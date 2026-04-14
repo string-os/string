@@ -1,0 +1,28 @@
+{
+  "name": "string-os",
+  "version": "0.1.0",
+  "private": true,
+  "description": "String — an OS for AI agents, built on SFMD. HTML for humans, SFMD for agents.",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/string-os/string.git"
+  },
+  "license": "MIT",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "build": "pnpm -r build",
+    "test": "pnpm --filter @string-os/string test",
+    "typecheck": "pnpm -r exec tsc --noEmit"
+  },
+  "devDependencies": {
+    "tsx": "^4.21.0",
+    "typescript": "^5.0.0"
+  },
+  "engines": {
+    "node": ">=18",
+    "pnpm": ">=9"
+  },
+  "packageManager": "pnpm@10.30.2"
+}

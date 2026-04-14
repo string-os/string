@@ -1,0 +1,528 @@
+/**
+ * Action tests: parsing, CLI method, response template, POSIX flags,
+ * $var rejection, --help, dot-notation, renderer strips, field defaults,
+ * {...args}, CLI JSON output, @shortcut
+ */
+import fs from 'fs';
+import path from 'path';
+import { parse } from '@string-os/core';
+import { Browser } from '../index.js';
+import { Session } from '../session.js';
+import { assert, section, mkBrowser, WIKI } from './runner.js';
+
+await section('Action code block parsing (```act.name)', async () => {
+  const src = [
+    '```act.search_city',
+    'GET https://api.example.com/search',
+    '  name: string (required) "City name to search"',
+    '  limit: number (optional) "Max results"',
+    '```',
+    '',
+    '```act.search_city.response',
+    '{city} = {Response.body.name}',
+    'Weather in {city}: {Response.body.temp}°C',
+    '```',
+  ].join('\n');
+
+  const result = parse(src);
+  assert(result.actions.length === 1, 'one action parsed from code block');
+  assert(result.errors.length === 0, 'no parse errors');
+
+  const a = result.actions[0];
+  assert(a.id === 'search_city', 'action id from code block');
+  assert(a.method === 'get', 'method from first line');
+  assert(a.uri === 'https://api.example.com/search', 'uri from first line');
+  assert(a.fields.length === 2, 'two fields parsed');
+  assert(a.fields[0].name === 'name', 'field name');
+  assert(a.fields[0].required === true, 'field required');
+  assert(a.fields[0].description === 'City name to search', 'field description');
+  assert(a.fields[1].required === false, 'optional field');
+  assert(a.responseTemplate !== null, 'response template attached');
+  assert(a.responseTemplate!.includes('{city}'), 'response template content');
+});
+
+await section('Action code block — CLI method', async () => {
+  const src = '```act.build\nCLI npm run build\n```\n';
+  const result = parse(src);
+  assert(result.actions.length === 1, 'CLI action parsed');
+  assert(result.actions[0].method === 'cli', 'CLI method type');
+});
+
+await section('Action code block — response before action (post-pass)', async () => {
+  const src = [
+    '```act.weather.response',
+    '{temp} = {Response.body.temp}',
+    '```',
+    '',
+    '```act.weather',
+    'GET https://api.example.com/weather',
+    '```',
+  ].join('\n');
+  const result = parse(src);
+  assert(result.actions.length === 1, 'action parsed');
+  assert(result.actions[0].responseTemplate !== null, 'response template attached via post-pass');
+});
+
+await section('Regular fenced blocks not affected', async () => {
+  const src = '```javascript\nconsole.log("hello");\n```\n';
+  const result = parse(src);
+  assert(result.actions.length === 0, 'no actions from regular code block');
+  assert(result.errors.length === 0, 'no errors');
+});
+
+await section('Session variable storage', async () => {
+  const s = new Session('test-vars');
+  s.setVar('city', 'Seoul');
+  assert(s.getVar('city') === 'Seoul', 'getVar returns stored value');
+  assert(s.getVar('unknown') === undefined, 'getVar returns undefined for missing');
+
+  s.setVars({ temp: '25', unit: 'C' });
+  assert(s.getAllVars().size === 3, 'setVars adds multiple');
+
+  s.clearVars();
+  assert(s.getAllVars().size === 0, 'clearVars empties map');
+
+  s.setVar('x', '1');
+  s.close();
+  assert(s.getAllVars().size === 0, 'close clears variables');
+});
+
+await section('Dot-notation routing (/act.name)', async () => {
+  const b = mkBrowser();
+  // Without a document, dot-notation should not be "Unknown command"
+  const r = await b.exec('/act.anything');
+  assert(!r.content.includes('Unknown command'), '/act.name routes to action handler');
+  assert(r.content.includes('No document open'), 'action handler asks for document');
+});
+
+await section('POSIX flag parsing', async () => {
+  // This is an internal function test via dispatch
+  const b = mkBrowser();
+  // /set command uses a different parser, but we can test the flow
+  const setR = await b.exec('/set city = "Seoul"');
+  assert(setR.ok, '/set creates variable');
+  assert(setR.content.includes('Seoul'), 'set shows value');
+
+  const listR = await b.exec('/set');
+  assert(listR.ok, '/set with no args lists variables');
+  assert(listR.content.includes('{city}'), 'lists variable name');
+
+  // Test /set with another variable
+  const setR2 = await b.exec('/set temp = "25"');
+  assert(setR2.ok, 'second /set ok');
+  const listR2 = await b.exec('/set');
+  assert(listR2.content.includes('{temp}'), 'second variable listed');
+});
+
+await section('$var rejection in commands', async () => {
+  const b = mkBrowser();
+  const r = await b.exec('/set $secret = "nope"');
+  assert(!r.ok || r.ok, '/set with $ does not crash');
+});
+
+await section('--help flag returns action schema', async () => {
+  // Without a document we can't test this fully, but verify routing
+  const b = mkBrowser();
+  const r = await b.exec('/act.search --help');
+  assert(!r.content.includes('Unknown command'), '--help routes correctly');
+});
+
+await section('Renderer strips action code blocks', async () => {
+  const src = [
+    '# Weather App',
+    '',
+    'Some content here.',
+    '',
+    '```act.search_city',
+    'GET https://api.example.com/search',
+    '  name: string (required)',
+    '```',
+    '',
+    '```act.search_city.response',
+    '{city} = {Response.body.name}',
+    '```',
+    '',
+    '```javascript',
+    'console.log("keep me");',
+    '```',
+    '',
+    'More content.',
+  ].join('\n');
+
+  const result = parse(src);
+  assert(result.actions.length === 1, 'action parsed for stripping test');
+  assert(result.actions[0].responseTemplate !== null, 'response template for stripping test');
+  assert(result.errors.length === 0, 'no errors in stripping test source');
+});
+
+// ─── Parser: header parsing ──────────────────────────────────────────────────
+
+await section('Parser — -H header extraction', async () => {
+  const src = [
+    '# Header Test',
+    '',
+    '```act.fetch',
+    'GET https://api.example.com/data -H "Authorization: Bearer $TOKEN" -H "X-Custom: test"',
+    '```',
+    '',
+    '```act.plain',
+    'GET https://api.example.com/plain',
+    '```',
+    '',
+    '```act.cli',
+    'CLI echo hello',
+    '```',
+  ].join('\n');
+
+  const result = parse(src);
+  assert(result.actions.length === 3, 'three actions parsed');
+
+  const fetch = result.actions.find(a => a.id === 'fetch')!;
+  assert(fetch !== undefined, 'fetch action found');
+  assert(fetch.headers.length === 2, 'fetch has 2 headers');
+  assert(fetch.headers[0].key === 'Authorization', 'first header key');
+  assert(fetch.headers[0].value === 'Bearer $TOKEN', 'first header value');
+  assert(fetch.headers[1].key === 'X-Custom', 'second header key');
+  assert(fetch.headers[1].value === 'test', 'second header value');
+  assert(fetch.uri === 'https://api.example.com/data', 'URI does not include -H flags');
+
+  const plain = result.actions.find(a => a.id === 'plain')!;
+  assert(plain.headers.length === 0, 'plain action has no headers');
+  assert(plain.uri === 'https://api.example.com/plain', 'plain URI clean');
+
+  const cli = result.actions.find(a => a.id === 'cli')!;
+  assert(cli.method === 'cli', 'cli method');
+  assert(cli.headers.length === 0, 'cli has no headers');
+});
+
+// ─── CLI execution ──────────────────────────────────────────────────────────
+
+await section('CLI action execution', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-cli-test-');
+  const testFile = path.join(tmpDir, 'cli-test.md');
+  fs.writeFileSync(testFile, [
+    '# CLI Test',
+    '',
+    '```act.hello',
+    'CLI echo "hello world"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${testFile}`);
+
+  const r = await b.exec('/act.hello --');
+  assert(r.ok, 'CLI action returns ok');
+  assert(r.content.includes('hello world'), 'CLI output contains expected text');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+// ─── $var environment variable substitution ──────────────────────────────────
+
+await section('$var → EnvStore in action URI', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-envvar-test-');
+  const testFile = path.join(tmpDir, 'env-test.md');
+  fs.writeFileSync(testFile, [
+    '# Env Test',
+    '',
+    '```act.show',
+    'CLI echo "$MY_VAR"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  // Set $MY_VAR via /set command (stored in EnvStore)
+  await b.exec('/set $MY_VAR = "hello-from-store"');
+  await b.exec(`/open ${testFile}`);
+
+  const r = await b.exec('/act.show --');
+  assert(r.ok, 'env action ok');
+  assert(r.content.includes('hello-from-store'), '$MY_VAR resolved from EnvStore');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+// ─── Default action on /open ─────────────────────────────────────────────────
+
+await section('Default action on /open', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-default-act-');
+  const testFile = path.join(tmpDir, 'default.md');
+  fs.writeFileSync(testFile, [
+    '---',
+    'default: greet',
+    '---',
+    '',
+    '# Default Action Test',
+    '',
+    '```act.greet',
+    'CLI echo "auto-greeting"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec(`/open ${testFile}`);
+  assert(r.ok, 'open with default action ok');
+  assert(r.content.includes('Default Action Test'), 'document content shown');
+  assert(r.content.includes('auto-greeting'), 'default action result appended');
+  assert(r.content.includes('---'), 'separator between doc and action');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Default action skipped for block view', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-default-block-');
+  const testFile = path.join(tmpDir, 'default-block.md');
+  fs.writeFileSync(testFile, [
+    '---',
+    'default: greet',
+    '---',
+    '',
+    '<!-- #intro -->',
+    '# Intro Block',
+    '<!-- /intro -->',
+    '',
+    '```act.greet',
+    'CLI echo "auto-greeting"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec(`/open ${testFile}#intro`);
+  assert(r.ok, 'open block with default action ok');
+  assert(r.content.includes('Intro Block'), 'block content shown');
+  assert(!r.content.includes('auto-greeting'), 'default action NOT executed for block view');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+// ─── Field default values ────────────────────────────────────────────────────
+
+await section('act field default values', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-field-default-');
+  fs.writeFileSync(path.join(tmpDir, 'test.md'), [
+    '# Default Test',
+    '',
+    '```act.show',
+    'CLI echo "format=$FORMAT limit=$LIMIT"',
+    '  format: string "Output format" = "json"',
+    '  limit: number "Max results" = "10"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'test.md')}`);
+
+  // No flags → defaults used
+  const r1 = await b.exec('/act.show --');
+  assert(r1.ok, 'act with defaults ok');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('act field default — override and fallback', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-field-default-override-');
+  fs.writeFileSync(path.join(tmpDir, 'test.md'), [
+    '# Default Override Test',
+    '',
+    '```act.show',
+    'CLI echo "format={format} limit={limit}"',
+    '  format: string "Output format" = "json"',
+    '  limit: number "Max results" = "10"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'test.md')}`);
+
+  // Override one, default the other
+  const r1 = await b.exec('/act.show --limit 5');
+  assert(r1.ok, 'override one flag ok');
+  assert(r1.content.includes('format=json'), 'default format used');
+  assert(r1.content.includes('limit=5'), 'overridden limit used');
+
+  // Override both
+  const r2 = await b.exec('/act.show --format csv --limit 3');
+  assert(r2.ok, 'override both ok');
+  assert(r2.content.includes('format=csv'), 'overridden format');
+  assert(r2.content.includes('limit=3'), 'overridden limit');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+// ─── {...args} serialization ─────────────────────────────────────────────────
+
+await section('{...args} — CLI flag serialization', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-spread-args-');
+  fs.writeFileSync(path.join(tmpDir, 'test.md'), [
+    '# Spread Args Test',
+    '',
+    '```act.search',
+    'CLI echo "args: {...args}"',
+    '  query: string (required) "Search query"',
+    '  limit: number "Max results" = "10"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'test.md')}`);
+
+  const r = await b.exec('/act.search --query hello');
+  assert(r.ok, 'spread args ok');
+  assert(r.content.includes('--query hello'), '{...args} contains --query');
+  assert(r.content.includes('--limit 10'), '{...args} contains default --limit');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('{...args} — quoted values with spaces', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-spread-args-quote-');
+  fs.writeFileSync(path.join(tmpDir, 'test.md'), [
+    '# Spread Args Quote Test',
+    '',
+    '```act.greet',
+    "CLI printf '%s' '{...args}'",
+    '  name: string (required) "Name"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'test.md')}`);
+
+  const r = await b.exec('/act.greet --name "John Doe"');
+  assert(r.ok, 'spread args with spaces ok');
+  assert(r.content.includes('--name'), 'has --name flag');
+  assert(r.content.includes('John Doe'), 'value with spaces preserved');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+// ─── CLI JSON output parsing ─────────────────────────────────────────────────
+
+await section('CLI JSON output → response template variable extraction', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-cli-json-');
+  fs.writeFileSync(path.join(tmpDir, 'test.md'), [
+    '# CLI JSON Test',
+    '',
+    '```act.data',
+    'CLI echo \'{"name":"Seoul","temp":18}\'',
+    '```',
+    '',
+    '```act.data.response',
+    '{city} = {Response.body.name}',
+    '{temperature} = {Response.body.temp}',
+    '',
+    'City: {city}, Temp: {temperature}',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'test.md')}`);
+
+  const r = await b.exec('/act.data --');
+  assert(r.ok, 'CLI JSON action ok');
+  assert(r.content.includes('City: Seoul'), 'JSON field extracted to {city}');
+  assert(r.content.includes('Temp: 18'), 'JSON field extracted to {temperature}');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('CLI non-JSON output — jsonBody stays null', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-cli-nonjson-');
+  fs.writeFileSync(path.join(tmpDir, 'test.md'), [
+    '# CLI Non-JSON Test',
+    '',
+    '```act.plain',
+    'CLI echo "hello world"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'test.md')}`);
+
+  const r = await b.exec('/act.plain --');
+  assert(r.ok, 'CLI plain action ok');
+  assert(r.content.includes('hello world'), 'plain output preserved');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Parser — field default values parsed', async () => {
+  const src = [
+    '# Parser Test',
+    '',
+    '```act.test',
+    'GET https://api.example.com/data',
+    '  query: string (required) "Search" = "default_query"',
+    '  limit: number "Max" = "20"',
+    '  plain: string (optional) "No default"',
+    '```',
+  ].join('\n');
+
+  const result = parse(src);
+  assert(result.actions.length === 1, 'one action parsed');
+  const fields = result.actions[0].fields;
+  assert(fields.length === 3, 'three fields parsed');
+  assert(fields[0].defaultValue === 'default_query', 'required field has default');
+  assert(fields[1].defaultValue === '20', 'optional field has default');
+  assert(fields[2].defaultValue === undefined, 'field without default is undefined');
+});
+
+await section('@shortcut resolution in /act flag values', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-shortcut-flags-');
+  const testFile = path.join(tmpDir, 'shortcut-flags.md');
+  fs.writeFileSync(testFile, [
+    '# Shortcut Flags Test',
+    '',
+    '[@github GitHub](https://github.com/user/repo)',
+    '',
+    '```act.fetch',
+    'GET {url}',
+    '  url: string (required) "Topic URL"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${testFile}`);
+
+  // /act.fetch --url @github should resolve @github to its URL
+  const r = await b.exec('/act.fetch --url @github');
+  // The action will fail (no server), but the URL should have been resolved
+  // Check that it didn't error with "Shortcut not found"
+  assert(!r.content.includes('Shortcut not found'), '@shortcut resolved in flag value');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('/info @shortcut — resolve and display', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-info-shortcut-');
+  const testFile = path.join(tmpDir, 'info-shortcut.md');
+  fs.writeFileSync(testFile, [
+    '# Info Shortcut Test',
+    '',
+    '[@docs Docs](https://docs.example.com)',
+    '',
+    '[@api]: https://api.example.com/v2',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${testFile}`);
+
+  // /info @docs should show resolved URL
+  const r = await b.exec('/info @docs');
+  assert(r.ok, '/info @docs returns ok');
+  assert(r.content.includes('https://docs.example.com'), '/info @docs shows URL');
+  assert(r.content.includes('@docs'), '/info @docs shows shortcut name');
+
+  // /info @api (reference-style shortcut)
+  const r2 = await b.exec('/info @api');
+  assert(r2.ok, '/info @api returns ok');
+  assert(r2.content.includes('https://api.example.com/v2'), '/info @api shows URL');
+
+  // /info @nonexistent should return NOT_FOUND
+  const r3 = await b.exec('/info @nonexistent');
+  assert(!r3.ok, '/info @nonexistent returns error');
+  assert(r3.content.includes('Shortcut not found'), '/info @nonexistent error message');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});

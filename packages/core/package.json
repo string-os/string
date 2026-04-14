@@ -1,0 +1,36 @@
+{
+  "name": "@string-os/core",
+  "version": "0.1.0",
+  "description": "SFMD parser, extractor, and utilities for String",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepack": "pnpm build"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/string-os/string.git",
+    "directory": "packages/core"
+  },
+  "keywords": [
+    "sfmd",
+    "parser",
+    "markdown",
+    "ai",
+    "string"
+  ],
+  "devDependencies": {
+    "typescript": "^5.0.0"
+  }
+}

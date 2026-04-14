@@ -1,0 +1,230 @@
+/**
+ * String — Session (Tab)
+ * One Session = one browser tab. Holds navigation history, shortcuts, menus, and actions.
+ */
+
+import type { LoadedDocument, ActionDirective } from './types.js';
+import { BashSession } from './bash-session.js';
+
+interface HistoryEntry {
+  doc: LoadedDocument;
+  blockId?: string;
+}
+
+export class Session {
+  readonly name: string;
+  private _current: HistoryEntry | null = null;
+  private _history: HistoryEntry[] = [];
+  private _variables: Map<string, string> = new Map();
+  private _autoShortcuts: Map<string, string> = new Map();
+  private _bash: BashSession | null = null;
+  private _lastUndoPath: string | null = null;
+  private _cwdOverride: string | null = null;
+
+  constructor(name: string) {
+    this.name = name;
+  }
+
+  // ── Undo Tracking ──────────────────────────────────────────────────────────
+
+  /** Record the resolved path of the last write/edit for /undo. */
+  setLastUndoPath(resolvedPath: string): void {
+    this._lastUndoPath = resolvedPath;
+  }
+
+  get lastUndoPath(): string | null {
+    return this._lastUndoPath;
+  }
+
+  clearLastUndo(): void {
+    this._lastUndoPath = null;
+  }
+
+  // ── CWD Override ─────────────────────────────────────────────────────────────
+
+  /** Set explicit cwd (e.g. when /open topics a directory). */
+  setCwdOverride(dir: string | null): void {
+    this._cwdOverride = dir;
+  }
+
+  get cwdOverride(): string | null {
+    return this._cwdOverride;
+  }
+
+  // ── Bash Session ────────────────────────────────────────────────────────────
+
+  get bashSession(): BashSession | null {
+    return this._bash;
+  }
+
+  async getOrCreateBash(cwd: string): Promise<BashSession> {
+    if (this._bash?.alive) return this._bash;
+    this._bash = new BashSession(cwd);
+    await this._bash.spawn();
+    return this._bash;
+  }
+
+  closeBash(): void {
+    if (this._bash) {
+      this._bash.close();
+      this._bash = null;
+    }
+  }
+
+  // ── Variables ─────────────────────────────────────────────────────────────
+
+  getVar(name: string): string | undefined {
+    return this._variables.get(name);
+  }
+
+  setVar(name: string, value: string): void {
+    this._variables.set(name, value);
+  }
+
+  setVars(record: Record<string, string>): void {
+    for (const [k, v] of Object.entries(record)) {
+      this._variables.set(k, v);
+    }
+  }
+
+  getAllVars(): Map<string, string> {
+    return new Map(this._variables);
+  }
+
+  clearVars(): void {
+    this._variables.clear();
+  }
+
+  // ── State ──────────────────────────────────────────────────────────────────
+
+  get currentDoc(): LoadedDocument | null {
+    return this._current?.doc ?? null;
+  }
+
+  get currentBlockId(): string | undefined {
+    return this._current?.blockId;
+  }
+
+  get currentUri(): string | null {
+    return this._current?.doc.uri ?? null;
+  }
+
+  get historyLength(): number {
+    return this._history.length;
+  }
+
+  // ── Navigation ─────────────────────────────────────────────────────────────
+
+  open(doc: LoadedDocument, blockId?: string): void {
+    if (this._current) {
+      this._history.push(this._current);
+    }
+    this._current = { doc, blockId };
+    this._cwdOverride = null; // document open resets cwd to document's directory
+  }
+
+  back(): HistoryEntry | null {
+    if (this._history.length === 0) return null;
+    this._current = this._history.pop()!;
+    return this._current;
+  }
+
+  close(): void {
+    this._current = null;
+    this._cwdOverride = null;
+    this._autoShortcuts = new Map();
+    this.clearVars();
+    this.closeBash();
+  }
+
+  refresh(doc: LoadedDocument): void {
+    if (!this._current) return;
+    this._current = { doc, blockId: this._current.blockId };
+  }
+
+  // ── Auto Shortcuts ─────────────────────────────────────────────────────────
+
+  /** Store auto-generated shortcuts from the last render pass. */
+  setAutoShortcuts(map: Map<string, string>): void {
+    this._autoShortcuts = map;
+  }
+
+  /** Get auto-generated shortcuts from the last render pass. */
+  get autoShortcuts(): Map<string, string> {
+    return this._autoShortcuts;
+  }
+
+  // ── Shortcut Resolution ────────────────────────────────────────────────────
+
+  /**
+   * Resolve a shortcut id (without @) to its href.
+   * Checks page-level shortcuts first, then all menu shortcuts.
+   * Supports namespaced menu shortcuts: "main.overview"
+   */
+  resolveShortcut(id: string): string | null {
+    const doc = this._current?.doc;
+    if (!doc) return null;
+
+    // 1. Page-level shortcuts (author-defined)
+    if (doc.shortcuts.has(id)) {
+      return doc.shortcuts.get(id)!;
+    }
+
+    // 2. Auto-generated shortcuts from last render (@slug, @slug-2, @link-1, etc.)
+    if (this._autoShortcuts.has(id)) {
+      return this._autoShortcuts.get(id)!;
+    }
+
+    // 3. Menu shortcuts (namespaced)
+    for (const entries of doc.menus.values()) {
+      for (const entry of entries) {
+        if (entry.id === id) return entry.href;
+      }
+    }
+
+    return null;
+  }
+
+  // ── Action Resolution ──────────────────────────────────────────────────────
+
+  /** Find an action directive by id on the current document. */
+  resolveAction(id: string): ActionDirective | null {
+    const doc = this._current?.doc;
+    if (!doc) return null;
+    return doc.actions.find(a => a.id === id) ?? null;
+  }
+
+  // ── Info ───────────────────────────────────────────────────────────────────
+
+  info(): string {
+    const doc = this._current?.doc;
+    if (!doc) return 'No document open.';
+
+    const lines: string[] = [];
+    const title = doc.frontmatter.title as string | undefined;
+
+    lines.push(`uri:     ${doc.uri}`);
+    if (title) lines.push(`title:   ${title}`);
+    if (doc.blockIds.length > 0) {
+      lines.push(`blocks:  ${doc.blockIds.join(', ')}`);
+    }
+    if (doc.menus.size > 0) {
+      lines.push(`menus:   ${[...doc.menus.keys()].join(', ')}`);
+    }
+    if (doc.shortcuts.size > 0) {
+      lines.push(`shortcuts: ${[...doc.shortcuts.keys()].map(k => `@${k}`).join(', ')}`);
+    }
+    if (doc.actions.length > 0) {
+      lines.push(`actions: ${doc.actions.map(a => `${a.id}(${a.method.toUpperCase()})`).join(', ')}`);
+    }
+    if (this._current?.blockId) {
+      lines.push(`block:   #${this._current.blockId}`);
+    }
+    if (this._variables.size > 0) {
+      const vars = [...this._variables.entries()].map(([k, v]) => `{${k}}=${v}`).join(', ');
+      lines.push(`vars:    ${vars}`);
+    }
+
+    return lines.join('\n');
+  }
+}

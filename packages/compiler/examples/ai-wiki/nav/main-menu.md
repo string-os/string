@@ -1,0 +1,6 @@
+[@welcome Welcome](./index.md#welcome)
+[@contributing Contributing](./index.md#contributing)
+[@apis API Knowledge](./topics/apis.md)
+[@tools AI Tools](./topics/tools.md)
+[@patterns Integration Patterns](./topics/patterns.md)
+[@recent Recent Changes](./recent.md)

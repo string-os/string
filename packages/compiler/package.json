@@ -1,0 +1,45 @@
+{
+  "name": "@string-os/compiler",
+  "version": "0.1.0",
+  "description": "Compiler and validator for SFMD documents",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "sfmd": "./dist/cli.js"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepack": "pnpm build",
+    "dev": "tsx src/cli.ts"
+  },
+  "dependencies": {
+    "@string-os/core": "workspace:*"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/string-os/string.git",
+    "directory": "packages/compiler"
+  },
+  "keywords": [
+    "sfmd",
+    "compiler",
+    "markdown",
+    "ai",
+    "string"
+  ]
+}

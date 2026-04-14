@@ -1,0 +1,47 @@
+{
+  "name": "@string-os/client",
+  "version": "0.1.0",
+  "description": "HTTP/SSE client for stringd — talk to a running String daemon from any Node.js or TypeScript program",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepack": "pnpm build"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/string-os/string.git",
+    "directory": "packages/client"
+  },
+  "homepage": "https://github.com/string-os/string/tree/main/packages/client#readme",
+  "bugs": {
+    "url": "https://github.com/string-os/string/issues"
+  },
+  "author": "String OS",
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "string",
+    "stringd",
+    "client",
+    "sfmd",
+    "ai",
+    "agent",
+    "sse"
+  ],
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "typescript": "^5.0.0"
+  }
+}

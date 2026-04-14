@@ -1,0 +1,59 @@
+{
+  "name": "@string-os/string",
+  "version": "0.1.0",
+  "description": "String runtime — an OS for AI agents, built on SFMD",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "bin": {
+    "string": "./dist/cli.js"
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc",
+    "prepack": "pnpm build",
+    "dev": "tsx src/cli.ts",
+    "test": "tsx src/test/index.ts"
+  },
+  "dependencies": {
+    "@string-os/client": "workspace:*",
+    "@string-os/compiler": "workspace:*",
+    "@string-os/core": "workspace:*",
+    "diff": "^8.0.3",
+    "turndown": "^7.2.0"
+  },
+  "optionalDependencies": {
+    "@lydell/node-pty": "1.2.0-beta.3"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "@types/turndown": "^5.0.5",
+    "tsx": "^4.0.0",
+    "typescript": "^5.0.0"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/string-os/string.git",
+    "directory": "packages/string"
+  },
+  "author": "String OS",
+  "engines": {
+    "node": ">=18"
+  },
+  "keywords": [
+    "string",
+    "ai",
+    "agent",
+    "sfmd",
+    "mcp",
+    "cli"
+  ]
+}
