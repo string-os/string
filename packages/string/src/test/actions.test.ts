@@ -401,6 +401,51 @@ await section('{...args} — quoted values with spaces', async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+await section('HTTP action invocation does not switch the current document', async () => {
+  // Regression: HTTP actions used to call session.open() on the response,
+  // turning the response body into the new current document. That meant a
+  // second /act.foo after the first would fail with "Action not found"
+  // because the response page had no actions on it. Action invocation is
+  // "call this and read the result", not navigation.
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-http-no-nav-');
+
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify([{ name: 'first' }, { name: 'second' }]));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '```act.lookup',
+    `GET http://127.0.0.1:${port}/search`,
+    '  q: string (required) "Query"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+
+  // First call succeeds (always did)
+  const r1 = await b.exec('/act.lookup --q seoul');
+  server.close();
+  assert(r1.ok, 'first call ok');
+  assert(r1.content.includes('first'), 'first call returns response body');
+
+  // Second call must also succeed — current doc must still be app.md, not
+  // the JSON response from call 1.
+  // Re-spawn server because we closed it; but the test of session state
+  // doesn't need a fresh HTTP — the bug was about session.open from call 1.
+  // We verify by checking that /act still finds the action.
+  const actList = await b.exec('/act');
+  assert(actList.content.includes('lookup'), 'action still listed after first HTTP call');
+  assert(!actList.content.includes('No actions defined'), 'current doc still has actions');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
 await section('Action body: directive parsed and field-substituted', async () => {
   // Body templates let HTTP actions declare a request body shape that
   // doesn't match the flat field map. Fields are substituted with

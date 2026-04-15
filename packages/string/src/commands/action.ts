@@ -204,11 +204,22 @@ export async function executeAction(
       };
     }
 
-    // HTTP: treat response as an SFMD document
+    // HTTP fallback (no response template declared): render the response as
+    // text and return it as the action's output. The current document stays
+    // unchanged — action invocation is *call this thing and read the result*,
+    // not navigation. Conflating the two meant a second `/act.foo` after the
+    // first would fail with "Action not found" because the JSON response
+    // body had been opened as the new current document and that document had
+    // no actions.
+    //
+    // For SFMD sites that genuinely want an action's response to BECOME the
+    // next page (the form-post pattern: submit, land on result page), the
+    // right way is an explicit `/open` after the action, or an opt-in
+    // navigation directive — not silent navigation on every HTTP call. The
+    // navigation behavior may come back later as opt-in if the use case
+    // emerges; for now, the safe default is "actions don't navigate".
     const responseDoc = await resolve(actionResult.uri, actionResult.source, loader, undefined, actionResult.rawSource);
-    session.open(responseDoc);
-    const { content: rendered, autoShortcuts } = await render(responseDoc, undefined, loader.home, loader);
-    session.setAutoShortcuts(autoShortcuts);
+    const { content: rendered } = await render(responseDoc, undefined, loader.home, loader);
     return ok(rendered);
   } catch (e) {
     if (e instanceof StringError) return err(e.message, e.code);
