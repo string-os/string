@@ -29,9 +29,9 @@ This is a real SFMD file. It renders as readable Markdown for humans, and an AI 
 - **Wind:** 3 m/s (NW)
 
 ### 📌 Navigation
-- [Hourly Forecast for today][@link_1]   (auto shortcut)
-- [7-Day Extended Forecast][@link_2]
-- [Saved city](@saved_city)              (named shortcut)
+- [Hourly Forecast for today][@link-1]   (auto shortcut)
+- [7-Day Extended Forecast][@link-2]
+- [Saved city][@saved_city]              (named shortcut)
 - [App configurations](./settings.md)    (relative path)
 
 ### ⚡ Quick Actions
