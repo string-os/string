@@ -29,7 +29,9 @@ export function err(message: string, code?: StringErrorCode): CommandResult {
  * Handles: --key value, --key "quoted value", --flag (boolean)
  * Returns null if --help is present.
  */
-export function parsePosixFlags(args: string): { flags: Record<string, string>; rest: string[] } | null {
+export function parsePosixFlags(
+  args: string,
+): { flags: Record<string, string>; rest: string[]; bareFlags: Set<string> } | null {
   const tokens: string[] = [];
   let current = '';
   let inQuote: '"' | "'" | null = null;
@@ -60,6 +62,13 @@ export function parsePosixFlags(args: string): { flags: Record<string, string>; 
 
   const flags: Record<string, string> = {};
   const rest: string[] = [];
+  // Flags that appeared without an explicit value — either at end-of-line or
+  // immediately followed by another --flag. Callers that care about the
+  // distinction between "--flag true" (explicit boolean) and "--flag" (bare)
+  // inspect this set. Boolean-typed fields accept both; non-boolean fields
+  // should reject bare appearance so `--city` doesn't silently become
+  // `city=true`.
+  const bareFlags = new Set<string>();
 
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i];
@@ -69,14 +78,15 @@ export function parsePosixFlags(args: string): { flags: Record<string, string>; 
       if (i + 1 < tokens.length && !tokens[i + 1].startsWith('--')) {
         flags[key] = tokens[++i];
       } else {
-        flags[key] = 'true'; // boolean flag
+        flags[key] = 'true'; // boolean flag (bare)
+        bareFlags.add(key);
       }
     } else {
       rest.push(tok);
     }
   }
 
-  return { flags, rest };
+  return { flags, rest, bareFlags };
 }
 
 // ─── Variable Substitution ───────────────────────────────────────────────────

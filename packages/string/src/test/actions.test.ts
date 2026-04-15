@@ -400,6 +400,59 @@ await section('{...args} — quoted values with spaces', async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+await section('Bare flag rejected for non-boolean field', async () => {
+  // Regression: `/act.echo --name` (no value) used to silently parse as
+  // `name=true` and pass the literal string "true" to the action. Now it
+  // returns INVALID_PAYLOAD because the field is declared `string`.
+  const tmpDir = fs.mkdtempSync('/tmp/string-bare-flag-');
+  fs.writeFileSync(path.join(tmpDir, 'test.md'), [
+    '# Bare Flag Test',
+    '',
+    '```act.echo',
+    'CLI echo {name}',
+    '  name: string (required) "Name"',
+    '```',
+    '',
+    '```act.toggle',
+    'CLI echo {flag}',
+    '  flag: boolean "Flag"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'test.md')}`);
+
+  // Bare --name on a string field → error
+  const bare = await b.exec('/act.echo --name');
+  assert(!bare.ok, 'bare --name on string field rejected');
+  assert(bare.code === 'INVALID_PAYLOAD', 'returns INVALID_PAYLOAD');
+  assert(bare.content.includes('--name'), 'error mentions the flag name');
+  assert(bare.content.includes('requires a value'), 'error explains why');
+
+  // --name immediately followed by another flag → also bare → also error
+  const beforeFlag = await b.exec('/act.echo --name --other');
+  assert(!beforeFlag.ok, 'bare --name before next flag rejected');
+  assert(beforeFlag.code === 'INVALID_PAYLOAD', 'still INVALID_PAYLOAD');
+
+  // Explicit value still works
+  const explicit = await b.exec('/act.echo --name Alice');
+  assert(explicit.ok, 'explicit --name Alice still works');
+  assert(explicit.content.includes('Alice'), 'value passed through');
+
+  // The literal string "true" as a value still works (must not be mistaken
+  // for a bare flag — bareFlags only marks flags whose value was synthesized).
+  const literalTrue = await b.exec('/act.echo --name true');
+  assert(literalTrue.ok, 'explicit --name true accepted');
+  assert(literalTrue.content.trim() === 'true', 'literal "true" passes through');
+
+  // Bare flag on a boolean-typed field is fine
+  const boolBare = await b.exec('/act.toggle --flag');
+  assert(boolBare.ok, 'bare --flag on boolean field accepted');
+  assert(boolBare.content.trim() === 'true', 'boolean bare flag becomes "true"');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
 // ─── CLI JSON output parsing ─────────────────────────────────────────────────
 
 await section('CLI JSON output → response template variable extraction', async () => {

@@ -27,19 +27,22 @@ export async function cmdInstall(
     );
   }
 
-  // --app/--tool are boolean flags, but parsePosixFlags may consume the next
-  // token as their value. Recover: if flag value isn't "true", it's the source.
+  // --app/--tool are boolean flags. parsePosixFlags greedily consumes the
+  // next non-flag token as a value, so `/install --app ./foo.md` parses as
+  // `app=./foo.md`. Recover by inspecting bareFlags: if --app appeared bare,
+  // its value is a real boolean; otherwise the consumed token is the source
+  // and should be folded back into `rest`.
   let typeOpt: 'app' | 'tool' | undefined;
   let source: string;
 
-  if (parsed.flags.app) {
+  if ('app' in parsed.flags) {
     typeOpt = 'app';
-    source = parsed.flags.app === 'true'
+    source = parsed.bareFlags.has('app')
       ? parsed.rest.join(' ')
       : [parsed.flags.app, ...parsed.rest].join(' ');
-  } else if (parsed.flags.tool) {
+  } else if ('tool' in parsed.flags) {
     typeOpt = 'tool';
-    source = parsed.flags.tool === 'true'
+    source = parsed.bareFlags.has('tool')
       ? parsed.rest.join(' ')
       : [parsed.flags.tool, ...parsed.rest].join(' ');
   } else {

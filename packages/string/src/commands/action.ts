@@ -43,6 +43,24 @@ export async function executeAction(
     return ok(`Action: ${action.id}`);
   }
 
+  // Reject bare flags (e.g. `--city` with no following value) for non-boolean
+  // fields. Without this, `--city` alone would silently parse as `city=true`
+  // and reach the action's template as the literal string "true", producing
+  // confusing results downstream (e.g. a weather lookup for the city "true").
+  const fieldByName = new Map(action.fields.map(f => [f.name, f]));
+  for (const bareKey of parsed.bareFlags) {
+    const field = fieldByName.get(bareKey);
+    // Unknown flag: leave it as a bare boolean, let rest-validation or the
+    // template decide. Known flag with a non-boolean type: reject.
+    if (field && field.type !== 'boolean') {
+      return err(
+        `Flag --${bareKey} requires a value (declared type: ${field.type}).\n` +
+        `Usage: /act.${action.id} --${bareKey} <${field.type}>`,
+        'INVALID_PAYLOAD',
+      );
+    }
+  }
+
   // Substitute {var} in flag values
   const payload: Record<string, unknown> = {};
   for (const [key, val] of Object.entries(parsed.flags)) {
