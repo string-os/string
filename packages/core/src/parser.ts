@@ -56,6 +56,33 @@ export interface ActionDirective {
   fields: ActionField[];
   responseTemplate: string | null;
   line: number;
+  /**
+   * Optional request body template for HTTP methods. When set, this string
+   * (with `{field}` substitution applied) is sent as the request body
+   * verbatim, instead of `JSON.stringify(payload)`. Lets authors declare
+   * APIs whose body shape doesn't match the flat field map — nested JSON,
+   * specific field names, etc.
+   *
+   * Example author syntax:
+   *   ```act.foo
+   *   POST https://api.example.com/v1/things
+   *     prompt: string (required) "Prompt"
+   *
+   *     body: {"contents":[{"parts":[{"text":"{prompt}"}]}]}
+   *   ```
+   *
+   * Substitution rules (handled in executeAction):
+   * - `{field}` → JSON-string-escaped value when inside a JSON string context
+   * - `{field}` → raw value otherwise
+   * - `{field|base64file}` → reads the value as a file path, base64-encodes
+   *
+   * Ignored for CLI methods.
+   *
+   * Response handling (extraction, decoding, file save) lives in the
+   * sibling `act.<id>.response` block, NOT here. Action block stays focused
+   * on the request shape; response block stays focused on result handling.
+   */
+  body?: string;
 }
 
 // ─── Result types ─────────────────────────────────────────────────────────────
@@ -340,11 +367,64 @@ function parseActionBlock(id: string, lines: string[], startLine: number): Actio
   if (!headerMatch) return null;
 
   const method = headerMatch[1].toLowerCase() as HttpMethod;
-  const { uri, headers } = parseHeaderFlags(headerMatch[2]);
+  // For HTTP methods, extract `-H "Key: Value"` flags as action headers.
+  // For CLI methods, leave the template alone — `-H` there is typically an
+  // argument to an embedded `curl` invocation, not an SFMD-level header
+  // declaration. Stripping it would corrupt the bash command and produce
+  // baffling "unexpected EOF" parse errors at execution time.
+  const { uri, headers } = method === 'cli'
+    ? { uri: headerMatch[2].trim(), headers: [] as ActionHeader[] }
+    : parseHeaderFlags(headerMatch[2]);
 
   const fields: ActionField[] = [];
+  // The action block accepts ONE optional directive: `body:` for HTTP methods
+  // that need a request body shape different from `JSON.stringify(payload)`.
+  // Response handling (extraction, decoding, file save) lives in the sibling
+  // `act.<id>.response` block, parsed and executed separately.
+  //
+  // `body:` may be inline (`body: {"k":"v"}`) or multi-line. Multi-line bodies
+  // are captured by collecting subsequent lines indented MORE than the
+  // directive line itself, until a less-indented non-blank line. Blank lines
+  // INSIDE a body are preserved so authors can format JSON with separators.
+  let body: string | undefined;
+
+  /** Indent width (leading spaces) of a line. */
+  const indentOf = (s: string): number => s.length - s.trimStart().length;
+
   for (let i = 1; i < lines.length; i++) {
-    const fieldMatch = lines[i].match(ACTION_BLOCK_FIELD_RE);
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed) continue;
+
+    // Body directive check before field regex (so `body:` isn't mistaken for
+    // a field declaration).
+    const bodyMatch = line.match(/^(\s+)body:\s*(.*)$/);
+    if (bodyMatch) {
+      const baseIndent = bodyMatch[1].length;
+      const inlineValue = bodyMatch[2];
+      const valueLines: string[] = inlineValue ? [inlineValue] : [];
+      const stripIndent = baseIndent + 2;
+      let j = i + 1;
+      while (j < lines.length) {
+        const next = lines[j];
+        if (!next.trim()) {
+          let k = j + 1;
+          while (k < lines.length && !lines[k].trim()) k++;
+          if (k >= lines.length || indentOf(lines[k]) <= baseIndent) break;
+          valueLines.push('');
+          j++;
+          continue;
+        }
+        if (indentOf(next) <= baseIndent) break;
+        valueLines.push(next.length > stripIndent ? next.slice(stripIndent) : next.trim());
+        j++;
+      }
+      i = j - 1;
+      body = valueLines.join('\n').trim();
+      continue;
+    }
+
+    const fieldMatch = line.match(ACTION_BLOCK_FIELD_RE);
     if (fieldMatch) {
       const reqStr = fieldMatch[3] ?? 'optional';
       const field: ActionField = {
@@ -371,6 +451,7 @@ function parseActionBlock(id: string, lines: string[], startLine: number): Actio
     fields,
     responseTemplate: null,
     line: startLine,
+    ...(body !== undefined ? { body } : {}),
   };
 }
 

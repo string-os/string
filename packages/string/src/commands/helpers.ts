@@ -113,15 +113,39 @@ export function substituteVars(input: string, session: Session): { result: strin
 // ─── Response Template Execution ─────────────────────────────────────────────
 
 /**
- * Walk a JSON object by dot-separated path.
- * E.g. "body.location.name" on { body: { location: { name: "Seoul" } } } → "Seoul"
+ * Walk a JSON value by a dotted path with optional array index segments.
+ *
+ * Supported syntax:
+ *   `body.location.name`              — nested object property access
+ *   `candidates[0].content`           — object property + array index
+ *   `parts[0].inlineData.data`        — chained array indices
+ *   `$.candidates[0].content`         — leading `$.` (JSONPath convention) is allowed and ignored
+ *
+ * Returns `undefined` for any unresolved step (missing key, out-of-range
+ * index, wrong type at a step). Not a full JSONPath implementation — this
+ * is "extract one value from a known shape", not a query engine.
  */
 export function walkJsonPath(obj: unknown, pathStr: string): unknown {
-  const parts = pathStr.split('.');
+  // Tokenize: keys (`name`) and array indices (`[N]`) interleaved, optionally
+  // separated by `.`. Leading `$.` or `$` is stripped.
+  const cleaned = pathStr.replace(/^\$\.?/, '');
+  const tokens: (string | number)[] = [];
+  const re = /([a-zA-Z_][\w-]*)|\[(\d+)\]/g;
+  let m;
+  while ((m = re.exec(cleaned)) !== null) {
+    if (m[1] !== undefined) tokens.push(m[1]);
+    else if (m[2] !== undefined) tokens.push(parseInt(m[2], 10));
+  }
   let current: unknown = obj;
-  for (const part of parts) {
-    if (current == null || typeof current !== 'object') return undefined;
-    current = (current as Record<string, unknown>)[part];
+  for (const tok of tokens) {
+    if (current == null) return undefined;
+    if (typeof tok === 'number') {
+      if (!Array.isArray(current)) return undefined;
+      current = current[tok];
+    } else {
+      if (typeof current !== 'object') return undefined;
+      current = (current as Record<string, unknown>)[tok];
+    }
   }
   return current;
 }
@@ -137,44 +161,158 @@ export function stringifyValue(val: unknown): string {
 
 /**
  * Execute a response template against an action result.
- * - Assignment lines: `{var} = {Response.body.field}` → extract, store, no output
- * - Output lines: substitute {Response.*} and {var} refs
+ *
+ * Line types (recognized in this order):
+ *
+ *   1. **Assignment:** `{var} = {Response.body.field}` — walks the response
+ *      JSON, stringifies the value, sets a session var. No output.
+ *
+ *   2. **Save directive:** `save: <jsonpath>` — walks the response JSON
+ *      body (no `Response.body.` prefix needed; both `$.foo.bar` and
+ *      `foo.bar` work) and stores the resulting value as the *current
+ *      buffer*. Used by subsequent `decode:` and `to:` lines. No output.
+ *
+ *   3. **Decode directive:** `decode: base64` — reinterprets the current
+ *      buffer through the named decoder. Currently `base64` is the only
+ *      supported decoder. No output.
+ *
+ *   4. **To directive:** `to: <path>` — writes the current buffer to the
+ *      given path. The path supports `{var}` (session vars) and `{field}`
+ *      (action payload fields) substitution. No output by default — the
+ *      author should add an explicit text line for any user-visible
+ *      "saved" message.
+ *
+ *   5. **Output text:** any line that doesn't match the above. Substitutes
+ *      `{Response.body.X}` (walks the response JSON), `{var}` (session
+ *      vars), and `{field}` (action payload fields). Appended to output.
+ *
+ * The function takes the action's `payload` so `{filename}` and similar
+ * placeholders in `to:` and text lines can be substituted from the parsed
+ * action flags.
  */
 export function executeResponseTemplate(
   template: string,
   actionResult: ActionResult,
   session: Session,
+  payload?: Record<string, unknown>,
 ): string {
   const responseObj: Record<string, unknown> = {
     status: actionResult.status,
     body: actionResult.jsonBody,
   };
 
+  // The "current buffer" for save → decode → to pipelines. Starts as a
+  // string (whatever JSON path resolved to, stringified). `decode: base64`
+  // turns it into a Buffer. `to:` writes whichever it currently is.
+  let currentBuffer: string | Buffer | undefined;
+
+  /** Substitute {var} (session) and {field} (payload) in arbitrary text. */
+  const substituteVarsAndFields = (input: string): string =>
+    input.replace(/\{([a-zA-Z_]\w*)\}/g, (_m: string, name: string): string => {
+      if (payload && payload[name] !== undefined) return String(payload[name]);
+      const val = session.getVar(name);
+      return val !== undefined ? val : `{${name}}`;
+    });
+
   const outputLines: string[] = [];
 
-  for (const line of template.split('\n')) {
-    // Assignment line: {var} = {Response.body.field}
+  for (const rawLine of template.split('\n')) {
+    const line = rawLine;
+
+    // 1. Assignment: {var} = {Response.body.field}
     const assignMatch = line.match(/^\{([a-zA-Z_]\w*)\}\s*=\s*\{Response\.(.+)\}$/);
     if (assignMatch) {
       const varName = assignMatch[1];
       const pathStr = assignMatch[2];
       const value = walkJsonPath(responseObj, pathStr);
       session.setVar(varName, stringifyValue(value));
-      continue; // no output for assignment lines
+      continue;
     }
 
-    // Output line: substitute {Response.*} and {var}
-    let outputLine = line.replace(/\{Response\.([a-zA-Z_.]+)\}/g, (_m, p) => {
+    // 2. save: <jsonpath>
+    const saveMatch = line.match(/^\s*save:\s*(.+)$/);
+    if (saveMatch) {
+      const pathStr = saveMatch[1].trim();
+      // save: walks INTO the response body directly (no Response.body. prefix
+      // needed — that's the conventional shape for binary extraction).
+      const value = walkJsonPath(actionResult.jsonBody, pathStr);
+      if (value === undefined) {
+        // Surface as a renderable warning so the agent sees the failure
+        // instead of silently writing an empty file later.
+        outputLines.push(`save: path returned no value: ${pathStr}`);
+        currentBuffer = undefined;
+        continue;
+      }
+      currentBuffer = stringifyValue(value);
+      continue;
+    }
+
+    // 3. decode: <encoding>
+    const decodeMatch = line.match(/^\s*decode:\s*(\S+)\s*$/);
+    if (decodeMatch) {
+      const encoding = decodeMatch[1];
+      if (currentBuffer === undefined) {
+        outputLines.push(`decode: no current buffer (was save: skipped or missing?)`);
+        continue;
+      }
+      if (encoding === 'base64') {
+        try {
+          currentBuffer = Buffer.from(
+            typeof currentBuffer === 'string' ? currentBuffer : currentBuffer.toString('utf-8'),
+            'base64',
+          );
+        } catch (e) {
+          outputLines.push(`decode: base64 failed: ${(e as Error).message}`);
+        }
+      } else if (encoding === 'none') {
+        // Explicit no-op
+      } else {
+        outputLines.push(`decode: unknown encoding "${encoding}" (supported: base64, none)`);
+      }
+      continue;
+    }
+
+    // 4. to: <path>
+    const toMatch = line.match(/^\s*to:\s*(.+)$/);
+    if (toMatch) {
+      if (currentBuffer === undefined) {
+        outputLines.push(`to: no current buffer (was save: skipped or missing?)`);
+        continue;
+      }
+      const rawPath = toMatch[1].trim();
+      const resolvedPath = substituteVarsAndFields(rawPath);
+      const absPath = path.isAbsolute(resolvedPath)
+        ? resolvedPath
+        : path.resolve(process.cwd(), resolvedPath);
+      try {
+        fs.mkdirSync(path.dirname(absPath), { recursive: true });
+        const bytes = typeof currentBuffer === 'string'
+          ? Buffer.from(currentBuffer, 'utf-8')
+          : currentBuffer;
+        fs.writeFileSync(absPath, bytes);
+      } catch (e) {
+        outputLines.push(`to: write failed: ${(e as Error).message}`);
+        continue;
+      }
+      // Note: success message is the author's responsibility — they should
+      // add a text line like `Saved {filename}` after the `to:` directive.
+      // This keeps the output format under the author's control.
+      continue;
+    }
+
+    // 5. Output text: substitute {Response.*}, then {var}/{field}.
+    let outputLine = line.replace(/\{Response\.([a-zA-Z_.[\]\d]+)\}/g, (_m: string, p: string): string => {
       const val = walkJsonPath(responseObj, p);
       return stringifyValue(val);
     });
-
-    outputLine = outputLine.replace(/\{([a-zA-Z_]\w*)\}/g, (_m, name) => {
-      const val = session.getVar(name);
-      return val !== undefined ? val : `{${name}}`;
-    });
-
+    outputLine = substituteVarsAndFields(outputLine);
     outputLines.push(outputLine);
+  }
+
+  // Drop any all-blank trailing lines so the rendered viewport doesn't
+  // gain phantom whitespace from template formatting.
+  while (outputLines.length > 0 && outputLines[outputLines.length - 1].trim() === '') {
+    outputLines.pop();
   }
 
   return outputLines.join('\n');
@@ -193,9 +331,18 @@ export function resolveEnvVars(
   extraEnv?: Record<string, string>,
 ): string {
   return input.replace(/\$([a-zA-Z_]\w*)/g, (_m, name) => {
+    // Resolution priority:
+    //   1. Per-call extraEnv (tool context vars passed in by caller)
+    //   2. SFMD env-store (per-user, /set values, encrypted on disk)
+    //   3. Daemon process.env (fallback for things like API keys exported in
+    //      the shell that started stringd — `export GEMINI_API_KEY=...`)
+    //   4. Literal $name (unresolved, leave as-is so failures are visible)
     if (extraEnv && name in extraEnv) return extraEnv[name];
-    const val = loader.envStore.get(name, scope);
-    return val !== undefined ? val : `$${name}`;
+    const stored = loader.envStore.get(name, scope);
+    if (stored !== undefined) return stored;
+    const fromProcess = process.env[name];
+    if (fromProcess !== undefined) return fromProcess;
+    return `$${name}`;
   });
 }
 

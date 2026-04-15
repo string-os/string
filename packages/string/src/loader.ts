@@ -90,6 +90,10 @@ export class Loader {
    * @param body    Payload fields (for HTTP) or params (for CLI template substitution)
    * @param baseUri Base URI for resolving relative paths
    * @param headers Extra headers to merge (from action -H definitions)
+   * @param bodyTemplate  Optional pre-substituted request body string. When set
+   *                      (HTTP only), used verbatim instead of JSON.stringify(body).
+   *                      Lets authors declare APIs whose body shape doesn't match
+   *                      the flat field map.
    */
   async action(
     topic: string,
@@ -97,6 +101,7 @@ export class Loader {
     body: Record<string, unknown>,
     baseUri?: string,
     headers?: Record<string, string>,
+    bodyTemplate?: string,
   ): Promise<ActionResult> {
     const verb = method.toUpperCase();
 
@@ -123,6 +128,8 @@ export class Loader {
 
     if (verb === 'GET' || verb === 'DELETE') {
       const url = new URL(resolved);
+      // GET/DELETE never use a body template — query string is the only
+      // input. Promote remaining fields (after URI substitution) to query.
       for (const [k, v] of Object.entries(body)) {
         url.searchParams.set(k, String(v));
       }
@@ -133,6 +140,11 @@ export class Loader {
       };
     } else {
       uri = resolved;
+      // Body precedence: caller-supplied template (already field-substituted)
+      // wins. Otherwise fall back to flat JSON.stringify(payload).
+      const requestBody = bodyTemplate !== undefined
+        ? bodyTemplate
+        : JSON.stringify(body);
       init = {
         method: verb,
         headers: {
@@ -140,7 +152,7 @@ export class Loader {
           Accept: 'text/markdown, text/plain',
           ...headers,
         },
-        body: JSON.stringify(body),
+        body: requestBody,
       };
     }
 
@@ -152,7 +164,16 @@ export class Loader {
     }
 
     if (res.status === 404) throw new StringError('NOT_FOUND', `Not found: ${uri}`);
-    if (!res.ok) throw new StringError('LOAD_ERROR', `HTTP ${res.status} at ${uri}`);
+    if (!res.ok) {
+      // Read body for context — many APIs return useful JSON error messages
+      // in the response even on non-2xx status. Forward up to ~500 chars.
+      let errBody = '';
+      try { errBody = (await res.text()).slice(0, 500); } catch { /* ignore */ }
+      throw new StringError(
+        'LOAD_ERROR',
+        `HTTP ${res.status} at ${uri}${errBody ? `\n${errBody}` : ''}`,
+      );
+    }
 
     let source = await res.text();
     let rawSource: string | undefined;

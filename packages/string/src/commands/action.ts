@@ -2,6 +2,7 @@
  * Action execution: /act command and shared executeAction helper.
  */
 
+import fs from 'fs';
 import type { ActionDirective } from '@string-os/core';
 import type { Loader, ActionResult } from '../loader.js';
 import type { Session } from '../session.js';
@@ -162,6 +163,18 @@ export async function executeAction(
     return err(`Missing required flags: ${missing.map(f => f.name).join(', ')}\n\nUsage:\n${schema}`, 'INVALID_PAYLOAD');
   }
 
+  // Build the request body template, if the action declares one. `{field}`
+  // placeholders are substituted with values from `payload` (and session
+  // vars as a fallback). When the placeholder appears inside a JSON string
+  // literal context, the value is JSON-string-escaped so embedded quotes
+  // and backslashes don't break the resulting JSON. `$var` env refs are
+  // also resolved (extraEnv → env-store → process.env).
+  let resolvedBody: string | undefined;
+  if (action.body !== undefined && !isCli) {
+    resolvedBody = substituteBodyTemplate(action.body, payload, session);
+    resolvedBody = resolveEnvVars(resolvedBody, loader, envScope, extraEnv);
+  }
+
   // Execute the action
   try {
     const actionResult = await loader.action(
@@ -170,11 +183,15 @@ export async function executeAction(
       payload as Record<string, unknown>,
       session.currentUri ?? undefined,
       Object.keys(resolvedHeaders).length > 0 ? resolvedHeaders : undefined,
+      resolvedBody,
     );
 
-    // If action has a response template, execute it
+    // If action has a response template, execute it. The template is the
+    // canonical place for response-shape concerns: variable extraction,
+    // file save (save:/decode:/to:), and rendered output. Pass the action's
+    // payload so directives like `to: {filename}` can substitute fields.
     if (action.responseTemplate) {
-      const output = executeResponseTemplate(action.responseTemplate, actionResult, session);
+      const output = executeResponseTemplate(action.responseTemplate, actionResult, session, payload);
       return ok(output);
     }
 
@@ -197,6 +214,97 @@ export async function executeAction(
     if (e instanceof StringError) return err(e.message, e.code);
     throw e;
   }
+}
+
+// ─── HTTP body templating + response extraction ─────────────────────────────
+
+/**
+ * Substitute `{field}` and `{field|modifier}` placeholders in an action's
+ * body template.
+ *
+ * The template is typically JSON, so values that land inside a JSON string
+ * literal must be JSON-escaped (quotes, backslashes, newlines, control chars).
+ * The substitution function detects context heuristically: if the placeholder
+ * is immediately surrounded by double quotes, it's inside a string and gets
+ * escaped. Otherwise the value is inserted raw — for cases where the author
+ * is interpolating a number, boolean, or pre-formatted JSON fragment.
+ *
+ * Resolution order for each placeholder name:
+ *   1. payload (parsed action flags)
+ *   2. session vars
+ *   3. left as `{name}` if unresolved
+ *
+ * Supported modifiers (pipe-separated, Jinja-style):
+ *   `{name|base64}`     base64-encode the field value as-is
+ *   `{name|base64file}` treat the value as a file path, read the file's
+ *                       bytes, and base64-encode them. Use this for binary
+ *                       inputs like images that would otherwise blow past
+ *                       the OS argv limit (~2MB on Linux) if passed as
+ *                       base64 strings on the command line.
+ *   `{name|file}`       treat the value as a file path, read the file as
+ *                       UTF-8 text, and substitute the contents.
+ *
+ * Modifiers can be chained: `{name|file|base64}`.
+ */
+function substituteBodyTemplate(
+  template: string,
+  payload: Record<string, unknown>,
+  session: Session,
+): string {
+  return template.replace(
+    /(")?\{([a-zA-Z_]\w*)((?:\|[a-zA-Z][a-zA-Z0-9]*)*)\}(")?/g,
+    (match: string, lq: string | undefined, name: string, modifierStr: string, rq: string | undefined): string => {
+      let resolved: string;
+      if (payload[name] !== undefined) {
+        resolved = String(payload[name]);
+      } else {
+        const sessionVal = session.getVar(name);
+        if (sessionVal === undefined) return match;
+        resolved = sessionVal;
+      }
+
+      // Apply modifiers left-to-right.
+      const modifiers = modifierStr.split('|').filter(Boolean);
+      for (const mod of modifiers) {
+        if (mod === 'base64') {
+          resolved = Buffer.from(resolved, 'utf-8').toString('base64');
+        } else if (mod === 'base64file') {
+          try {
+            const bytes: Buffer = fs.readFileSync(resolved);
+            resolved = bytes.toString('base64');
+          } catch (e) {
+            // Leave the placeholder unresolved with an inline error marker
+            // so the caller sees something useful instead of a silent JSON
+            // parse error from the API.
+            return `__BODY_TEMPLATE_ERROR__: cannot read ${resolved}: ${(e as Error).message}`;
+          }
+        } else if (mod === 'file') {
+          try {
+            resolved = fs.readFileSync(resolved, 'utf-8');
+          } catch (e) {
+            return `__BODY_TEMPLATE_ERROR__: cannot read ${resolved}: ${(e as Error).message}`;
+          }
+        } else {
+          // Unknown modifier — leave placeholder intact for visibility
+          return match;
+        }
+      }
+
+      // Inside a JSON string: escape and re-emit the surrounding quotes.
+      if (lq && rq) {
+        return `"${jsonEscape(resolved)}"`;
+      }
+      // Outside a JSON string: insert raw.
+      return resolved;
+    },
+  );
+}
+
+function jsonEscape(s: string): string {
+  // Use JSON.stringify to handle every edge case (control chars, unicode,
+  // surrogate pairs) correctly, then strip the surrounding quotes.
+  const json = JSON.stringify(s);
+  return json.slice(1, -1);
 }
 
 /**
