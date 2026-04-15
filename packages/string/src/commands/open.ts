@@ -56,11 +56,30 @@ export async function cmdOpen(
     uri = uri.slice(0, hashIdx);
   }
 
-  // Installed app resolution: bare name → registry lookup
-  if (!uri.includes('/') && !uri.includes('.') && !uri.includes('://') && !uri.startsWith('@')) {
-    const registeredUri = loader.envStore.getPackage('apps', uri);
-    if (registeredUri) {
-      uri = registeredUri;
+  // Installed app resolution:
+  //   bare name (e.g. "weather")         → apps registry lookup
+  //   app:<name> (e.g. "app:weather")    → apps registry lookup
+  //   tool:<name> (e.g. "tool:git")      → tools registry lookup
+  // The typed forms match what `/install` prints as the next-step hint and
+  // what the runtime docs reference as the canonical way to open an app.
+  {
+    let registryType: 'apps' | 'tools' | null = null;
+    let registryName: string | null = null;
+    if (/^app:[a-zA-Z0-9_-]+$/.test(uri)) {
+      registryType = 'apps';
+      registryName = uri.slice('app:'.length);
+    } else if (/^tool:[a-zA-Z0-9_-]+$/.test(uri)) {
+      registryType = 'tools';
+      registryName = uri.slice('tool:'.length);
+    } else if (!uri.includes('/') && !uri.includes('.') && !uri.includes('://') && !uri.startsWith('@')) {
+      registryType = 'apps';
+      registryName = uri;
+    }
+    if (registryType && registryName) {
+      const registeredUri = loader.envStore.getPackage(registryType, registryName);
+      if (registeredUri) {
+        uri = registeredUri;
+      }
     }
   }
 
