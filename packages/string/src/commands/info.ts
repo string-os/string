@@ -216,9 +216,12 @@ export function cmdHelp(session: Session, mode?: 'bash'): CommandResult {
     lines.push('');
     lines.push('## Actions on this page');
     for (const a of doc.actions) {
+      // Required-fields-only signature, no method/URL — see comment in
+      // renderer.renderActions for the rationale. Matches the format used
+      // by the [actions] hint that the renderer prepends on /open.
       const flags = a.fields.filter(f => f.required).map(f => `--${f.name} <${f.type}>`);
       const flagStr = flags.length > 0 ? ' ' + flags.join(' ') : '';
-      lines.push(`/act.${a.id}${flagStr}  ${a.method.toUpperCase()} ${a.uri}`);
+      lines.push(`/act.${a.id}${flagStr}`);
     }
   }
 

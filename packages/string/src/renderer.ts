@@ -368,7 +368,13 @@ export function renderActions(doc: LoadedDocument, singleId?: string): string {
 
   return list
     .map(a => {
-      const header = `/act.${a.id} — ${a.method.toUpperCase()} ${a.uri}`;
+      // Header is the action's verb only — `/act.<id>`. The method (POST,
+      // CLI, etc.) and the URL/template are *implementation* details, not
+      // part of the call interface the agent needs to invoke the action.
+      // Hiding them keeps the help surface focused on "what to call, what
+      // to pass". For inspecting the underlying request, use `/source` to
+      // dump the raw .md file.
+      const header = `/act.${a.id}`;
       const desc = a.description ? `\n   ${a.description}` : '';
       const fields =
         a.fields.length > 0
