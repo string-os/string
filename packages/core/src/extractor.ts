@@ -47,10 +47,18 @@ export function extract(source: string, blockId: string): ExtractResult {
   return { blockId, content: '', found: false };
 }
 
+// Escape regex metacharacters so an attacker-controlled blockId like ".*"
+// can't match unintended blocks. Valid SFMD block IDs are slug-like, but the
+// extractor is reachable from untrusted input paths.
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 function extractExplicit(source: string, blockId: string): string | null {
   const lines = source.split('\n');
-  const openRe = new RegExp(`^<!-- #${blockId} -->$`);
-  const closeRe = new RegExp(`^<!-- \\/${blockId} -->$`);
+  const escaped = escapeRegex(blockId);
+  const openRe = new RegExp(`^<!-- #${escaped} -->$`);
+  const closeRe = new RegExp(`^<!-- \\/${escaped} -->$`);
 
   let capturing = false;
   const contentLines: string[] = [];

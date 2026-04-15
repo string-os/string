@@ -66,6 +66,14 @@ export function compile(sourceDir: string, baseName: string): CompileResult {
       blockFile = path.join(sourceSubDir, `${blockId}.md`);
     } else {
       blockFile = path.resolve(sourceDir, rawPath);
+      // Boundary check: rawPath must not escape sourceDir. Without this, an
+      // SFMD include directive could inline /etc/passwd at compile time.
+      const rel = path.relative(sourceDir, blockFile);
+      if (rel.startsWith('..') || path.isAbsolute(rel)) {
+        throw new Error(
+          `Include path escapes source directory: "${rawPath}" → ${blockFile}`
+        );
+      }
     }
 
     // Auto-create if missing

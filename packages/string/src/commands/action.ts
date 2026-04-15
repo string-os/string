@@ -71,13 +71,25 @@ export async function executeAction(
   const consumedByUri = new Set<string>();
   let resolvedUri = action.uri;
 
+  const isCli = action.method === 'cli';
+
+  // Shell-safe single-quote escaping for CLI substitution.
+  // Empty → ''; all-safe chars → as-is; otherwise wrap in '...' with any
+  // embedded ' escaped as '\''. This is POSIX sh's only fully reliable quoting.
+  const shellQuote = (s: string): string => {
+    if (s === '') return "''";
+    if (/^[a-zA-Z0-9_\-./=@:+,]+$/.test(s)) return s;
+    return `'${s.replace(/'/g, `'\\''`)}'`;
+  };
+  const cliSub = (val: string): string => isCli ? shellQuote(val) : encodeURIComponent(val);
+
   // {...args} — serialize remaining payload as --key value flags
   resolvedUri = resolvedUri.replace(/\{\.\.\.args\}/g, () => {
     const parts: string[] = [];
     for (const [k, v] of Object.entries(payload)) {
       const val = String(v);
-      // Quote values containing spaces
-      parts.push(val.includes(' ') ? `--${k} "${val}"` : `--${k} ${val}`);
+      // For CLI, always shell-quote. For HTTP, URL-encode.
+      parts.push(`--${k} ${cliSub(val)}`);
     }
     // Mark all fields as consumed and remove from payload
     for (const k of Object.keys(payload)) {
@@ -87,21 +99,19 @@ export async function executeAction(
     return parts.join(' ');
   });
 
-  const isCli = action.method === 'cli';
   resolvedUri = resolvedUri.replace(/\{([a-zA-Z_]\w*)\}/g, (_m, name) => {
     // If the flag matches a path param, consume it
     if (payload[name] !== undefined) {
       const val = String(payload[name]);
       consumedByUri.add(name);
       delete payload[name];
-      // CLI: raw value (no encoding). HTTP: URL-encode for path segments.
-      return isCli ? val : encodeURIComponent(val);
+      return cliSub(val);
     }
     // Try session variable
     const sessionVal = session.getVar(name);
     if (sessionVal !== undefined) {
       consumedByUri.add(name);
-      return isCli ? sessionVal : encodeURIComponent(sessionVal);
+      return cliSub(sessionVal);
     }
     return `{${name}}`;
   });

@@ -381,7 +381,10 @@ await section('{...args} — quoted values with spaces', async () => {
     '# Spread Args Quote Test',
     '',
     '```act.greet',
-    "CLI printf '%s' '{...args}'",
+    // {...args} self-quotes each value, so the template must NOT wrap it in
+    // outer quotes — same convention as bash "$@". Using echo here lets each
+    // --key value token land as its own argv entry.
+    'CLI echo {...args}',
     '  name: string (required) "Name"',
     '```',
   ].join('\n'));

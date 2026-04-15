@@ -72,8 +72,8 @@ export class UserRegistry {
   private _save(): void {
     if (!this.persistPath) return;
     try {
-      mkdirSync(dirname(this.persistPath), { recursive: true });
-      writeFileSync(this.persistPath, JSON.stringify(this.list(), null, 2) + '\n');
+      mkdirSync(dirname(this.persistPath), { recursive: true, mode: 0o700 });
+      writeFileSync(this.persistPath, JSON.stringify(this.list(), null, 2) + '\n', { mode: 0o600 });
     } catch (e) {
       console.error(`[UserRegistry] Failed to save: ${e}`);
     }

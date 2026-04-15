@@ -159,8 +159,10 @@ export class EnvStore {
 
   private writeJson(filePath: string, data: Record<string, unknown>): void {
     try {
-      mkdirSync(dirname(filePath), { recursive: true });
-      writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n');
+      // 0o700 dir / 0o600 file: env-store holds API keys and tokens; must not
+      // be world-readable on shared machines.
+      mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
+      writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
       this.fileCache.set(filePath, data);
     } catch (e) {
       console.error(`[EnvStore] Failed to write ${filePath}: ${e}`);

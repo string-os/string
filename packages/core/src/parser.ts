@@ -379,8 +379,10 @@ export function extractBlock(source: string, blockId: string): string | null {
   let capturing = false;
   const contentLines: string[] = [];
 
-  const openPattern = new RegExp(`^<!-- #${blockId} -->$`);
-  const closePattern = new RegExp(`^<!-- \\/${blockId} -->$`);
+  // Escape regex metacharacters: blockId is attacker-controlled in some call paths.
+  const escaped = blockId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const openPattern = new RegExp(`^<!-- #${escaped} -->$`);
+  const closePattern = new RegExp(`^<!-- \\/${escaped} -->$`);
 
   for (const line of lines) {
     const trimmed = line.trim();

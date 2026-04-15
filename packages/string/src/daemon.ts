@@ -96,10 +96,22 @@ let log: Logger;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
+// 10 MiB request body cap — prevents trivial OOM from an unbounded POST.
+const MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
+
 async function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
-    req.on('data', c => chunks.push(c));
+    let size = 0;
+    req.on('data', c => {
+      size += c.length;
+      if (size > MAX_REQUEST_BODY_BYTES) {
+        reject(new Error(`Request body exceeds ${MAX_REQUEST_BODY_BYTES} bytes`));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
     req.on('end', () => resolve(Buffer.concat(chunks).toString('utf-8')));
     req.on('error', reject);
   });

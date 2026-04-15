@@ -8,6 +8,20 @@
 
 ---
 
+## Security model
+
+`stringd` is a **single-user, loopback-only** daemon. The protocol is designed around these assumptions — conforming implementations MUST NOT loosen them without an explicit versioned extension.
+
+1. **Loopback only.** The daemon binds `127.0.0.1`. It is not a network service. Do not put it behind a reverse proxy, do not expose it in a shared container, do not publish the port. CORS is permissive for local-tooling convenience, not as a security boundary.
+2. **`X-User-Id` is identity, not authentication.** It selects which user record a request operates under. Any process on the loopback interface can set any value. The trust assumption is "same host, same OS user" — processes on the same machine running as the same UID are trusted to not lie to each other.
+3. **No per-request signing or token auth.** `/health` and `/shutdown` accept any caller. A hostile local process can shut the daemon down; this is equivalent to sending `SIGTERM`, which such a process could already do.
+4. **Request body cap.** The daemon rejects bodies larger than 10 MiB to prevent trivial OOM. Clients SHOULD NOT send JSON payloads anywhere near this bound.
+5. **Shell execution is by design.** `/exec` and CLI-method actions run under `/bin/bash -c`. This is a deliberate property of the agent runtime, not a vulnerability. Embedders who need sandboxing must provide it at the OS level (containers, firejail, VMs).
+
+If your deployment needs multi-tenant access, remote use, or per-request authentication, **do not run v0.1 of `stringd`**. These are planned for v0.2 as an explicit protocol extension.
+
+---
+
 ## Concepts
 
 A **user** is the top-level identity. Each user has a home directory (`user.home`) and an optional allowlist of additional accessible paths. Users are registered via `POST /users` and persist across daemon restarts in `${STRINGD_DATA_DIR}/users.json` (default: `.stringd/users.json` in the daemon's working directory).
