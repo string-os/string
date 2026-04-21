@@ -222,6 +222,14 @@ string daemon                    # Start daemon (port 3100)
 string daemon --log 4000         # Enable logging, custom port
 ```
 
+### Apps vs Tools
+
+**App** — has its own view and session. You enter it with `/open app:name` and explore its pages. Think: a website you visit.
+
+**Tool** — no view of its own. You call it with `/tool:name` and it runs in your current context, returning output. Think: a shell command.
+
+Both are `.md` files with action blocks. The difference is how they're accessed, not how they're written. See [Tools guide](./docs/runtime/13-tools.md) for details.
+
 ### Topic types
 
 | Topic | Description | Examples |
