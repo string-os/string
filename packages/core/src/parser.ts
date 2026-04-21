@@ -40,6 +40,7 @@ export interface ActionField {
   constraints: string;
   description: string;
   defaultValue?: string;
+  short?: string;
 }
 
 export interface ActionHeader {
@@ -57,30 +58,14 @@ export interface ActionDirective {
   responseTemplate: string | null;
   line: number;
   /**
-   * Optional request body template for HTTP methods. When set, this string
-   * (with `{field}` substitution applied) is sent as the request body
-   * verbatim, instead of `JSON.stringify(payload)`. Lets authors declare
-   * APIs whose body shape doesn't match the flat field map — nested JSON,
-   * specific field names, etc.
+   * Optional request body template, extracted from `-d '...'` on the first line.
+   * `{field}` placeholders are substituted with JSON-escaped values.
    *
-   * Example author syntax:
+   * Example:
    *   ```act.foo
-   *   POST https://api.example.com/v1/things
+   *   POST https://api.example.com/v1 -d '{"text":"{prompt}"}'
    *     prompt: string (required) "Prompt"
-   *
-   *     body: {"contents":[{"parts":[{"text":"{prompt}"}]}]}
    *   ```
-   *
-   * Substitution rules (handled in executeAction):
-   * - `{field}` → JSON-string-escaped value when inside a JSON string context
-   * - `{field}` → raw value otherwise
-   * - `{field|base64file}` → reads the value as a file path, base64-encodes
-   *
-   * Ignored for CLI methods.
-   *
-   * Response handling (extraction, decoding, file save) lives in the
-   * sibling `act.<id>.response` block, NOT here. Action block stays focused
-   * on the request shape; response block stays focused on result handling.
    */
   body?: string;
 }
@@ -337,10 +322,11 @@ export function parse(source: string): ParseResult {
  * Line 0: METHOD URI
  * Lines 1+: name: type (required|optional) "description"
  */
-const ACTION_BLOCK_FIELD_RE = /^\s+(\w+):\s+(\w+)(?:\s+\((required|optional)\))?(?:\s+"([^"]*)")?(?:\s*=\s*"([^"]*)")?$/;
+// Field: `  name: type ...` or `  name, -x: type ...` (with optional short alias)
+const ACTION_BLOCK_FIELD_RE = /^\s+(\w+)(?:,\s*-([a-zA-Z]))?\s*:\s+(\w+)(?:\s+\((required|optional)\))?(?:\s+"([^"]*)")?(?:\s*=\s*"([^"]*)")?$/;
 
-/** Extract -H "Key: Value" flags from action first line, returning remaining URI and headers. */
-function parseHeaderFlags(raw: string): { uri: string; headers: ActionHeader[] } {
+/** Extract -H "Key: Value" and -d '...' flags from action first line. */
+function parseHeaderFlags(raw: string): { uri: string; headers: ActionHeader[]; body?: string } {
   const headers: ActionHeader[] = [];
   const HEADER_RE = /-H\s+"([^"]+)"/g;
   let match;
@@ -353,10 +339,18 @@ function parseHeaderFlags(raw: string): { uri: string; headers: ActionHeader[] }
       });
     }
   }
-  // URI is everything before the first -H flag
-  const hIdx = raw.indexOf(' -H ');
-  const uri = (hIdx !== -1 ? raw.slice(0, hIdx) : raw).trim();
-  return { uri, headers };
+
+  // Extract -d '...' or -d "..." body template
+  let body: string | undefined;
+  const bodyMatch = raw.match(/-d\s+(?:'([^']*)'|"([^"]*)")/);
+  if (bodyMatch) {
+    body = bodyMatch[1] ?? bodyMatch[2];
+  }
+
+  // URI is everything before the first flag (-H or -d)
+  const flagIdx = raw.search(/\s-[Hd]\s/);
+  const uri = (flagIdx !== -1 ? raw.slice(0, flagIdx) : raw).trim();
+  return { uri, headers, ...(body !== undefined ? { body } : {}) };
 }
 
 function parseActionBlock(id: string, lines: string[], startLine: number): ActionDirective | null {
@@ -367,79 +361,39 @@ function parseActionBlock(id: string, lines: string[], startLine: number): Actio
   if (!headerMatch) return null;
 
   const method = headerMatch[1].toLowerCase() as HttpMethod;
-  // For HTTP methods, extract `-H "Key: Value"` flags as action headers.
-  // For CLI methods, leave the template alone — `-H` there is typically an
-  // argument to an embedded `curl` invocation, not an SFMD-level header
-  // declaration. Stripping it would corrupt the bash command and produce
-  // baffling "unexpected EOF" parse errors at execution time.
-  const { uri, headers } = method === 'cli'
+  // For HTTP methods, extract `-H "Key: Value"` and `-d '...'` from first line.
+  // For CLI methods, leave the template alone.
+  const parsed = method === 'cli'
     ? { uri: headerMatch[2].trim(), headers: [] as ActionHeader[] }
     : parseHeaderFlags(headerMatch[2]);
+  const { uri, headers } = parsed;
+  const body = 'body' in parsed ? (parsed as { body: string }).body : undefined;
 
   const fields: ActionField[] = [];
-  // The action block accepts ONE optional directive: `body:` for HTTP methods
-  // that need a request body shape different from `JSON.stringify(payload)`.
-  // Response handling (extraction, decoding, file save) lives in the sibling
-  // `act.<id>.response` block, parsed and executed separately.
-  //
-  // `body:` may be inline (`body: {"k":"v"}`) or multi-line. Multi-line bodies
-  // are captured by collecting subsequent lines indented MORE than the
-  // directive line itself, until a less-indented non-blank line. Blank lines
-  // INSIDE a body are preserved so authors can format JSON with separators.
-  let body: string | undefined;
-
-  /** Indent width (leading spaces) of a line. */
-  const indentOf = (s: string): number => s.length - s.trimStart().length;
 
   for (let i = 1; i < lines.length; i++) {
     const line = lines[i];
     const trimmed = line.trim();
     if (!trimmed) continue;
 
-    // Body directive check before field regex (so `body:` isn't mistaken for
-    // a field declaration).
-    const bodyMatch = line.match(/^(\s+)body:\s*(.*)$/);
-    if (bodyMatch) {
-      const baseIndent = bodyMatch[1].length;
-      const inlineValue = bodyMatch[2];
-      const valueLines: string[] = inlineValue ? [inlineValue] : [];
-      const stripIndent = baseIndent + 2;
-      let j = i + 1;
-      while (j < lines.length) {
-        const next = lines[j];
-        if (!next.trim()) {
-          let k = j + 1;
-          while (k < lines.length && !lines[k].trim()) k++;
-          if (k >= lines.length || indentOf(lines[k]) <= baseIndent) break;
-          valueLines.push('');
-          j++;
-          continue;
-        }
-        if (indentOf(next) <= baseIndent) break;
-        valueLines.push(next.length > stripIndent ? next.slice(stripIndent) : next.trim());
-        j++;
-      }
-      i = j - 1;
-      body = valueLines.join('\n').trim();
-      continue;
-    }
-
     const fieldMatch = line.match(ACTION_BLOCK_FIELD_RE);
     if (fieldMatch) {
-      const reqStr = fieldMatch[3] ?? 'optional';
+      const reqStr = fieldMatch[4] ?? 'optional';
       const field: ActionField = {
         name: fieldMatch[1],
-        type: fieldMatch[2],
+        type: fieldMatch[3],
         required: reqStr.toLowerCase() === 'required',
         constraints: reqStr,
-        description: fieldMatch[4] ?? '',
+        description: fieldMatch[5] ?? '',
       };
-      if (fieldMatch[5] !== undefined) {
-        field.defaultValue = fieldMatch[5];
+      if (fieldMatch[2]) {
+        field.short = fieldMatch[2];
+      }
+      if (fieldMatch[6] !== undefined) {
+        field.defaultValue = fieldMatch[6];
       }
       fields.push(field);
     }
-    // Non-matching non-empty lines are ignored (blank lines separate sections)
   }
 
   return {

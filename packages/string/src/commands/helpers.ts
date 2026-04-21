@@ -29,8 +29,16 @@ export function err(message: string, code?: StringErrorCode): CommandResult {
  * Handles: --key value, --key "quoted value", --flag (boolean)
  * Returns null if --help is present.
  */
+/**
+ * Parse POSIX-style flags from args string.
+ * Handles: --key value, --key "quoted value", --flag (boolean), -x value (short alias)
+ * Returns null if --help or -h is present.
+ *
+ * @param shortToLong  Optional map of short flag → long name (e.g. {c: 'city'})
+ */
 export function parsePosixFlags(
   args: string,
+  shortToLong?: Record<string, string>,
 ): { flags: Record<string, string>; rest: string[]; bareFlags: Set<string> } | null {
   const tokens: string[] = [];
   let current = '';
@@ -57,28 +65,30 @@ export function parsePosixFlags(
   }
   if (current) tokens.push(current);
 
-  // Check for --help
-  if (tokens.includes('--help')) return null;
+  if (tokens.includes('--help') || tokens.includes('-h')) return null;
 
   const flags: Record<string, string> = {};
   const rest: string[] = [];
-  // Flags that appeared without an explicit value — either at end-of-line or
-  // immediately followed by another --flag. Callers that care about the
-  // distinction between "--flag true" (explicit boolean) and "--flag" (bare)
-  // inspect this set. Boolean-typed fields accept both; non-boolean fields
-  // should reject bare appearance so `--city` doesn't silently become
-  // `city=true`.
   const bareFlags = new Set<string>();
+  const isFlag = (t: string) => t.startsWith('--') || (t.length === 2 && t.startsWith('-'));
 
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i];
     if (tok.startsWith('--') && tok.length > 2) {
       const key = tok.slice(2);
-      // Peek next token — if it exists and is not a flag, treat as value
-      if (i + 1 < tokens.length && !tokens[i + 1].startsWith('--')) {
+      if (i + 1 < tokens.length && !isFlag(tokens[i + 1])) {
         flags[key] = tokens[++i];
       } else {
-        flags[key] = 'true'; // boolean flag (bare)
+        flags[key] = 'true';
+        bareFlags.add(key);
+      }
+    } else if (tok.length === 2 && tok.startsWith('-') && tok !== '--') {
+      const shortChar = tok.slice(1);
+      const key = shortToLong?.[shortChar] ?? shortChar;
+      if (i + 1 < tokens.length && !isFlag(tokens[i + 1])) {
+        flags[key] = tokens[++i];
+      } else {
+        flags[key] = 'true';
         bareFlags.add(key);
       }
     } else {

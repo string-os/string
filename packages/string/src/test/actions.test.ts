@@ -446,22 +446,12 @@ await section('HTTP action invocation does not switch the current document', asy
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-await section('Action body: directive parsed and field-substituted', async () => {
-  // Body templates let HTTP actions declare a request body shape that
-  // doesn't match the flat field map. Fields are substituted with
-  // `{name}` placeholders. Inside JSON string contexts (between `"`), the
-  // value is JSON-string-escaped.
+await section('Action -d body parsed from first line', async () => {
   const src = [
     '```act.lookup',
-    'POST https://api.example.com/v1/lookup',
+    `POST https://api.example.com/v1/lookup -d '{"q":"{query}","options":{"limit":{limit}}}'`,
     '  query: string (required) "Search query"',
     '  limit: number = "10"',
-    '',
-    '  body:',
-    '    {',
-    '      "q": "{query}",',
-    '      "options": {"limit": {limit}}',
-    '    }',
     '```',
   ].join('\n');
 
@@ -471,9 +461,9 @@ await section('Action body: directive parsed and field-substituted', async () =>
 
   const action = result.actions[0];
   assert(action.method === 'post', 'method is post');
-  assert(action.body !== undefined, 'body directive captured');
-  assert(action.body!.includes('"q": "{query}"'), 'body contains field placeholder');
-  assert(action.body!.includes('"limit": {limit}'), 'body contains numeric placeholder');
+  assert(action.body !== undefined, 'body from -d captured');
+  assert(action.body!.includes('"q":"{query}"'), 'body contains field placeholder');
+  assert(action.body!.includes('{limit}'), 'body contains numeric placeholder');
   assert(action.fields.length === 2, 'fields parsed alongside body');
   assert(action.fields[0].name === 'query', 'first field is query');
   assert(action.fields[1].name === 'limit', 'second field is limit');
@@ -518,10 +508,8 @@ await section('Response template: save/decode/to extracts to file', async () => 
   const outPath = path.join(tmpDir, 'out.bin');
   fs.writeFileSync(path.join(tmpDir, 'mock.md'), [
     '```act.gen',
-    `POST http://127.0.0.1:${port}/v1/generate`,
+    `POST http://127.0.0.1:${port}/v1/generate -d '{"prompt": "test"}'`,
     '  filename: string (required) "Output path"',
-    '',
-    '  body: {"prompt": "test"}',
     '```',
     '',
     '```act.gen.response',
@@ -575,43 +563,36 @@ await section('Action body template substitution: JSON string escaping', async (
   // only triggered for HTTP methods, so we test it indirectly via a real
   // HTTP action against a local mock server below.
 
-  // Pure parser-level check: ensure body field substitution preserves
-  // the exact placeholder syntax for downstream resolution.
+  // Parser-level check: -d body from first line preserves placeholders
   const src = [
     '```act.greet',
-    'POST https://api.example.com/greet',
+    `POST https://api.example.com/greet -d '{"hello": "{name}"}'`,
     '  name: string (required) "Name"',
-    '  body: {"hello": "{name}"}',
     '```',
   ].join('\n');
 
   const result = parse(src);
   assert(result.actions.length === 1, 'parsed');
-  assert(result.actions[0].body === '{"hello": "{name}"}', 'inline body captured verbatim');
+  assert(result.actions[0].body === '{"hello": "{name}"}', '-d body captured verbatim');
 });
 
-await section('Action body: blank lines preserved inside multi-line body', async () => {
+await section('Field short alias parsed', async () => {
   const src = [
-    '```act.complex',
-    'POST https://api.example.com/complex',
-    '  q: string (required) "q"',
-    '',
-    '  body:',
-    '    {',
-    '      "outer": {',
-    '        "a": "{q}"',
-    '',
-    '      },',
-    '      "trailing": true',
-    '    }',
+    '```act.test',
+    'GET https://api.example.com/{city}',
+    '  city, -c: string (required) "City name"',
+    '  limit, -l: number "Max results" = "20"',
+    '  verbose: boolean "Verbose"',
     '```',
   ].join('\n');
 
   const result = parse(src);
   assert(result.actions.length === 1, 'parsed');
-  const body = result.actions[0].body!;
-  assert(body.includes('"trailing": true'), 'content after blank line preserved');
-  assert(body.includes('\n\n'), 'blank line preserved as empty line');
+  const fields = result.actions[0].fields;
+  assert(fields.length === 3, 'three fields');
+  assert(fields[0].short === 'c', 'city short alias');
+  assert(fields[1].short === 'l', 'limit short alias');
+  assert(fields[2].short === undefined, 'verbose has no short alias');
 });
 
 await section('CLI action templates do not strip embedded -H flags', async () => {

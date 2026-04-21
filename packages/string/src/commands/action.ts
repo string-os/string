@@ -36,8 +36,14 @@ export async function executeAction(
   loader: Loader,
   extraEnv?: Record<string, string>,
 ): Promise<CommandResult> {
-  // Parse POSIX flags — null means --help was present
-  const parsed = parsePosixFlags(flagStr);
+  // Build short alias map from field definitions (e.g. {c: 'city'})
+  const shortToLong: Record<string, string> = {};
+  for (const f of action.fields) {
+    if (f.short) shortToLong[f.short] = f.name;
+  }
+
+  // Parse POSIX flags — null means --help or -h was present
+  const parsed = parsePosixFlags(flagStr, shortToLong);
   if (parsed === null) {
     const doc = session.currentDoc;
     if (doc) return ok(`Action: ${action.id}\n---\n${renderActions(doc, action.id)}`);
