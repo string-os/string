@@ -27,8 +27,10 @@ export async function cmdOpen(
   loader: Loader,
 ): Promise<CommandResult> {
   if (!topic) {
-    // No argument: re-open current document (like refresh, but re-runs default action)
-    if (session.currentUri) {
+    // No argument in an app: topic → re-open the app's index.md (= app home)
+    if (session.name.startsWith('app:')) {
+      topic = session.name; // e.g. "app:moltbook-browse" → resolved by registry below
+    } else if (session.currentUri) {
       topic = session.currentUri;
     } else {
       return err(
