@@ -27,15 +27,20 @@ export async function cmdOpen(
   loader: Loader,
 ): Promise<CommandResult> {
   if (!topic) {
-    return err(
-      'Usage: /open <uri | path | file.md#block | @shortcut>\n' +
-      'Examples:\n' +
-      '  /open index.md\n' +
-      '  /open guide/setup.md\n' +
-      '  /open @home\n' +
-      '  /open file.md#intro',
-      'INVALID_TARGET'
-    );
+    // No argument: re-open current document (like refresh, but re-runs default action)
+    if (session.currentUri) {
+      topic = session.currentUri;
+    } else {
+      return err(
+        'Usage: /open <uri | path | file.md#block | @shortcut>\n' +
+        'Examples:\n' +
+        '  /open index.md\n' +
+        '  /open guide/setup.md\n' +
+        '  /open @home\n' +
+        '  /open file.md#intro',
+        'INVALID_TARGET'
+      );
+    }
   }
 
   // Parse fragment
