@@ -19,8 +19,8 @@ import type { Loader } from './loader.js';
 
 // [@shortcut_id Label](href) — IDs may include dots for namespaced menu entries
 const SHORTCUT_RE = /\[(@[a-zA-Z0-9._-]+)\s+([^\]]+)\]\([^)]+\)/g;
-// Plain markdown link — excludes shortcut refs (@)
-const PLAIN_LINK_RE = /\[([^\]]+)\]\((?![@])([^)]+)\)/g;
+// Plain markdown link — excludes shortcut refs (@). Allows empty label [](url).
+const PLAIN_LINK_RE = /\[([^\]]*)\]\((?![@])([^)]+)\)/g;
 // [!include:id](path) — include directive
 const INCLUDE_RE = /\[!include:([a-zA-Z0-9_-]+)\]\(([^)]+)\)/g;
 // Standard Markdown reference link: [text][ref] — excludes @-prefixed (SFMD shortcuts)
@@ -287,7 +287,9 @@ export async function render(
     PLAIN_LINK_RE,
     (_match, label: string, _href: string, offset: number) => {
       const slug = offsets.get(offset);
-      return slug ? `[${label}][@${slug}]` : _match;
+      if (!slug) return _match;
+      const display = label || slug;
+      return `[${display}][@${slug}]`;
     },
   );
 

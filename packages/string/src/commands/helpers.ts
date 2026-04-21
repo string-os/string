@@ -214,10 +214,21 @@ export function executeResponseTemplate(
       return val !== undefined ? val : `{${name}}`;
     });
 
-  const outputLines: string[] = [];
+  /** Substitute {Response.*} and then {var}/{field} in a single text line. */
+  const substituteLine = (line: string): string => {
+    let out = line.replace(/\{Response\.([a-zA-Z_.[\]\d]+)\}/g, (_m: string, p: string): string => {
+      const val = walkJsonPath(responseObj, p);
+      return stringifyValue(val);
+    });
+    out = substituteVarsAndFields(out);
+    return out;
+  };
 
-  for (const rawLine of template.split('\n')) {
-    const line = rawLine;
+  const outputLines: string[] = [];
+  const lines = template.split('\n');
+
+  for (let li = 0; li < lines.length; li++) {
+    const line = lines[li];
 
     // 1. Assignment: {var} = {Response.body.field}
     const assignMatch = line.match(/^\{([a-zA-Z_]\w*)\}\s*=\s*\{Response\.(.+)\}$/);
@@ -229,16 +240,50 @@ export function executeResponseTemplate(
       continue;
     }
 
-    // 2. save: <jsonpath>
+    // 2. for: <item> in <jsonpath> ... end:
+    const forMatch = line.match(/^\s*for:\s*([a-zA-Z_]\w*)\s+in\s+(.+)$/);
+    if (forMatch) {
+      const itemVar = forMatch[1];
+      let arrayPath = forMatch[2].trim();
+      if (arrayPath.startsWith('Response.')) arrayPath = arrayPath.slice('Response.'.length);
+      const arr = walkJsonPath(responseObj, arrayPath);
+
+      // Collect body lines until end:
+      const bodyLines: string[] = [];
+      li++;
+      while (li < lines.length) {
+        if (/^\s*end:\s*$/.test(lines[li])) break;
+        bodyLines.push(lines[li]);
+        li++;
+      }
+      // li now points at end: (or past the array)
+
+      if (!Array.isArray(arr) || arr.length === 0) continue;
+
+      for (const item of arr) {
+        for (const bodyLine of bodyLines) {
+          // Substitute {item.field} with values from the current element
+          let expanded = bodyLine.replace(
+            /\{([a-zA-Z_]\w*)\.([a-zA-Z_.[\]\d]+)\}/g,
+            (_m: string, varRef: string, fieldPath: string): string => {
+              if (varRef !== itemVar) return _m;
+              const val = walkJsonPath(item, fieldPath);
+              return stringifyValue(val);
+            },
+          );
+          expanded = substituteLine(expanded);
+          outputLines.push(expanded);
+        }
+      }
+      continue;
+    }
+
+    // 3. save: <jsonpath>
     const saveMatch = line.match(/^\s*save:\s*(.+)$/);
     if (saveMatch) {
       const pathStr = saveMatch[1].trim();
-      // save: walks INTO the response body directly (no Response.body. prefix
-      // needed — that's the conventional shape for binary extraction).
       const value = walkJsonPath(actionResult.jsonBody, pathStr);
       if (value === undefined) {
-        // Surface as a renderable warning so the agent sees the failure
-        // instead of silently writing an empty file later.
         outputLines.push(`save: path returned no value: ${pathStr}`);
         currentBuffer = undefined;
         continue;
@@ -247,7 +292,7 @@ export function executeResponseTemplate(
       continue;
     }
 
-    // 3. decode: <encoding>
+    // 4. decode: <encoding>
     const decodeMatch = line.match(/^\s*decode:\s*(\S+)\s*$/);
     if (decodeMatch) {
       const encoding = decodeMatch[1];
@@ -272,7 +317,7 @@ export function executeResponseTemplate(
       continue;
     }
 
-    // 4. to: <path>
+    // 5. to: <path>
     const toMatch = line.match(/^\s*to:\s*(.+)$/);
     if (toMatch) {
       if (currentBuffer === undefined) {
@@ -294,19 +339,11 @@ export function executeResponseTemplate(
         outputLines.push(`to: write failed: ${(e as Error).message}`);
         continue;
       }
-      // Note: success message is the author's responsibility — they should
-      // add a text line like `Saved {filename}` after the `to:` directive.
-      // This keeps the output format under the author's control.
       continue;
     }
 
-    // 5. Output text: substitute {Response.*}, then {var}/{field}.
-    let outputLine = line.replace(/\{Response\.([a-zA-Z_.[\]\d]+)\}/g, (_m: string, p: string): string => {
-      const val = walkJsonPath(responseObj, p);
-      return stringifyValue(val);
-    });
-    outputLine = substituteVarsAndFields(outputLine);
-    outputLines.push(outputLine);
+    // 6. Output text: substitute {Response.*}, then {var}/{field}.
+    outputLines.push(substituteLine(line));
   }
 
   // Drop any all-blank trailing lines so the rendered viewport doesn't

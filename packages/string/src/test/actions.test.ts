@@ -849,3 +849,102 @@ await section('/info @shortcut — resolve and display', async () => {
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
+
+await section('Response template: for: directive iterates arrays', async () => {
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-for-');
+
+  const responseBody = {
+    posts: [
+      { title: 'First Post', id: 'p1', author: { name: 'Alice' } },
+      { title: 'Second Post', id: 'p2', author: { name: 'Bob' } },
+      { title: 'Third Post', id: 'p3', author: { name: 'Carol' } },
+    ],
+  };
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(responseBody));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+
+  fs.writeFileSync(path.join(tmpDir, 'test.md'), [
+    '# For Test',
+    '',
+    '```act.feed',
+    `GET http://127.0.0.1:${port}/feed`,
+    '```',
+    '',
+    '```act.feed.response',
+    'Feed:',
+    '',
+    'for: post in Response.body.posts',
+    '- [{post.title}](https://example.com/post/{post.id}) — by {post.author.name}',
+    'end:',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'test.md')}`);
+  const r = await b.exec('/act.feed --');
+
+  server.close();
+
+  assert(r.ok, 'for: action ran ok');
+  assert(r.content.includes('First Post'), 'first item rendered');
+  assert(r.content.includes('Second Post'), 'second item rendered');
+  assert(r.content.includes('Third Post'), 'third item rendered');
+  assert(r.content.includes('by Alice'), 'nested field resolved');
+  assert(r.content.includes('by Bob'), 'nested field resolved (2)');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Response SFMD rendering: links become auto-shortcuts', async () => {
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-resp-sfmd-');
+
+  const responseBody = {
+    items: [
+      { title: 'Alpha', url: 'https://example.com/alpha' },
+      { title: 'Beta', url: 'https://example.com/beta' },
+    ],
+  };
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify(responseBody));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+
+  fs.writeFileSync(path.join(tmpDir, 'test.md'), [
+    '# SFMD Render Test',
+    '',
+    '[Existing Link](https://example.com/existing)',
+    '',
+    '```act.list',
+    `GET http://127.0.0.1:${port}/items`,
+    '```',
+    '',
+    '```act.list.response',
+    'for: item in Response.body.items',
+    '- [{item.title}]({item.url})',
+    'end:',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  const openResult = await b.exec(`/open ${path.join(tmpDir, 'test.md')}`);
+  assert(openResult.content.includes('@existing-link'), 'existing link auto-shortcut present');
+
+  const r = await b.exec('/act.list --');
+  server.close();
+
+  assert(r.ok, 'response SFMD action ran ok');
+  assert(r.content.includes('@alpha'), 'response link became auto-shortcut');
+  assert(r.content.includes('@beta'), 'response link became auto-shortcut (2)');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});

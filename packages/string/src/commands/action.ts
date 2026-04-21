@@ -186,13 +186,20 @@ export async function executeAction(
       resolvedBody,
     );
 
-    // If action has a response template, execute it. The template is the
-    // canonical place for response-shape concerns: variable extraction,
-    // file save (save:/decode:/to:), and rendered output. Pass the action's
-    // payload so directives like `to: {filename}` can substitute fields.
+    // If action has a response template, execute it. The template output
+    // is treated as SFMD source: resolved + rendered so that any markdown
+    // links in the output become auto-shortcuts the agent can follow with
+    // /open @slug. Shortcuts are MERGED into the session (not replaced),
+    // preserving the index.md's nav/actions/shortcuts so the agent can
+    // still call other actions after reading a response.
     if (action.responseTemplate) {
-      const output = executeResponseTemplate(action.responseTemplate, actionResult, session, payload);
-      return ok(output);
+      const sfmdSource = executeResponseTemplate(action.responseTemplate, actionResult, session, payload);
+      const tempDoc = await resolve(`response://${action.id}`, sfmdSource, loader);
+      const { content: rendered, autoShortcuts: newShortcuts } = await render(tempDoc, undefined, loader.home, loader);
+      const merged = new Map(session.autoShortcuts);
+      for (const [id, href] of newShortcuts) { merged.set(id, href); }
+      session.setAutoShortcuts(merged);
+      return ok(rendered);
     }
 
     // CLI: return raw output
