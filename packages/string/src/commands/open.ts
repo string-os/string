@@ -205,6 +205,19 @@ export async function cmdBack(session: Session, loader: Loader): Promise<Command
       : doc.uri;
     const { content: rendered, autoShortcuts } = await render(doc, prev.blockId, loader.home, loader);
     session.setAutoShortcuts(autoShortcuts);
+
+    // Default action on /back (same as /open)
+    const defaultAction = doc.frontmatter.default as string | undefined;
+    if (defaultAction && !prev.blockId) {
+      const action = doc.actions.find(a => a.id === defaultAction);
+      if (action) {
+        const actionResult = await executeAction(action, '', session, loader);
+        if (actionResult.ok) {
+          return ok(`Back to ${displayPath}\n---\n${rendered}\n\n---\n\n${actionResult.content}`);
+        }
+      }
+    }
+
     return ok(`Back to ${displayPath}\n---\n${rendered}`);
   } catch {
     const displayPath = prev.doc.uri.startsWith('file://')
