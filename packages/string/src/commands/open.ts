@@ -16,6 +16,7 @@ import {
   validateWorkspaceBoundary,
 } from './helpers.js';
 import { executeAction } from './action.js';
+import { deriveEnvScope } from '../env-store.js';
 import { cmdLs } from './info.js';
 
 // ─── /open ────────────────────────────────────────────────────────────────────
@@ -136,6 +137,26 @@ export async function cmdOpen(
     const { content: rendered, autoShortcuts } = await render(doc, blockId, loader.home, loader);
     session.setAutoShortcuts(autoShortcuts);
 
+    // Check frontmatter `requires: [VAR1, VAR2]` — warn about missing env vars
+    const requires = doc.frontmatter.requires as string[] | undefined;
+    let requiresWarning = '';
+    if (requires && Array.isArray(requires) && !blockId) {
+      const envScope = deriveEnvScope(session.name);
+      const missing = requires.filter(name => {
+        if (loader.envStore.get(name, envScope) !== undefined) return false;
+        if (process.env[name] !== undefined) return false;
+        return true;
+      });
+      if (missing.length > 0) {
+        requiresWarning = '\n\n[!] Missing required environment variable' +
+          (missing.length > 1 ? 's' : '') + ': ' +
+          missing.map(n => `$${n}`).join(', ') + '\n' +
+          'Set ' + (missing.length > 1 ? 'them' : 'it') + ' with: ' +
+          missing.map(n => `/set ${n} <value>`).join(', ') +
+          '\nSee setup instructions in this document.';
+      }
+    }
+
     // Default action: auto-execute if frontmatter declares one
     const defaultAction = doc.frontmatter.default as string | undefined;
     if (defaultAction && !blockId) {
@@ -143,12 +164,12 @@ export async function cmdOpen(
       if (action) {
         const actionResult = await executeAction(action, '', session, loader);
         if (actionResult.ok) {
-          return ok(`Opened ${openLabel}\n---\n${rendered}\n\n---\n\n${actionResult.content}`);
+          return ok(`Opened ${openLabel}\n---\n${rendered}${requiresWarning}\n\n---\n\n${actionResult.content}`);
         }
       }
     }
 
-    return ok(`Opened ${openLabel}\n---\n${rendered}`);
+    return ok(`Opened ${openLabel}\n---\n${rendered}${requiresWarning}`);
   } catch (e) {
     if (e instanceof StringError) {
       // Add recovery hints for common errors

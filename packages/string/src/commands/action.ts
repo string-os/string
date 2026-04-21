@@ -175,6 +175,35 @@ export async function executeAction(
     resolvedBody = resolveEnvVars(resolvedBody, loader, envScope, extraEnv);
   }
 
+  // Detect unresolved $VAR before sending HTTP requests. A literal $NAME
+  // in the resolved URI, headers, or body means an env var was declared
+  // but never set. Catch it here with a clear message instead of letting
+  // the remote server reject a malformed request.
+  // CLI actions are exempt — $VAR in a shell command is normal shell usage.
+  if (!isCli) {
+  const unresolvedVarRe = /\$([A-Z_][A-Z0-9_]*)/g;
+  const unresolvedVars = new Set<string>();
+  for (const m of resolvedUri.matchAll(unresolvedVarRe)) unresolvedVars.add(m[1]);
+  for (const v of Object.values(resolvedHeaders)) {
+    for (const m of v.matchAll(unresolvedVarRe)) unresolvedVars.add(m[1]);
+  }
+  if (resolvedBody) {
+    for (const m of resolvedBody.matchAll(unresolvedVarRe)) unresolvedVars.add(m[1]);
+  }
+  if (unresolvedVars.size > 0) {
+    const names = [...unresolvedVars];
+    const list = names.map(n => `  $${n}`).join('\n');
+    return err(
+      `Unresolved environment variable${names.length > 1 ? 's' : ''}:\n${list}\n\n` +
+      `Set ${names.length > 1 ? 'them' : 'it'} with:\n` +
+      names.map(n => `  /set ${n} <value>`).join('\n') + '\n' +
+      `Or export in the shell that runs stringd:\n` +
+      names.map(n => `  export ${n}=...`).join('\n'),
+      'INVALID_PAYLOAD',
+    );
+  }
+  } // end !isCli
+
   // Execute the action
   try {
     const actionResult = await loader.action(

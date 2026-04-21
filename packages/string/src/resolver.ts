@@ -162,12 +162,12 @@ function parseFrontmatter(source: string): Record<string, unknown> {
   const result: Record<string, unknown> = {};
   const lines = match[1].split('\n');
   let currentKey: string | null = null;
-  let currentList: Array<Record<string, unknown>> | null = null;
+  let currentList: unknown[] | null = null;
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i];
 
-    // List item: "  - KEY: value" or "  - VALUE"
+    // List item: "  - KEY: value" (object entry) or "  - VALUE" (plain scalar)
     if (currentList !== null && /^\s+-\s/.test(line)) {
       const itemContent = line.replace(/^\s+-\s*/, '');
       const colonIdx = itemContent.indexOf(':');
@@ -178,7 +178,7 @@ function parseFrontmatter(source: string): Record<string, unknown> {
         entry[itemKey] = parseYamlScalar(itemValue);
         currentList.push(entry);
       } else {
-        currentList.push({ value: parseYamlScalar(itemContent.trim()) });
+        currentList.push(parseYamlScalar(itemContent.trim()));
       }
       continue;
     }
@@ -187,11 +187,11 @@ function parseFrontmatter(source: string): Record<string, unknown> {
     if (currentList !== null && /^\s{4,}\w/.test(line)) {
       const trimmed = line.trim();
       const colonIdx = trimmed.indexOf(':');
-      if (colonIdx !== -1 && currentList.length > 0) {
+      const lastEntry = currentList.length > 0 ? currentList[currentList.length - 1] : null;
+      if (colonIdx !== -1 && lastEntry && typeof lastEntry === 'object') {
         const subKey = trimmed.slice(0, colonIdx).trim();
         const subValue = trimmed.slice(colonIdx + 1).trim();
-        const lastEntry = currentList[currentList.length - 1];
-        lastEntry[subKey] = parseYamlScalar(subValue);
+        (lastEntry as Record<string, unknown>)[subKey] = parseYamlScalar(subValue);
       }
       continue;
     }
