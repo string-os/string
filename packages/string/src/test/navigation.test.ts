@@ -151,13 +151,13 @@ await section('Auto-shortcut resolution (@slug, @slug-N, @link-N)', async () => 
   // Local link should NOT be slugified (not https)
   assert(r.content.includes('(./other.md)'), 'local link unchanged');
 
-  // Auto-shortcuts should be resolvable via /open
-  const r2 = await b.exec('/open @example');
-  // Will fail to load (no server), but should NOT say "Shortcut not found"
-  assert(!r2.content.includes('Shortcut not found'), '@example resolves');
+  // Auto-shortcuts should be resolvable — use /info to verify without
+  // navigating away (which would replace autoShortcuts with the new page's)
+  const r2 = await b.exec('/info @example');
+  assert(r2.ok && r2.content.includes('https://example.com'), '@example resolves');
 
-  const r3 = await b.exec('/open @docs');
-  assert(!r3.content.includes('Shortcut not found'), '@docs resolves');
+  const r3 = await b.exec('/info @docs');
+  assert(r3.ok && r3.content.includes('https://docs.example.com'), '@docs resolves');
 
   fs.rmSync(tmpDir, { recursive: true });
 });
