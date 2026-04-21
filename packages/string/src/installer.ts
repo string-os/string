@@ -64,11 +64,28 @@ export async function installPackage(
     throw new Error(`Invalid package name: "${rawName}" — must contain [a-zA-Z0-9_-]`);
   }
 
-  // Copy to ~/.string/packages/{name}/index.md
+  // Copy to ~/.string/packages/{name}/
+  // If the source is a local file, copy all sibling .md files so multi-file
+  // apps (index.md + submolts.md + profile.md etc.) work after install.
   const packagesDir = path.join(loader.home, '.string', 'packages', name);
   await fs.mkdir(packagesDir, { recursive: true });
   const destFile = path.join(packagesDir, 'index.md');
   await fs.writeFile(destFile, loaded.source, 'utf-8');
+
+  if (loaded.uri.startsWith('file://')) {
+    const sourceDir = path.dirname(new URL(loaded.uri).pathname);
+    try {
+      const entries = await fs.readdir(sourceDir);
+      for (const entry of entries) {
+        if (entry === 'index.md') continue;
+        if (!entry.endsWith('.md')) continue;
+        const srcPath = path.join(sourceDir, entry);
+        const stat = await fs.stat(srcPath);
+        if (!stat.isFile()) continue;
+        await fs.copyFile(srcPath, path.join(packagesDir, entry));
+      }
+    } catch { /* non-local or unreadable — skip */ }
+  }
 
   // Register in config.json
   const registryType = type === 'app' ? 'apps' : 'tools';
