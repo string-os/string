@@ -383,8 +383,10 @@ export function renderActions(doc: LoadedDocument, singleId?: string): string {
           ? '\n' +
             a.fields
               .map(
-                f =>
-                  `   --${f.name} <${f.type}>${f.required ? ' (required)' : ' (optional)'}${f.description ? ' — ' + f.description : ''}`,
+                f => {
+                  const alias = f.short ? `-${f.short}, ` : '';
+                  return `   ${alias}--${f.name} <${f.type}>${f.required ? ' (required)' : ' (optional)'}${f.description ? ' — ' + f.description : ''}`;
+                },
               )
               .join('\n')
           : '\n   (no flags)';

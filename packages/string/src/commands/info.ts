@@ -219,7 +219,10 @@ export function cmdHelp(session: Session, mode?: 'bash'): CommandResult {
       // Required-fields-only signature, no method/URL — see comment in
       // renderer.renderActions for the rationale. Matches the format used
       // by the [actions] hint that the renderer prepends on /open.
-      const flags = a.fields.filter(f => f.required).map(f => `--${f.name} <${f.type}>`);
+      const flags = a.fields.filter(f => f.required).map(f => {
+        const alias = f.short ? `-${f.short}/` : '';
+        return `${alias}--${f.name} <${f.type}>`;
+      });
       const flagStr = flags.length > 0 ? ' ' + flags.join(' ') : '';
       lines.push(`/act.${a.id}${flagStr}`);
     }
