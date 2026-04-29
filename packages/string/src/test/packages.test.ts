@@ -21,15 +21,15 @@ await section('EnvStore — package registry CRUD', async () => {
   assert(Object.keys(store.listPackages('apps')).length === 0, 'listPackages empty initially');
 
   // Set
-  store.setPackage('apps', 'weather', 'file:///path/to/weather/index.md');
-  assert(store.getPackage('apps', 'weather') === 'file:///path/to/weather/index.md', 'getPackage returns set value');
+  store.setPackage('apps', 'weather', 'file:///path/to/weather/string.md');
+  assert(store.getPackage('apps', 'weather') === 'file:///path/to/weather/string.md', 'getPackage returns set value');
 
-  store.setPackage('tools', 'translate', 'file:///path/to/translate/index.md');
-  assert(store.getPackage('tools', 'translate') === 'file:///path/to/translate/index.md', 'tools registry works');
+  store.setPackage('tools', 'translate', 'file:///path/to/translate/string.md');
+  assert(store.getPackage('tools', 'translate') === 'file:///path/to/translate/string.md', 'tools registry works');
 
   // List
   const apps = store.listPackages('apps');
-  assert(apps.weather === 'file:///path/to/weather/index.md', 'listPackages includes app');
+  assert(apps.weather === 'file:///path/to/weather/string.md', 'listPackages includes app');
   assert(Object.keys(apps).length === 1, 'listPackages correct count');
 
   // Delete
@@ -91,7 +91,7 @@ await section('/install --tool — local .md file', async () => {
   assert(r.content.includes('/tool:greet'), 'output shows use hint');
 
   // Verify file was copied
-  const installedPath = path.join(tmpDir, '.string', 'packages', 'greet', 'index.md');
+  const installedPath = path.join(tmpDir, '.string', 'packages', 'greet', 'string.md');
   assert(fs.existsSync(installedPath), 'file copied to packages dir');
 
   // Verify registered in config.json
@@ -294,13 +294,13 @@ await section('resolveTool — registry fallback', async () => {
     'CLI echo "hello from registry"',
     '```',
   ].join('\n');
-  fs.writeFileSync(path.join(pkgDir, 'index.md'), toolContent);
+  fs.writeFileSync(path.join(pkgDir, 'string.md'), toolContent);
 
   // Register in config.json
   const configDir = path.join(tmpDir, '.string');
   fs.mkdirSync(configDir, { recursive: true });
   fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
-    tools: { greeter: `file://${path.join(pkgDir, 'index.md')}` },
+    tools: { greeter: `file://${path.join(pkgDir, 'string.md')}` },
   }, null, 2));
 
   const b = new Browser({ home: tmpDir });
@@ -319,7 +319,7 @@ await section('/info — app topic shows logical name, hides path', async () => 
   // Create installed app with full metadata
   const pkgDir = path.join(tmpDir, '.string', 'packages', 'weather');
   fs.mkdirSync(pkgDir, { recursive: true });
-  fs.writeFileSync(path.join(pkgDir, 'index.md'), [
+  fs.writeFileSync(path.join(pkgDir, 'string.md'), [
     '---',
     'name: "@string/weather"',
     'title: Weather App',
@@ -330,7 +330,7 @@ await section('/info — app topic shows logical name, hides path', async () => 
   ].join('\n'));
   const configDir = path.join(tmpDir, '.string');
   fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
-    apps: { weather: `file://${path.join(pkgDir, 'index.md')}` },
+    apps: { weather: `file://${path.join(pkgDir, 'string.md')}` },
   }, null, 2));
 
   const b = new Browser({ home: tmpDir });
@@ -362,7 +362,7 @@ await section('installed app — /open bare name', async () => {
   // Create an app file in packages
   const pkgDir = path.join(tmpDir, '.string', 'packages', 'myapp');
   fs.mkdirSync(pkgDir, { recursive: true });
-  fs.writeFileSync(path.join(pkgDir, 'index.md'), [
+  fs.writeFileSync(path.join(pkgDir, 'string.md'), [
     '---',
     'name: myapp',
     'type: app',
@@ -374,7 +374,7 @@ await section('installed app — /open bare name', async () => {
   // Register
   const configDir = path.join(tmpDir, '.string');
   fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
-    apps: { myapp: `file://${path.join(pkgDir, 'index.md')}` },
+    apps: { myapp: `file://${path.join(pkgDir, 'string.md')}` },
   }, null, 2));
 
   const b = new Browser({ home: tmpDir });

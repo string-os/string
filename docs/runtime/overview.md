@@ -1,3 +1,7 @@
+---
+title: String
+---
+
 # String
 
 **String is an operating system for AI.**

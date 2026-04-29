@@ -405,8 +405,16 @@ function stripFrontmatter(source: string): string {
  * Strip block markers, SFMD directive lines, and action code blocks (```act.*).
  */
 function stripAimdMarkup(source: string): string {
-  let inFencedBlock = false;
+  // Track current fence opener (char + length) — null when outside a fence.
+  // CommonMark: closing fence must use the same char and be at least as long.
+  let fence: { char: '`' | '~'; len: number } | null = null;
   let inActionBlock = false;
+
+  const matchFence = (s: string): { char: '`' | '~'; len: number; info: string } | null => {
+    const m = s.match(/^(`{3,}|~{3,})(.*)$/);
+    if (!m) return null;
+    return { char: m[1][0] as '`' | '~', len: m[1].length, info: m[2].trim() };
+  };
 
   return source
     .split('\n')
@@ -414,25 +422,35 @@ function stripAimdMarkup(source: string): string {
       const t = line.trim();
 
       // Track fenced code blocks
-      if (t.startsWith('```') || t.startsWith('~~~')) {
-        if (inFencedBlock) {
-          // Closing fence
-          if (inActionBlock) {
-            inActionBlock = false;
-            inFencedBlock = false;
-            return false;
+      const f = matchFence(t);
+      if (f) {
+        if (fence) {
+          // Inside a fence — only close if this is a matching closer:
+          // same char, length >= opener, and no info string.
+          const isCloser =
+            f.char === fence.char &&
+            f.len >= fence.len &&
+            f.info === '';
+          if (isCloser) {
+            if (inActionBlock) {
+              inActionBlock = false;
+              fence = null;
+              return false;
+            }
+            fence = null;
+            return true;
           }
-          inFencedBlock = false;
+          // Not a closer — content inside the current fence
+          if (inActionBlock) return false;
           return true;
         } else {
           // Opening fence — check for act.* info string
-          const info = t.slice(3).trim();
-          if (/^act\.[a-zA-Z0-9_-]+(?:\.response)?$/.test(info)) {
+          if (/^act\.[a-zA-Z0-9_-]+(?:\.response)?$/.test(f.info)) {
             inActionBlock = true;
-            inFencedBlock = true;
+            fence = { char: f.char, len: f.len };
             return false;
           }
-          inFencedBlock = true;
+          fence = { char: f.char, len: f.len };
           return true;
         }
       }
@@ -441,7 +459,7 @@ function stripAimdMarkup(source: string): string {
       if (inActionBlock) return false;
 
       // Inside regular fenced blocks: keep everything
-      if (inFencedBlock) return true;
+      if (fence) return true;
 
       // Block markers
       if (BLOCK_OPEN_RE.test(t) || BLOCK_CLOSE_RE.test(t)) return false;
@@ -482,8 +500,12 @@ function buildSlugMap(source: string): SlugMapResult {
   while ((match = PLAIN_LINK_RE.exec(source)) !== null) {
     const label = match[1];
     const href = match[2];
-    // Only auto-slug full URLs (https?://) or very long paths (> 40 chars)
-    const shouldSlug = href.startsWith('http://') || href.startsWith('https://') || href.length > 40;
+    // Only auto-slug full URLs (https?://), act: action shortcuts, or very long paths
+    const shouldSlug =
+      href.startsWith('http://') ||
+      href.startsWith('https://') ||
+      href.startsWith('act:') ||
+      href.length > 40;
     if (!shouldSlug) continue;
 
     const slug = toSlug(label);

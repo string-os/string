@@ -929,3 +929,280 @@ await section('Response SFMD rendering: links become auto-shortcuts', async () =
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
+
+await section('act: scheme — /open dispatches action without changing currentDoc', async () => {
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-act-scheme-');
+
+  // Mock server: /list returns 2 items, /post/:id returns post detail
+  const server = http.createServer((req, res) => {
+    if (req.url === '/list') {
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({
+        posts: [
+          { id: 'post-aaa', title: 'Alpha post' },
+          { id: 'post-bbb', title: 'Beta post' },
+        ],
+      }));
+      return;
+    }
+    if (req.url?.startsWith('/post/')) {
+      const id = req.url.slice('/post/'.length);
+      res.writeHead(200, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ post: { id, title: `Post ${id}`, body: `Body of ${id}` } }));
+      return;
+    }
+    res.writeHead(404);
+    res.end();
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+
+  fs.writeFileSync(path.join(tmpDir, 'feed.md'), [
+    '# Feed App',
+    '',
+    '```act.list',
+    `GET http://127.0.0.1:${port}/list`,
+    '```',
+    '',
+    '```act.list.response',
+    'for: p in Response.body.posts',
+    '- [{p.title}](act:read?id={p.id})',
+    'end:',
+    '```',
+    '',
+    '```act.read',
+    `GET http://127.0.0.1:${port}/post/{id}`,
+    '  id: string (required)',
+    '```',
+    '',
+    '```act.read.response',
+    '{title} = {Response.body.post.title}',
+    '{body} = {Response.body.post.body}',
+    '## {title}',
+    '',
+    '{body}',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'feed.md')}`);
+
+  const list = await b.exec('/act.list --');
+  assert(list.ok, 'list ran ok');
+  assert(list.content.includes('@alpha-post'), 'alpha shortcut from act: link');
+  assert(list.content.includes('@beta-post'), 'beta shortcut from act: link');
+
+  // /open @alpha-post should dispatch act.read --id post-aaa
+  const drilled = await b.exec('/open @alpha-post');
+  assert(drilled.ok, '/open @shortcut dispatched action ok');
+  assert(drilled.content.includes('Post post-aaa'), 'response body rendered');
+  assert(drilled.content.includes('Body of post-aaa'), 'body content rendered');
+
+  // currentDoc should still be feed.md (not loaded a new doc)
+  const info = await b.exec('/info');
+  assert(info.content.includes('feed.md'), 'currentDoc unchanged after act: dispatch');
+
+  // Other shortcut still navigable from same context
+  const drilled2 = await b.exec('/open @beta-post');
+  assert(drilled2.ok, 'second drill-in works');
+  assert(drilled2.content.includes('Body of post-bbb'), 'second post body rendered');
+
+  server.close();
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Positional args — single required field', async () => {
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-positional-1-');
+
+  const server = http.createServer((req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end(req.url ?? '');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const port = (server.address() as { port: number }).port;
+
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '# App',
+    '',
+    '```act.fetch',
+    `GET http://127.0.0.1:${port}/{city}`,
+    '  city: string (required) "City"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+
+  const r1 = await b.exec('/act.fetch Seoul');
+  assert(r1.ok, 'positional value works');
+  assert(r1.content.includes('/Seoul'), 'city bound from positional');
+
+  const r2 = await b.exec('/act.fetch --city Tokyo');
+  assert(r2.ok, 'flag still works');
+  assert(r2.content.includes('/Tokyo'), 'city bound from flag');
+
+  server.close();
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Positional args — multi required, declaration order', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-positional-multi-');
+
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '# App',
+    '',
+    '```act.greet',
+    'CLI echo "{greeting} {name}"',
+    '  greeting: string (required) "Greeting"',
+    '  name: string (required) "Name"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+
+  const r1 = await b.exec('/act.greet hello world');
+  assert(r1.ok, 'two positional ok');
+  assert(r1.content.includes('hello world'), 'declaration order respected');
+
+  // Mix positional + flag (positional fills first unfilled required)
+  const r2 = await b.exec('/act.greet --name alice hi');
+  assert(r2.ok, 'mixed positional+flag ok');
+  assert(r2.content.includes('hi alice'), 'positional skipped already-filled field');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Positional args — too many → error', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-positional-overflow-');
+
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '# App',
+    '',
+    '```act.echo',
+    'CLI echo "{msg}"',
+    '  msg: string (required) "Message"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+
+  const r = await b.exec('/act.echo hello world extra');
+  assert(!r.ok, 'too many positional rejected');
+  assert(r.content.toLowerCase().includes('too many'), 'error message mentions too many');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Positional args — -- separator allows leading dash values', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-positional-sep-');
+
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '# App',
+    '',
+    '```act.search',
+    'CLI echo "{q}"',
+    '  q: string (required) "Query"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+
+  const r = await b.exec('/act.search -- --weird-query');
+  assert(r.ok, '-- separator passes leading-dash value');
+  assert(r.content.includes('--weird-query'), 'leading-dash query preserved');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Positional args — --key=value form', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-positional-eq-');
+
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '# App',
+    '',
+    '```act.fetch',
+    'CLI echo "{city}"',
+    '  city: string (required)',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+
+  const r = await b.exec('/act.fetch --city=Seoul');
+  assert(r.ok, '--key=value form works');
+  assert(r.content.includes('Seoul'), 'value extracted from --key=value');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Positional args — optional fields bind in declaration order', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-positional-optional-');
+
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '# App',
+    '',
+    '```act.fetch',
+    'CLI echo "{city} days={days}"',
+    '  city: string (required)',
+    '  days: number "Days" = "3"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+
+  // Single positional → city only; days uses default
+  const r1 = await b.exec('/act.fetch Seoul');
+  assert(r1.ok, 'single positional with optional default');
+  assert(r1.content.includes('Seoul days=3'), 'days defaulted when no second positional');
+
+  // Two positionals → both bind in declaration order, including the optional
+  const r2 = await b.exec('/act.fetch Seoul 5');
+  assert(r2.ok, 'second positional binds to optional field');
+  assert(r2.content.includes('Seoul days=5'), 'days set via positional');
+
+  // Mix positional + --days flag — flag wins, no second positional permitted
+  const r3 = await b.exec('/act.fetch Tokyo --days 7');
+  assert(r3.ok, 'positional + optional flag ok');
+  assert(r3.content.includes('Tokyo days=7'), 'optional set via flag');
+
+  // Three positionals → overflow (only two fields declared)
+  const r4 = await b.exec('/act.fetch Seoul 1 extra');
+  assert(!r4.ok, 'overflow rejected when more positionals than fields');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('act: scheme — error cases', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-act-err-');
+
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '# App',
+    '',
+    '```act.known',
+    'CLI echo "ok"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+
+  // Unknown action via act: scheme
+  const r1 = await b.exec('/open act:unknown?id=x');
+  assert(!r1.ok, 'unknown action errors');
+  assert(r1.content.toLowerCase().includes('action not found'), 'error mentions action not found');
+
+  // Missing action id
+  const r2 = await b.exec('/open act:?id=x');
+  assert(!r2.ok, 'empty action id errors');
+  assert(r2.content.toLowerCase().includes('missing action'), 'error mentions missing id');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});

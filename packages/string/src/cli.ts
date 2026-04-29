@@ -209,6 +209,8 @@ String v0.1
 Usage:
   string <topic> '<body>'              Execute command on topic
   string <topic>                       Interactive REPL
+  string '<body>'                      Command without topic (uses file:main, or
+                                       derives topic from /open app:X targets)
   string --daemon [start|stop|status]   Daemon management
   string --help                         This help
 
@@ -217,6 +219,8 @@ Examples:
   string file:main '/open ./doc.md'
   string web:docs '/open https://developer.mozilla.org'
   string app:weather                    # enters REPL
+  string '/open app:weather'            # topic auto-derived → app:weather
+  string '/install --app ./foo.md'      # default topic → file:main
 
 Flags:
   --json      JSON envelope output (suppresses ChanFlow)
@@ -258,17 +262,29 @@ if (daemon) {
 } else if (positional.length === 0) {
   printUsage();
 } else {
-  // First positional = topic, rest = body
-  const rawTopic = positional[0];
-  const parsed = parseTopic(rawTopic);
-
-  if (!parsed) {
-    process.stderr.write(`string: invalid topic: ${rawTopic}\n`);
-    process.exit(1);
+  // If the first positional starts with '/', treat the whole thing as a
+  // command body. Default topic is `file:main`. For `/open app:X` or
+  // `/open tool:X`, derive topic from the target so app-scoped env (like
+  // $API_KEY) resolves correctly without forcing the user to type the
+  // topic twice.
+  let topic: string;
+  let body: string;
+  if (positional[0].startsWith('/')) {
+    body = positional.join(' ');
+    let derived = 'file:main';
+    const openMatch = body.match(/^\/open\s+(app:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)?|tool:[a-zA-Z0-9_-]+)\b/);
+    if (openMatch) derived = openMatch[1];
+    topic = derived;
+  } else {
+    const rawTopic = positional[0];
+    const parsed = parseTopic(rawTopic);
+    if (!parsed) {
+      process.stderr.write(`string: invalid topic: ${rawTopic}\n`);
+      process.exit(1);
+    }
+    topic = topicToString(parsed);
+    body = positional.slice(1).join(' ');
   }
-
-  const topic = topicToString(parsed);
-  const body = positional.slice(1).join(' ');
 
   const run = body
     ? execOneShot(topic, body, json)

@@ -1,3 +1,7 @@
+---
+title: Packages
+---
+
 # Packages
 
 패키지는 String에서 앱과 도구를 배포하는 단위다.
@@ -12,9 +16,9 @@
 ├── config.json                    # 전역 설정 + 패키지 레지스트리
 ├── packages/                      # 설치된 패키지 파일
 │   ├── weather/
-│   │   └── index.md               # 앱 엔트리포인트
+│   │   └── string.md               # 앱 엔트리포인트
 │   └── gmail/
-│       └── index.md
+│       └── string.md
 └── apps/                          # 앱별 persistent state ($var)
     ├── weather/
     │   └── env.json               # app:weather의 $var
@@ -30,7 +34,7 @@
 
 | 디렉토리 | 내용 | 예시 |
 |-----------|------|------|
-| `packages/{name}/` | 패키지 소스 (문서 파일) | `index.md`, 멀티페이지 앱의 하위 `.md` |
+| `packages/{name}/` | 패키지 소스 (문서 파일) | `string.md`, 멀티페이지 앱의 하위 `.md` |
 | `apps/{name}/` | 런타임 상태 (`$var`) | `env.json` — 토큰, 설정값 등 |
 | `config.json` | 전역 레지스트리 + 전역 `$var` | 어떤 앱/도구가 설치되어 있는지 |
 
@@ -47,11 +51,11 @@
 ```json
 {
   "apps": {
-    "weather": "file:///home/user/.string/packages/weather/index.md",
-    "gmail": "file:///home/user/.string/packages/gmail/index.md"
+    "weather": "file:///home/user/.string/packages/weather/string.md",
+    "gmail": "file:///home/user/.string/packages/gmail/string.md"
   },
   "tools": {
-    "translate": "file:///home/user/.string/packages/translate/index.md"
+    "translate": "file:///home/user/.string/packages/translate/string.md"
   },
   "env": {
     "LANG": "ko",
@@ -83,7 +87,7 @@
 **동작:**
 1. 소스 문서를 로드 (로컬 파일 또는 HTTP)
 2. frontmatter에서 `name`과 `type` 파싱
-3. `~/.string/packages/{name}/index.md`로 복사
+3. `~/.string/packages/{name}/string.md`로 복사
 4. `config.json`에 레지스트리 등록
 
 **타입 판별 우선순위:**
@@ -145,7 +149,7 @@
 
 ```
 packages/weather/
-└── index.md
+└── string.md
 ```
 
 ```markdown
@@ -169,15 +173,15 @@ CLI curl -s "wttr.in/{city}?format=%l:+%c+%t"
 
 ```
 packages/gmail/
-├── index.md           # 엔트리포인트 (inbox)
+├── string.md           # 엔트리포인트 (inbox)
 ├── compose.md         # 메일 작성
 ├── thread.md          # 쓰레드 보기
 └── nav/
     └── main.md        # 네비게이션 메뉴
 ```
 
-`index.md`가 항상 엔트리포인트. `app:gmail`로 접근하면
-`index.md`가 열린다. 내부에서 `/open compose.md` 등으로
+`string.md`가 항상 엔트리포인트. `app:gmail`로 접근하면
+`string.md`가 열린다. 내부에서 `/open compose.md` 등으로
 다른 페이지로 이동.
 
 ---
@@ -254,7 +258,7 @@ env:                                 # 필요한 환경변수 선언
 ### Weather 앱
 
 ```bash
-# 설치 (또는 직접 ~/.string/packages/weather/index.md에 배치)
+# 설치 (또는 직접 ~/.string/packages/weather/string.md에 배치)
 /install --app ./weather.md
 
 # 사용
@@ -266,7 +270,7 @@ string app:weather '/act.forecast --city "London"'
 
 ```bash
 # 직접 배치
-~/.string/packages/gmail/index.md
+~/.string/packages/gmail/string.md
 
 # 사용
 string app:gmail '/act.profile'

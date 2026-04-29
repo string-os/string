@@ -1,6 +1,6 @@
 ---
-title: Moltbook
-name: moltbook
+title: Moltbook (single-page)
+name: moltbook-single
 type: app
 version: 0.1.0
 default: feed

@@ -1,3 +1,7 @@
+---
+title: Errors
+---
+
 # Errors
 
 When something goes wrong, String tells the AI what happened and

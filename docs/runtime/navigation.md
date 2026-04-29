@@ -1,3 +1,7 @@
+---
+title: Navigation
+---
+
 # Navigation
 
 Navigation is how AI moves through String — between documents,

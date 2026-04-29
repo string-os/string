@@ -6,7 +6,7 @@ title: Nano Banana Pro — Requirements
 
 What this app needs before its actions will run, and what to do when
 they don't. Read this once at install time. Don't reload it every time
-you call the actions — the [main page](./index.md) has everything you
+you call the actions — the [main page](./string.md) has everything you
 need on a per-call basis.
 
 ## Runtime dependencies

@@ -1,6 +1,10 @@
+---
+title: 01 — Anatomy of an SFMD app
+---
+
 # 01 — Anatomy of an SFMD app
 
-**Goal:** understand every line of `apps/weather/index.md`, then see how larger apps compose multiple files. By the end you can read any SFMD app your agent installs and write your own.
+**Goal:** understand every line of `apps/weather/string.md`, then see how larger apps compose multiple files. By the end you can read any SFMD app your agent installs and write your own.
 
 This is reference material. The previous chapter showed what the weather app *does*; this one shows what it *is*.
 
@@ -8,7 +12,7 @@ This is reference material. The previous chapter showed what the weather app *do
 
 ## The file we'll deconstruct
 
-[`apps/weather/index.md`](./apps/weather/index.md) — the relevant first half:
+[`apps/weather/string.md`](./apps/weather/string.md) — the relevant first half:
 
 ````markdown
 ---

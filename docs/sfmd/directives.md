@@ -1,3 +1,7 @@
+---
+title: Directives
+---
+
 # Directives
 
 Directives are metadata declarations that use Markdown link syntax.

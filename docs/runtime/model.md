@@ -1,3 +1,7 @@
+---
+title: The Model
+---
+
 # The Model
 
 String has two layers: a **context layer** and an **action layer**.

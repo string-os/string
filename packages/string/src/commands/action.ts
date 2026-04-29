@@ -50,6 +50,34 @@ export async function executeAction(
     return ok(`Action: ${action.id}`);
   }
 
+  // Bind positional operands to fields in declaration order
+  // (GNU/POSIX-style: `/act.forecast Seoul 1` is equivalent to
+  // `/act.forecast --city Seoul --days 1`). Both required and optional
+  // fields can receive positional values — this matches how real CLIs
+  // document signatures like `<city> [days]`. A field that has already
+  // been set by `--flag value` is skipped.
+  //
+  // If the action declares no fields at all, leave `rest` untouched: tools
+  // like `CLI echo $ARGS` rely on the raw arg string passing through, and
+  // positional binding would steal those tokens.
+  if (parsed.rest.length > 0 && action.fields.length > 0) {
+    const unfilled = action.fields.filter(f => !(f.name in parsed.flags));
+    if (parsed.rest.length > unfilled.length) {
+      const names = action.fields.map(f => f.name).join(', ');
+      return err(
+        `Too many positional arguments for /act.${action.id}.\n` +
+        `Expected up to ${unfilled.length} positional value${unfilled.length === 1 ? '' : 's'}` +
+        ` (field${action.fields.length === 1 ? '' : 's'}: ${names || 'none'})` +
+        `, got ${parsed.rest.length}.\n` +
+        `Use -- to pass values that start with '-'.`,
+        'INVALID_PAYLOAD',
+      );
+    }
+    for (let i = 0; i < parsed.rest.length; i++) {
+      parsed.flags[unfilled[i].name] = parsed.rest[i];
+    }
+  }
+
   // Reject bare flags (e.g. `--city` with no following value) for non-boolean
   // fields. Without this, `--city` alone would silently parse as `city=true`
   // and reach the action's template as the literal string "true", producing
@@ -225,7 +253,7 @@ export async function executeAction(
     // is treated as SFMD source: resolved + rendered so that any markdown
     // links in the output become auto-shortcuts the agent can follow with
     // /open @slug. Shortcuts are MERGED into the session (not replaced),
-    // preserving the index.md's nav/actions/shortcuts so the agent can
+    // preserving the app's string.md nav/actions/shortcuts so the agent can
     // still call other actions after reading a response.
     if (action.responseTemplate) {
       const sfmdSource = executeResponseTemplate(action.responseTemplate, actionResult, session, payload);

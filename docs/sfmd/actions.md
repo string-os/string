@@ -1,3 +1,7 @@
+---
+title: Actions
+---
+
 # Actions
 
 Actions define executable operations within a document. They are
@@ -341,10 +345,19 @@ human) what the action looks like when invoked.
 
 ```markdown
 `/act.search_city --name "{City Name}"`
+`/act.search_city "{City Name}"`
 ```
 
-Invocation hints are conventional, not parsed. They serve as
-documentation within the document.
+Both forms are valid. Bare values (no leading `-`) bind to the
+action's required fields in declaration order; `--name value`,
+`--name=value`, and short aliases (`-n value`) are also accepted.
+A bare `--` ends option processing — anything after it is positional
+even if it starts with `-`.
+
+Invocation hints are conventional, not parsed by the SFMD format
+itself. They serve as documentation within the document. Runtime
+binding rules are described in the [runtime actions](../runtime/actions.md)
+guide.
 
 ---
 

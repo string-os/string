@@ -1,3 +1,7 @@
+---
+title: Why String
+---
+
 # Why String
 
 ## AI doesn't have an operating system

@@ -1,3 +1,7 @@
+---
+title: The AI Loop
+---
+
 # The AI Loop
 
 This section shows what it actually looks like when an AI agent uses

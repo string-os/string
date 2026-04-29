@@ -86,7 +86,7 @@ export class Browser {
 
   /**
    * Execute a command string against a session.
-   * @param command      e.g. "/open index.md" or "/nav main"
+   * @param command      e.g. "/open string.md" or "/nav main"
    * @param sessionName  session name (default: active session)
    * @param topicType   topic scheme — bash topics use // for meta-commands
    */

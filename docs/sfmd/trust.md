@@ -1,3 +1,7 @@
+---
+title: Trust and Execution (SFMD v0.1)
+---
+
 # Trust and Execution (SFMD v0.1)
 
 **Status:** Informative. This document describes the trust and execution model used by the reference runtime, [String](https://github.com/string-os/string). It is not part of the SFMD format specification. Other runtimes may implement different models.

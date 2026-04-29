@@ -1,3 +1,7 @@
+---
+title: 04 — Porting Nano Banana Pro to a string app
+---
+
 # 04 — Porting Nano Banana Pro to a string app
 
 **Goal:** take a real skill from the wild — [@steipete](https://clawhub.ai/steipete/nano-banana-pro)'s `nano-banana-pro` Codex skill on ClawHub — and port it to an SFMD app the agent uses natively. About 20 minutes if you follow along.
@@ -229,14 +233,14 @@ Modifiers compose. `{name|file}` reads a file as UTF-8. `{name|base64}` base64-e
 
 ## Step 6: Write the body
 
-The action blocks are the machinery. The `index.md` body is what the agent reads when it `/open`s the app — the place to surface the two things the agent needs *every call*:
+The action blocks are the machinery. The `string.md` body is what the agent reads when it `/open`s the app — the place to surface the two things the agent needs *every call*:
 
 1. **A 1-line example for each action.** Copy-paste-ready, with realistic prompts and filenames. This eliminates a `/act --help` round-trip on the first call.
 2. **Per-call default rules.** Resolution rule of thumb, filename pattern, prompt-handling guidance. The things the agent should apply without thinking.
 
-Setup concerns (API key, dependencies, common failures, what the app *isn't*) go into a sibling `REQUIREMENTS.md`, not into the main `index.md`. The agent reads `REQUIREMENTS.md` once at install time; everything in `index.md` is loaded on every `/open`. Keeping the per-call surface tight saves prompt tokens on every call.
+Setup concerns (API key, dependencies, common failures, what the app *isn't*) go into a sibling `REQUIREMENTS.md`, not into the main `string.md`. The agent reads `REQUIREMENTS.md` once at install time; everything in `string.md` is loaded on every `/open`. Keeping the per-call surface tight saves prompt tokens on every call.
 
-The full body for `nano-banana-pro` is in [`apps/nano-banana-pro/index.md`](./apps/nano-banana-pro/index.md) — about 50 lines including the action blocks. The whole file is the single source of truth for the app, and it's what gets installed.
+The full body for `nano-banana-pro` is in [`apps/nano-banana-pro/string.md`](./apps/nano-banana-pro/string.md) — about 50 lines including the action blocks. The whole file is the single source of truth for the app, and it's what gets installed.
 
 ---
 
@@ -298,7 +302,7 @@ The result, every time, is a single SFMD file with no helper scripts, no languag
 git clone https://github.com/string-os/cookbook.git
 cd cookbook
 export GEMINI_API_KEY=...   # https://aistudio.google.com/apikey
-string file:setup '/install --app ./apps/nano-banana-pro/index.md'
+string file:setup '/install --app ./apps/nano-banana-pro/string.md'
 string app:nano-banana-pro '/open app:nano-banana-pro'
 string app:nano-banana-pro '/act.generate --prompt "a vintage red bicycle leaning against a stone wall" --filename bike.png'
 ```

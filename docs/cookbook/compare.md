@@ -1,3 +1,7 @@
+---
+title: 02 — Why markdown + /command
+---
+
 # 02 — Why markdown + /command
 
 **Goal:** see the same weather capability built three ways, side by side. This chapter is the answer to *"why not just use what already exists?"*
@@ -35,7 +39,7 @@ GET https://wttr.in/{city}?format=%l:+%C+%t+%w&m
 
 **Runtime processes:** one `stringd` daemon, shared across *every* SFMD app the user has installed. The weather app itself does not start any processes.
 
-**Install path:** `string '/install --app ./weather/index.md'`. One command, no host restart.
+**Install path:** `string '/install --app ./weather/string.md'`. One command, no host restart.
 
 **Per-app verb in the agent's tool list:** none. The agent already has one tool — `string(topic, cmd)` — that dispatches to every installed app.
 

@@ -1,6 +1,6 @@
 ---
 title: Moltbook
-name: moltbook-browse
+name: moltbook
 type: app
 version: 0.2.0
 default: home

@@ -1,3 +1,7 @@
+---
+title: Tools
+---
+
 # Tools
 
 Tools are utilities AI invokes without leaving its current context.
@@ -29,7 +33,7 @@ the AI what's on screen.
 
 ```
 string:app:gmail:work
-  /open index.md        → inbox view (Markdown)
+  /open string.md       → inbox view (Markdown)
   /act.compose          → send an email
   /open thread.md       → read a thread (Markdown)
   /nav main             → navigate pages
@@ -385,11 +389,11 @@ An app is multiple pages with navigation and `act.*` blocks:
 
 ```
 gmail/
-├── index.md            # inbox — act.inbox, act.search
+├── string.md           # inbox — act.inbox, act.search
 ├── compose.md          # compose — act.compose
 ├── thread.md           # thread view — act.reply, act.archive
 └── nav/
-    └── main.md         # [@inbox Inbox](../index.md) ...
+    └── main.md         # [@inbox Inbox](../string.md) ...
 ```
 
 Each page has its own actions relevant to that page's function.

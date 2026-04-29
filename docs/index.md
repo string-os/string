@@ -1,50 +1,42 @@
-# String — An OS for AI
+---
+title: String Documentation
+---
 
-String gives AI agents a single, consistent interface to apps, documents, websites, APIs, and files.
+# String Documentation
 
-Everything is Markdown. Every action is a command. New capabilities come from new documents, not new code.
+## Getting Started
 
-## Get Started
+- [Quick Start](./start/quickstart.md) — install and run your first app in 5 minutes
+- [Showcase](./start/showcase.md) — example apps with demo output
+- [Agent Integration](./start/agent-integration.md) — connect String to your agent framework
 
-```bash
-npm install -g @string-os/string
-string file:main '/open ./README.md'
-```
+## Build String Apps
 
-That's it. `string` is a normal CLI once installed. See the [Quick Start](./quickstart.md) for the full walkthrough.
+- [Writing Apps](./build/writing-apps.md) — turn any API into a String App
 
-## Learn More
+## Cookbook
 
-- [Quick Start](./quickstart.md) — up and running in 5 minutes
-- [Agent Integration](./agent-integration.md) — CLI, MCP, and library usage
-- [Writing Skills](./writing-skills.md) — create tools and apps as Markdown files
+- [Weather](./cookbook/weather.md) — simplest example, start here
+- [Anatomy](./cookbook/anatomy.md) — how an SFMD app is structured
+- [Compare](./cookbook/compare.md) — MCP vs Function Calling vs String
+- [Client Library](./cookbook/client-library.md) — embed String in your framework
+- [Porting](./cookbook/porting.md) — port a real API to a String App
 
-## Key Ideas
+## SFMD Specification
 
-**SFMD (String Flavored Markdown)** extends CommonMark with navigation, actions, and block addressing — while remaining 100% compatible with any Markdown viewer.
+- [Overview](./sfmd/overview.md) — the format, why it exists
+- [Frontmatter](./sfmd/frontmatter.md), [Blocks](./sfmd/blocks.md), [Directives](./sfmd/directives.md), [Shortcuts](./sfmd/shortcuts.md), [Actions](./sfmd/actions.md), [Variables](./sfmd/variables.md)
+- [Trust Model](./sfmd/trust.md)
 
-**Two primitives** cover nearly everything:
-- `/open` — see something
-- `/act` — do something
+## Runtime
 
-**Four integration paths** share the same core:
-- **CLI** — `string file:main '/open doc.md'`
-- **MCP Server** — plug into Claude Desktop or any MCP-compatible agent
-- **In-process library** — `import { Browser } from '@string-os/string'`
-- **Daemon client** — `import { exec } from '@string-os/client'` (any Node.js program; other languages via the [stringd protocol](./stringd-protocol-v0.1.md))
+- [Overview](./runtime/overview.md) — how String works
+- [Actions](./runtime/actions.md), [State](./runtime/state.md), [Navigation](./runtime/navigation.md), [Topics](./runtime/topics.md)
+- [Tools](./runtime/tools.md), [Packages](./runtime/packages.md), [Editing](./runtime/editing.md)
+- [Shell](./runtime/shell.md), [Errors](./runtime/errors.md)
 
-## Packages
+## Reference
 
-| Package | npm |
-|---------|-----|
-| `@string-os/core` | SFMD parser and extractor |
-| `@string-os/compiler` | Document compiler and validator |
-| `@string-os/client` | HTTP/SSE client for stringd (standalone, no deps) |
-| `@string-os/string` | Runtime + daemon + CLI |
-| `@string-os/string-mcp` | MCP server |
-
-## Links
-
-- [GitHub Repository](https://github.com/string-os/string)
-- [SFMD Specification](https://github.com/string-os/sfmd)
-- [Cookbook](https://github.com/string-os/cookbook)
+- [Protocol](./reference/protocol.md) — stringd HTTP/SSE API
+- [Transport](./reference/transport.md) — message structure
+- [Response Format](./reference/response-format.md)

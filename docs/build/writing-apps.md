@@ -1,3 +1,7 @@
+---
+title: Writing Skills
+---
+
 # Writing Skills
 
 A skill is a single SFMD (`.md`) file that defines actions an AI agent can execute. Skills are the primary way to extend String's capabilities.

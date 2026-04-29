@@ -1,3 +1,7 @@
+---
+title: Shortcuts
+---
+
 # Shortcuts
 
 Shortcuts are named references that give stable, short identifiers
@@ -278,6 +282,99 @@ Stay on [Home](./index.md).
 
 ---
 
+## Action shortcuts (`act:` scheme)
+
+Shortcuts can point to action invocations instead of documents.
+The `act:` URI scheme tells the runtime to dispatch the action
+on the current document instead of loading a new page.
+
+### Syntax
+
+```
+act:<action-id>
+act:<action-id>?<key>=<value>&<key>=<value>...
+```
+
+The action id matches an `act.<id>` block on the document holding
+the shortcut. Query parameters become the action's `--key value`
+flags.
+
+### Author writes
+
+```markdown
+[Read post]({act-url})
+
+for: post in Response.body.posts
+- [{post.title}](act:read?id={post.id}) — by {post.author.name}
+end:
+```
+
+After auto-shortcut assignment, the AI sees:
+
+```markdown
+- [I have started treating...][@link-1] — by SparkLabScout
+- [they built a kill switch...][@link-2] — by pyclaw001
+```
+
+### Dispatch
+
+When the AI runs `/open @link-1`, the runtime:
+
+1. Resolves the shortcut → `act:read?id=861040aa-...`
+2. Sees the `act:` scheme — does NOT fetch a document
+3. Looks up `act.read` on the current document
+4. Parses query string → `--id "861040aa-..."`
+5. Executes the action and renders its response template
+
+The session's `currentDoc` is unchanged. The agent stays on the
+same page (e.g. the feed) and can follow other shortcuts in the
+same list without re-fetching.
+
+### Why this matters
+
+A SPA URL like `https://app.example.com/post/X` is rendered for
+humans (JavaScript hydrates the content). An agent fetching it
+gets the loading shell.
+
+The right primitive for "read this thing" is the **action** that
+calls the API and returns structured content — `act.read` in the
+example above.
+
+`act:` URI scheme lets templates output one-click drill-in links
+without forcing the AI to type the full action call. The list
+shortcut and the action invocation become a single primitive:
+follow the link, get the result.
+
+### Comparison
+
+| Pattern | Shortcut value | What `/open @link-1` does |
+|---------|---------------|---------------------------|
+| `[t](https://example.com/x)` | URL | HTTP fetch, currentDoc replaced |
+| `[t](file:///path.md)` | local path | File load, currentDoc replaced |
+| `[t](act:read?id=X)` | action call | **Dispatch action, currentDoc unchanged** |
+
+### Rules
+
+- The action MUST be defined on the document where `/open` runs.
+  If the agent navigates to a sub-page that doesn't define the
+  action, dispatch fails with `Action not found`.
+- Query keys map to action field names (`--<key> "<value>"`).
+- Values are URL-decoded before substitution.
+- No fragment (`#block`) — `act:` URLs don't refer to documents.
+- The `currentDoc` does not change. Auto-shortcuts from the prior
+  rendering remain valid (drill-in patterns stay navigable).
+
+### Errors
+
+| Condition | Error |
+|-----------|-------|
+| No document open | `Cannot dispatch action: no document open.` |
+| Missing action id | `act: URI missing action id` |
+| Unknown action | `Action not found: "<id>"` |
+| Required field missing | Standard action validation error |
+
+---
+
 ## Uniqueness
 
 - Inline shortcut IDs MUST be unique within a document.
@@ -318,3 +415,4 @@ directly to that menu. No priority lookup is needed.
 12. Non-sluggable fallback: `@link-N` (reserved prefix, global counter).
 13. Resolution order: inline > auto > menu.
 14. In CommonMark viewers, both forms render as standard links.
+15. `act:<action-id>?<key>=<value>` URLs dispatch actions on `/open` without changing `currentDoc`.

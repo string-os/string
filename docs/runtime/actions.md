@@ -1,3 +1,7 @@
+---
+title: Actions
+---
+
 # Actions
 
 Actions are how AI does things through String — calling APIs, running
@@ -167,18 +171,69 @@ declared `-H` headers are sent. This is standard REST behavior.
 
 ## Invocation syntax
 
-All actions use POSIX CLI syntax:
+Actions follow GNU/POSIX CLI conventions. All of the following forms
+are valid:
 
 ```
-/act.action_name --flag value --flag2 "value with spaces"
+/act.search_city --name "Seoul"
+/act.search_city --name=Seoul
+/act.search_city -n Seoul
+/act.search_city Seoul
 ```
 
-- Flags are `--name value` pairs
-- Quoted values for strings with spaces
-- Boolean flags: `--verbose` (no value = true)
-- The dot-notation (`/act.name`) is the standard form
+### Flag forms
 
-All four forms are equivalent:
+- **Long flag, separate value:** `--name value`
+- **Long flag, attached value:** `--name=value` (GNU style)
+- **Short alias:** `-n value` (when the action declares `name, -n`)
+- **Boolean long:** `--verbose` (no value = `true`)
+- **Quoted values:** `--name "value with spaces"`
+
+### Positional arguments
+
+Bare values (no leading `--` or `-`) bind to the action's **required
+fields, in declaration order**. Optional fields are never bound
+positionally — pass them by flag.
+
+For an action declared as:
+
+```
+  prompt, -p: string (required) "Image description"
+  filename, -f: string (required) "Output path"
+  resolution, -r: string "1K, 2K, or 4K" = "1K"
+```
+
+these all produce the same payload:
+
+```
+/act.generate --prompt "a serene japanese garden" --filename out.png
+/act.generate "a serene japanese garden" out.png
+/act.generate "a serene japanese garden" --filename out.png
+/act.generate -p "a serene japanese garden" -f out.png
+```
+
+A positional value never overrides a flag: if a required field has
+already been set by `--name value`, it is skipped when binding the
+remaining positionals. Passing more positionals than there are
+unfilled required fields is an error.
+
+### `--` (end of options)
+
+A bare `--` token ends option processing. Everything after it is
+treated as a positional, even if it starts with `-`. This is the
+standard POSIX escape hatch for values that look like flags:
+
+```
+/act.search -- --tricky-query
+```
+
+Here `--tricky-query` binds to the first required field rather than
+being parsed as an unknown long flag.
+
+### Action verb
+
+`/act` and `/action` are interchangeable; dot-notation and
+space-separated forms are both valid:
 
 ```
 /act.search_city --name "Seoul"
@@ -187,9 +242,8 @@ All four forms are equivalent:
 /action search_city --name "Seoul"
 ```
 
-`/act` and `/action` are interchangeable. Dot-notation and
-space-separated forms are both valid. Dot-notation is preferred
-in documentation and action hints for readability.
+Dot-notation is preferred in documentation and action hints for
+readability.
 
 ---
 
@@ -334,7 +388,7 @@ a separate `.md` file with its own actions.
 
 ```
 weather-app/
-├── index.md              # Home — search action
+├── string.md             # Home — search action
 ├── forecast.md           # 7-day forecast page
 ├── alerts.md             # Alert management
 └── nav/
@@ -346,7 +400,7 @@ declares its own actions. The forecast page has forecast-related
 actions. The alerts page has alert-related actions.
 
 ```markdown
-# index.md — navigates to forecast
+# string.md — navigates to forecast
 /act.search_city --name "Seoul"
 → response includes [7-Day Forecast](./forecast.md)
 → AI: /open ./forecast.md
@@ -426,7 +480,7 @@ only. The AI decides what to do next.
 
 | Concept | How |
 |---------|-----|
-| **Invocation** | `/act.name --flag value` (POSIX CLI syntax) |
+| **Invocation** | `/act.name --flag value` — also `--flag=value`, short `-f`, positional in declaration order, `--` to end options |
 | **Definition** | ```` ```act.name ```` code block (parsed by String, hidden from AI) |
 | **Types** | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `CLI` — first line of definition |
 | **Headers** | `-H "Key: Value"` on first line — curl syntax, supports `{var}` and `$var` |

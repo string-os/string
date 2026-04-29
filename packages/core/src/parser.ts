@@ -123,50 +123,73 @@ export function parse(source: string): ParseResult {
   const shortcutIdsSeen = new Set<string>();
 
   let openBlock: { id: string; startLine: number; contentLines: string[] } | null = null;
-  /** Track if we're inside a fenced code block (```). */
-  let inFencedBlock = false;
+  /** Track fenced code block state — null when outside, otherwise the
+   * opening fence's character (`'`'` or `'~'`) and length. CommonMark requires
+   * the closing fence to use the same character and be at least as long as
+   * the opener; a 4-backtick block can therefore wrap a 3-backtick block. */
+  let fenceState: { char: '`' | '~'; len: number } | null = null;
   /** Track action code block state: 'action' | 'response' */
   let pendingActionBlock: { kind: 'action' | 'response'; id: string; lines: string[]; startLine: number } | null = null;
   /** Collected response templates keyed by action ID (for post-pass matching). */
   const responseTemplates = new Map<string, string>();
 
+  /** Match a fence line: returns the run of fence chars and info string, or null. */
+  const matchFence = (s: string): { char: '`' | '~'; len: number; info: string } | null => {
+    const m = s.match(/^(`{3,}|~{3,})(.*)$/);
+    if (!m) return null;
+    return { char: m[1][0] as '`' | '~', len: m[1].length, info: m[2].trim() };
+  };
+
   for (let i = 0; i < lines.length; i++) {
     const lineNum = i + 1;
     const line = lines[i].trim();
 
-    // ── Track fenced code blocks (```) ────────────────────────────────────────
-    if (line.startsWith('```') || line.startsWith('~~~')) {
-      if (inFencedBlock) {
-        // Closing fence
-        if (pendingActionBlock) {
-          // Finalize the action block
-          if (pendingActionBlock.kind === 'action') {
-            const parsed = parseActionBlock(pendingActionBlock.id, pendingActionBlock.lines, pendingActionBlock.startLine);
-            if (parsed) {
-              actions.push(parsed);
+    // ── Track fenced code blocks (``` or ~~~, 3+ chars) ──────────────────────
+    const fence = matchFence(line);
+    if (fence) {
+      if (fenceState) {
+        // Inside a fence — only close if this is a matching closer:
+        // same char, length >= opener, and no info string.
+        const isCloser =
+          fence.char === fenceState.char &&
+          fence.len >= fenceState.len &&
+          fence.info === '';
+        if (isCloser) {
+          if (pendingActionBlock) {
+            // Finalize the action block
+            if (pendingActionBlock.kind === 'action') {
+              const parsed = parseActionBlock(pendingActionBlock.id, pendingActionBlock.lines, pendingActionBlock.startLine);
+              if (parsed) {
+                actions.push(parsed);
+              } else {
+                errors.push({ line: pendingActionBlock.startLine, message: `INVALID_ACTION_BLOCK: could not parse action definition for "${pendingActionBlock.id}"` });
+              }
             } else {
-              errors.push({ line: pendingActionBlock.startLine, message: `INVALID_ACTION_BLOCK: could not parse action definition for "${pendingActionBlock.id}"` });
+              // Response template
+              responseTemplates.set(pendingActionBlock.id, pendingActionBlock.lines.join('\n'));
             }
-          } else {
-            // Response template
-            responseTemplates.set(pendingActionBlock.id, pendingActionBlock.lines.join('\n'));
+            pendingActionBlock = null;
           }
-          pendingActionBlock = null;
+          fenceState = null;
+          continue;
         }
-        inFencedBlock = false;
+        // Not a closer — treat as content inside the current fence.
+        if (pendingActionBlock) {
+          pendingActionBlock.lines.push(lines[i]);
+        } else if (openBlock) {
+          openBlock.contentLines.push(lines[i]);
+        }
+        continue;
       } else {
         // Opening fence — check info string
-        const info = line.slice(3).trim();
-        const actMatch = info.match(/^act\.([a-zA-Z0-9_-]+)\.response$/);
-        const actDefMatch = !actMatch ? info.match(/^act\.([a-zA-Z0-9_-]+)$/) : null;
+        const actMatch = fence.info.match(/^act\.([a-zA-Z0-9_-]+)\.response$/);
+        const actDefMatch = !actMatch ? fence.info.match(/^act\.([a-zA-Z0-9_-]+)$/) : null;
+        fenceState = { char: fence.char, len: fence.len };
         if (actMatch) {
           pendingActionBlock = { kind: 'response', id: actMatch[1], lines: [], startLine: lineNum };
-          inFencedBlock = true;
         } else if (actDefMatch) {
           pendingActionBlock = { kind: 'action', id: actDefMatch[1], lines: [], startLine: lineNum };
-          inFencedBlock = true;
         } else {
-          inFencedBlock = true;
           if (openBlock) {
             openBlock.contentLines.push(lines[i]);
           }
@@ -176,7 +199,7 @@ export function parse(source: string): ParseResult {
     }
 
     // Inside fenced code blocks
-    if (inFencedBlock) {
+    if (fenceState) {
       if (pendingActionBlock) {
         pendingActionBlock.lines.push(lines[i]);
       } else if (openBlock) {

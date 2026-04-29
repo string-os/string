@@ -74,7 +74,20 @@ export function parsePosixFlags(
 
   for (let i = 0; i < tokens.length; i++) {
     const tok = tokens[i];
+    // POSIX guideline 10: `--` ends option processing. Everything after
+    // is an operand, even if it starts with `-`.
+    if (tok === '--') {
+      for (let j = i + 1; j < tokens.length; j++) rest.push(tokens[j]);
+      break;
+    }
     if (tok.startsWith('--') && tok.length > 2) {
+      // GNU long-option form: `--key=value` (value embedded in same token)
+      const eqIdx = tok.indexOf('=');
+      if (eqIdx > 2) {
+        const key = tok.slice(2, eqIdx);
+        flags[key] = tok.slice(eqIdx + 1);
+        continue;
+      }
       const key = tok.slice(2);
       if (i + 1 < tokens.length && !isFlag(tokens[i + 1])) {
         flags[key] = tokens[++i];
@@ -206,9 +219,17 @@ export function executeResponseTemplate(
   session: Session,
   payload?: Record<string, unknown>,
 ): string {
+  // For JSON responses, `{Response.body.field}` walks the parsed object.
+  // For plain-text responses (wttr.in, prometheus, /etc/hosts...) `jsonBody`
+  // is null — fall back to the raw source so `{Response.body}` returns the
+  // text. This lets authors wrap text responses in a fenced code block to
+  // preserve newlines (markdown collapses bare newlines to spaces).
+  const body: unknown = actionResult.jsonBody !== null && actionResult.jsonBody !== undefined
+    ? actionResult.jsonBody
+    : actionResult.source;
   const responseObj: Record<string, unknown> = {
     status: actionResult.status,
-    body: actionResult.jsonBody,
+    body,
   };
 
   // The "current buffer" for save → decode → to pipelines. Starts as a

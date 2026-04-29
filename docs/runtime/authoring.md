@@ -1,3 +1,7 @@
+---
+title: Authoring
+---
+
 # Authoring
 
 This is a guide for writing SFMD documents — whether you're a human
@@ -384,7 +388,7 @@ POST https://api.weather.com/alerts
 
 ```
 my-app/
-├── index.md            # Entry point
+├── string.md           # Entry point
 ├── search.md           # Search page with search action
 ├── detail.md           # Detail view
 ├── settings.md         # Configuration page

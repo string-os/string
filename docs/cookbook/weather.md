@@ -1,3 +1,7 @@
+---
+title: 00 — Weather app, end to end
+---
+
 # 00 — Weather app, end to end
 
 **Goal:** install a real SFMD app, drive it from a terminal, then watch an AI agent use the same app through the CLI with no further integration. About 15 minutes.
@@ -45,7 +49,7 @@ cd cookbook
 Install the weather app into `string`'s package registry:
 
 ```bash
-string file:setup '/install --app ./apps/weather/index.md'
+string file:setup '/install --app ./apps/weather/string.md'
 ```
 
 Output:
@@ -53,8 +57,8 @@ Output:
 ```
 <𝒞=string:file:setup>
 Installed app:weather
-  Source: /home/you/cookbook/apps/weather/index.md
-  Path: /home/you/.string/users/default/.string/packages/weather/index.md
+  Source: /home/you/cookbook/apps/weather/string.md
+  Path: /home/you/.string/users/default/.string/packages/weather/string.md
 Use: /open app:weather
 </𝒞>
 ```
@@ -84,7 +88,7 @@ string app:weather '/open app:weather'
 
 ```
 <𝒞=string:app:weather>
-Opened .string/packages/weather/index.md
+Opened .string/packages/weather/string.md
 ---
 [actions] /act.now --city <string> | /act.forecast --city <string> | /act.search --q <string>
           /act.<name> --help for details
@@ -179,7 +183,7 @@ The agent, using its shell tool, runs four commands. Each of these outputs is **
 ```bash
 $ string app:weather '/open app:weather'
 <𝒞=string:app:weather>
-Opened .string/packages/weather/index.md
+Opened .string/packages/weather/string.md
 ---
 [actions] /act.now --city <string> | /act.forecast --city <string> | /act.search --q <string>
           /act.<name> --help for details
@@ -247,6 +251,6 @@ The weather app is a markdown file. The runtime parses it, exposes its actions t
 
 ## Next
 
-- **[01 — Anatomy](./01-anatomy.md)** — every line of `apps/weather/index.md` explained, plus how larger SFMD apps compose multiple files.
+- **[01 — Anatomy](./01-anatomy.md)** — every line of `apps/weather/string.md` explained, plus how larger SFMD apps compose multiple files.
 - **[02 — Why this matters](./02-compare.md)** — the same weather capability built as an MCP server and as a function-calling tool, so you can see the delta honestly.
 - **[03 — Client library](./03-client-library.md)** — the recommended integration path when you are building the agent framework yourself.

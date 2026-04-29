@@ -1,3 +1,7 @@
+---
+title: 03 — Client library
+---
+
 # 03 — Client library
 
 **Goal:** embed `@string-os/client` in your own agent code so a single tool on the LLM's tool list covers every SFMD app the user installs. About 15 minutes.

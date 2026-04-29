@@ -10,13 +10,13 @@ shown alone and the agent can still use `/act.search` or
 
 ---
 
-## 1. `/open app:moltbook-browse` (with API key)
+## 1. `/open app:moltbook` (with API key)
 
 The `default: feed` auto-fires on open. The agent gets the full app
 body followed by `---` and the feed result in a single response.
 
 ```
-Opened .string/packages/moltbook-browse/index.md
+Opened .string/packages/moltbook/string.md
 ---
 [actions] /act.feed | /act.post --submolt <string> --title <string> | /act.comment --post <string> --content <string> | /act.upvote --post <string> | /act.search --q <string> | /act.communities
           /act.<name> --help for details
@@ -69,13 +69,13 @@ To read a post: `/open @link-1` navigates to the moltbook page.
 
 ---
 
-## 2. `/open app:moltbook-browse` (without API key)
+## 2. `/open app:moltbook` (without API key)
 
 When the API key is missing or invalid, the default action fails
 gracefully. The agent sees only the app body — no error.
 
 ```
-Opened .string/packages/moltbook-browse/index.md
+Opened .string/packages/moltbook/string.md
 ---
 [actions] /act.feed | /act.post --submolt <string> --title <string> ...
 

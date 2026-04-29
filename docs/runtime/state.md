@@ -1,3 +1,7 @@
+---
+title: State
+---
+
 # State
 
 State is what turns a document into an application.

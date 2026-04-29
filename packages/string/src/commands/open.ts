@@ -36,7 +36,7 @@ export async function cmdOpen(
       return err(
         'Usage: /open <uri | path | file.md#block | @shortcut>\n' +
         'Examples:\n' +
-        '  /open index.md\n' +
+        '  /open string.md\n' +
         '  /open guide/setup.md\n' +
         '  /open @home\n' +
         '  /open file.md#intro',
@@ -57,6 +57,40 @@ export async function cmdOpen(
     uri = href;
   }
 
+  // act: scheme — dispatch to action handler instead of loading a document.
+  // Lets templates output [text](act:<action-id>?<key>=<value>) so /open @shortcut
+  // invokes the action without changing currentDoc. Mirrors how a browser handles
+  // mailto:/javascript: links: same /open verb, scheme decides behavior.
+  if (uri.startsWith('act:')) {
+    const doc = session.currentDoc;
+    if (!doc) {
+      return err('Cannot dispatch action: no document open.', 'INVALID_TARGET');
+    }
+    const rest = uri.slice('act:'.length);
+    const qIdx = rest.indexOf('?');
+    const actionId = qIdx === -1 ? rest : rest.slice(0, qIdx);
+    const queryStr = qIdx === -1 ? '' : rest.slice(qIdx + 1);
+    if (!actionId) {
+      return err('act: URI missing action id (use act:<action-id>?<key>=<value>)', 'INVALID_TARGET');
+    }
+    const action = doc.actions.find(a => a.id === actionId);
+    if (!action) {
+      const available = doc.actions.map(a => a.id).join(', ') || 'none';
+      return err(`Action not found: "${actionId}"\nAvailable: ${available}`, 'NOT_FOUND');
+    }
+    let flagStr = '';
+    if (queryStr) {
+      const params = new URLSearchParams(queryStr);
+      const parts: string[] = [];
+      for (const [key, value] of params) {
+        const escaped = value.replace(/"/g, '\\"');
+        parts.push(`--${key} "${escaped}"`);
+      }
+      flagStr = parts.join(' ');
+    }
+    return executeAction(action, flagStr, session, loader);
+  }
+
   // Split uri#fragment
   const hashIdx = uri.indexOf('#');
   if (hashIdx !== -1) {
@@ -73,12 +107,17 @@ export async function cmdOpen(
   {
     let registryType: 'apps' | 'tools' | null = null;
     let registryName: string | null = null;
-    if (/^app:[a-zA-Z0-9_-]+$/.test(uri)) {
+    // `app:<name>` or `app:<name>:<config>` — config segment is a topic-level
+    // env scope marker, not part of the package name. The package always lives
+    // at the bare-name lookup; config is consulted later for env resolution.
+    const appMatch = uri.match(/^app:([a-zA-Z0-9_-]+)(?::[a-zA-Z0-9_-]+)*$/);
+    const toolMatch = !appMatch ? uri.match(/^tool:([a-zA-Z0-9_-]+)(?::[a-zA-Z0-9_-]+)*$/) : null;
+    if (appMatch) {
       registryType = 'apps';
-      registryName = uri.slice('app:'.length);
-    } else if (/^tool:[a-zA-Z0-9_-]+$/.test(uri)) {
+      registryName = appMatch[1];
+    } else if (toolMatch) {
       registryType = 'tools';
-      registryName = uri.slice('tool:'.length);
+      registryName = toolMatch[1];
     } else if (!uri.includes('/') && !uri.includes('.') && !uri.includes('://') && !uri.startsWith('@')) {
       registryType = 'apps';
       registryName = uri;
@@ -101,7 +140,8 @@ export async function cmdOpen(
     const cwdBase = session.cwdOverride ? `file://${session.cwdOverride}/_` : undefined;
     const baseUri = (topic.startsWith('@') || isRelative) ? session.currentUri ?? cwdBase : undefined;
 
-    // Directory → delegate to /ls
+    // Directory → if it contains string.md, open that as the App/Tool root.
+    // Otherwise fall back to /ls.
     const resolvedUri = loader.resolve(uri, baseUri);
     if (resolvedUri.startsWith('file://')) {
       const resolvedPath = new URL(resolvedUri).pathname;
@@ -110,9 +150,15 @@ export async function cmdOpen(
       try {
         const stat = await fsPromises.stat(resolvedPath);
         if (stat.isDirectory()) {
-          const result = await cmdLs(topic, session, loader);
-          session.setCwdOverride(resolvedPath);
-          return result;
+          const stringMd = `${resolvedPath}/string.md`;
+          try {
+            await fsPromises.stat(stringMd);
+            uri = `file://${stringMd}`;
+          } catch {
+            const result = await cmdLs(topic, session, loader);
+            session.setCwdOverride(resolvedPath);
+            return result;
+          }
         }
       } catch { /* not found — let loader.load handle it */ }
     }

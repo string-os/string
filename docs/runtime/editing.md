@@ -1,3 +1,7 @@
+---
+title: Editing
+---
+
 # Editing
 
 String is not read-only. AI creates, modifies, and manages documents
@@ -560,12 +564,12 @@ Revised total: $45,000
 ```
 # 1. Create the nav file
 /write ~/my-app/nav/main.md
-[@home Home](../index.md)
+[@home Home](../string.md)
 [@search Search](../search.md)
 [@settings Settings](../settings.md)
 
 # 2. Create the main page
-/write ~/my-app/index.md
+/write ~/my-app/string.md
 ---
 title: My App
 ---

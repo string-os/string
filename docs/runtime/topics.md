@@ -1,3 +1,7 @@
+---
+title: Topics
+---
+
 # Topics
 
 A topic is a session. Every command an AI sends through String is

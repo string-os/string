@@ -1,3 +1,7 @@
+---
+title: Variables
+---
+
 # Variables
 
 Variables are named references that are substituted with values

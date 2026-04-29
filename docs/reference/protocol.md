@@ -1,3 +1,7 @@
+---
+title: stringd Protocol v0.1
+---
+
 # stringd Protocol v0.1
 
 **Status:** Normative. This document specifies the wire protocol between a String client and a `stringd` daemon. Any client implementation (TypeScript, Python, Go, anything else) that conforms to this document can drive a running `stringd`. The reference implementations are [`@string-os/client`](https://www.npmjs.com/package/@string-os/client) (TypeScript) and [`string-os`](https://pypi.org/project/string-os) (Python, planned).

@@ -1,3 +1,7 @@
+---
+title: Response Format
+---
+
 # Response Format
 
 Every String command response is composed of two parts: a **system
