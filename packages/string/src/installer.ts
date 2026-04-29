@@ -1,6 +1,7 @@
 /**
  * String — Package Installer
- * Installs apps/tools by copying source to ~/.string/packages/ and registering in config.json.
+ * Installs apps/tools by copying source to {home}/packages/ and registering in config.json.
+ * `home` here is the String user's home (already a String-only directory).
  */
 
 import fs from 'fs/promises';
@@ -20,7 +21,7 @@ export interface InstallResult {
  * Flow:
  * 1. Load the source document via loader
  * 2. Parse frontmatter for type/name
- * 3. Copy to ~/.string/packages/{name}/string.md
+ * 3. Copy to {home}/packages/{name}/string.md
  * 4. Register in config.json
  */
 export async function installPackage(
@@ -66,7 +67,7 @@ export async function installPackage(
   // Determine name: frontmatter.name > filename.
   // Both paths go through the same sanitizer — frontmatter is attacker-controlled
   // input (you install packages from other people's repos) and must not contain
-  // '..', '/', or any char that could escape ~/.string/packages/.
+  // '..', '/', or any char that could escape {home}/packages/.
   const sanitizeName = (s: string) => s.replace(/[^a-zA-Z0-9_-]/g, '-').replace(/^-+|-+$/g, '');
   const rawName = typeof doc.frontmatter.name === 'string' && doc.frontmatter.name
     ? doc.frontmatter.name
@@ -76,12 +77,12 @@ export async function installPackage(
     throw new Error(`Invalid package name: "${rawName}" — must contain [a-zA-Z0-9_-]`);
   }
 
-  // Copy to ~/.string/packages/{name}/
+  // Copy to {home}/packages/{name}/
   // The package root is always string.md (parallel to skill.md). When multiple
   // files exist, string.md marks "this is the entry point of a String unit."
   // If the source is a local file, copy all sibling .md files so multi-file
   // apps (string.md + submolts.md + profile.md etc.) work after install.
-  const packagesDir = path.join(loader.home, '.string', 'packages', name);
+  const packagesDir = path.join(loader.home, 'packages', name);
   await fs.mkdir(packagesDir, { recursive: true });
   const destFile = path.join(packagesDir, 'string.md');
   await fs.writeFile(destFile, loaded.source, 'utf-8');

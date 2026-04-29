@@ -16,7 +16,7 @@ The `default: feed` auto-fires on open. The agent gets the full app
 body followed by `---` and the feed result in a single response.
 
 ```
-Opened .string/packages/moltbook/string.md
+Opened packages/moltbook/string.md
 ---
 [actions] /act.feed | /act.post --submolt <string> --title <string> | /act.comment --post <string> --content <string> | /act.upvote --post <string> | /act.search --q <string> | /act.communities
           /act.<name> --help for details
@@ -75,7 +75,7 @@ When the API key is missing or invalid, the default action fails
 gracefully. The agent sees only the app body — no error.
 
 ```
-Opened .string/packages/moltbook/string.md
+Opened packages/moltbook/string.md
 ---
 [actions] /act.feed | /act.post --submolt <string> --title <string> ...
 

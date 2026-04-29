@@ -18,7 +18,7 @@ await section('EnvStore — global get/set/delete', async () => {
   assert(store.get('FOO') === 'bar', 'get returns set value');
 
   // Persisted to disk
-  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, '.string', 'config.json'), 'utf-8'));
+  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
   assert(config.env.FOO === 'bar', 'persisted to config.json');
 
   // Delete
@@ -59,10 +59,9 @@ await section('EnvStore — app and config scope', async () => {
 
 await section('EnvStore — config.json preserves other fields', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-envstore-preserve-');
-  const configDir = path.join(tmpDir, '.string');
-  fs.mkdirSync(configDir, { recursive: true });
+  fs.mkdirSync(tmpDir, { recursive: true });
   // Write config with extra fields
-  fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
+  fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
     theme: 'dark',
     env: { EXISTING: 'kept' },
   }, null, 2));
@@ -70,7 +69,7 @@ await section('EnvStore — config.json preserves other fields', async () => {
   const store = new EnvStore(tmpDir);
   store.set('NEW_VAR', 'hello');
 
-  const config = JSON.parse(fs.readFileSync(path.join(configDir, 'config.json'), 'utf-8'));
+  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
   assert(config.theme === 'dark', 'other config fields preserved');
   assert(config.env.EXISTING === 'kept', 'existing env vars preserved');
   assert(config.env.NEW_VAR === 'hello', 'new var added');
@@ -104,7 +103,7 @@ await section('/set $VAR — persistent env via command', async () => {
   assert(r1.content.includes('global'), 'shows global scope');
 
   // Verify persisted to disk
-  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, '.string', 'config.json'), 'utf-8'));
+  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
   assert(config.env.API_KEY === 'my-secret-key', 'persisted to config.json');
 
   // /set with no args shows both session and env vars
@@ -127,7 +126,7 @@ await section('/set $VAR — app scope', async () => {
   assert(r.content.includes('myapp'), 'shows app scope');
 
   // Verify stored in app env file
-  const envFile = path.join(tmpDir, '.string', 'apps', 'myapp', 'env.json');
+  const envFile = path.join(tmpDir, 'apps', 'myapp', 'env.json');
   const env = JSON.parse(fs.readFileSync(envFile, 'utf-8'));
   assert(env.APP_TOKEN === 'app-tok', 'stored in app env file');
 

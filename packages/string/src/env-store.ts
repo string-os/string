@@ -2,10 +2,13 @@
  * String — Environment Variable Store
  * Per-user persistent $var storage with scope cascade.
  *
+ * `home` is the String user's home directory — it's already String-only, so
+ * everything sits at the root (no nested `.string/` subdir).
+ *
  * Storage layout:
- *   Global:  {home}/.string/config.json  → { "env": { "KEY": "val" }, ... }
- *   App:     {home}/.string/apps/{app}/env.json  → { "KEY": "val" }
- *   Config:  {home}/.string/apps/{app}/{cfg}/env.json  → { "KEY": "val" }
+ *   Global:  {home}/config.json              → { "env": { "KEY": "val" }, ... }
+ *   App:     {home}/apps/{app}/env.json      → { "KEY": "val" }
+ *   Config:  {home}/apps/{app}/{cfg}/env.json → { "KEY": "val" }
  *
  * Resolution order (most specific wins): config → app → global
  */
@@ -19,11 +22,11 @@ export interface EnvScope {
 }
 
 export class EnvStore {
-  private readonly baseDir: string; // {home}/.string/
+  private readonly baseDir: string; // String user home — root for config/apps
   private readonly fileCache = new Map<string, Record<string, unknown>>();
 
   constructor(home: string) {
-    this.baseDir = join(home, '.string');
+    this.baseDir = home;
   }
 
   // ── Public API ──────────────────────────────────────────────────────────────

@@ -53,7 +53,7 @@ await section('EnvStore — registry preserves env section', async () => {
   store.setPackage('apps', 'myapp', 'file:///app.md');
 
   // Verify both sections present
-  const configPath = path.join(tmpDir, '.string', 'config.json');
+  const configPath = path.join(tmpDir, 'config.json');
   const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
   assert(config.env.API_KEY === 'secret123', 'env section preserved after setPackage');
   assert(config.apps.myapp === 'file:///app.md', 'apps section present');
@@ -91,11 +91,11 @@ await section('/install --tool — local .md file', async () => {
   assert(r.content.includes('/tool:greet'), 'output shows use hint');
 
   // Verify file was copied
-  const installedPath = path.join(tmpDir, '.string', 'packages', 'greet', 'string.md');
+  const installedPath = path.join(tmpDir, 'packages', 'greet', 'string.md');
   assert(fs.existsSync(installedPath), 'file copied to packages dir');
 
   // Verify registered in config.json
-  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, '.string', 'config.json'), 'utf-8'));
+  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
   assert(typeof config.tools?.greet === 'string', 'registered in config.json tools');
 
   fs.rmSync(tmpDir, { recursive: true });
@@ -124,7 +124,7 @@ await section('/install --app — local .md file', async () => {
   assert(r.content.includes('/open app:weather'), 'output shows app use hint');
 
   // Verify registered
-  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, '.string', 'config.json'), 'utf-8'));
+  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
   assert(typeof config.apps?.weather === 'string', 'registered in config.json apps');
 
   fs.rmSync(tmpDir, { recursive: true });
@@ -174,7 +174,7 @@ await section('/install — no args, current doc as source', async () => {
   assert(r.content.includes('tool:myutil'), 'detected as tool from current doc');
 
   // Verify registered
-  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, '.string', 'config.json'), 'utf-8'));
+  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
   assert(typeof config.tools?.myutil === 'string', 'registered in tools');
 
   fs.rmSync(tmpDir, { recursive: true });
@@ -256,11 +256,11 @@ await section('/uninstall — removes package', async () => {
   assert(r2.content.includes('Uninstalled tool:bye'), 'uninstall output correct');
 
   // Verify removed from registry
-  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, '.string', 'config.json'), 'utf-8'));
+  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
   assert(config.tools?.bye === undefined, 'removed from registry');
 
   // Verify files deleted
-  const packagesDir = path.join(tmpDir, '.string', 'packages', 'bye');
+  const packagesDir = path.join(tmpDir, 'packages', 'bye');
   assert(!fs.existsSync(packagesDir), 'package directory removed');
 
   fs.rmSync(tmpDir, { recursive: true });
@@ -281,7 +281,7 @@ await section('resolveTool — registry fallback', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-resolve-tool-');
 
   // Install a tool into registry (manually to avoid needing the command)
-  const pkgDir = path.join(tmpDir, '.string', 'packages', 'greeter');
+  const pkgDir = path.join(tmpDir, 'packages', 'greeter');
   fs.mkdirSync(pkgDir, { recursive: true });
   const toolContent = [
     '---',
@@ -297,9 +297,8 @@ await section('resolveTool — registry fallback', async () => {
   fs.writeFileSync(path.join(pkgDir, 'string.md'), toolContent);
 
   // Register in config.json
-  const configDir = path.join(tmpDir, '.string');
-  fs.mkdirSync(configDir, { recursive: true });
-  fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
+  fs.mkdirSync(tmpDir, { recursive: true });
+  fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
     tools: { greeter: `file://${path.join(pkgDir, 'string.md')}` },
   }, null, 2));
 
@@ -317,7 +316,7 @@ await section('/info — app topic shows logical name, hides path', async () => 
   const tmpDir = fs.mkdtempSync('/tmp/string-info-app-');
 
   // Create installed app with full metadata
-  const pkgDir = path.join(tmpDir, '.string', 'packages', 'weather');
+  const pkgDir = path.join(tmpDir, 'packages', 'weather');
   fs.mkdirSync(pkgDir, { recursive: true });
   fs.writeFileSync(path.join(pkgDir, 'string.md'), [
     '---',
@@ -328,8 +327,7 @@ await section('/info — app topic shows logical name, hides path', async () => 
     '---',
     '# Weather',
   ].join('\n'));
-  const configDir = path.join(tmpDir, '.string');
-  fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
+  fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
     apps: { weather: `file://${path.join(pkgDir, 'string.md')}` },
   }, null, 2));
 
@@ -340,7 +338,7 @@ await section('/info — app topic shows logical name, hides path', async () => 
   assert(info.content.includes('app:       weather'), 'shows app: weather');
   assert(info.content.includes('name:      @string/weather'), 'shows full name');
   assert(info.content.includes('version:   1.2.0'), 'shows version');
-  assert(!info.content.includes('.string/packages'), 'hides internal path');
+  assert(!info.content.includes('/packages/weather'), 'hides internal path');
   assert(!info.content.includes('cwd:'), 'no cwd for app topic');
   assert(info.content.includes('Weather App'), 'title shown');
 
@@ -360,7 +358,7 @@ await section('installed app — /open bare name', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-open-app-');
 
   // Create an app file in packages
-  const pkgDir = path.join(tmpDir, '.string', 'packages', 'myapp');
+  const pkgDir = path.join(tmpDir, 'packages', 'myapp');
   fs.mkdirSync(pkgDir, { recursive: true });
   fs.writeFileSync(path.join(pkgDir, 'string.md'), [
     '---',
@@ -372,8 +370,7 @@ await section('installed app — /open bare name', async () => {
   ].join('\n'));
 
   // Register
-  const configDir = path.join(tmpDir, '.string');
-  fs.writeFileSync(path.join(configDir, 'config.json'), JSON.stringify({
+  fs.writeFileSync(path.join(tmpDir, 'config.json'), JSON.stringify({
     apps: { myapp: `file://${path.join(pkgDir, 'string.md')}` },
   }, null, 2));
 

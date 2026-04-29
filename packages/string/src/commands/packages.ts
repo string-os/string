@@ -111,7 +111,7 @@ export async function cmdUninstall(
   loader.envStore.deletePackage(type as 'apps' | 'tools', name);
 
   // Remove local package files
-  const packagesDir = path.join(loader.home, '.string', 'packages', name);
+  const packagesDir = path.join(loader.home, 'packages', name);
   try {
     await fsPromises.rm(packagesDir, { recursive: true });
   } catch { /* directory may not exist */ }
