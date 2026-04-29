@@ -246,6 +246,7 @@ export async function render(
   blockId?: string,
   home?: string,
   loader?: Loader,
+  envScope?: import('./env-store.js').EnvScope,
 ): Promise<RenderResult> {
   let source = doc.source;
 
@@ -312,8 +313,26 @@ export async function render(
     hints.push(`[actions] ${actionHints}`);
     hints.push(`          /act.<name> --help for details`);
   }
-  if (!blockId && doc.requirements) {
-    hints.push(`[setup] /open ${doc.requirements.path}`);
+  // Missing-env warning: cross-check `requires:` frontmatter against env store.
+  // Surfaces a clear "set this var" hint at /open time so the agent doesn't
+  // fire actions that will fail with opaque API-side auth errors.
+  if (!blockId && loader?.envStore) {
+    const requires = doc.frontmatter.requires;
+    const required = Array.isArray(requires)
+      ? requires.filter((v): v is string => typeof v === 'string')
+      : [];
+    const missing = required.filter(name => {
+      const val = loader.envStore.get(name, envScope ?? {});
+      return val === undefined || val === '';
+    });
+    if (missing.length > 0) {
+      const list = missing.map(n => `$${n}`).join(', ');
+      hints.push(`[!] Missing required env: ${list}`);
+      hints.push(`    Set: ${missing.map(n => `/set $${n}="..."`).join(' ; ')}`);
+      if (doc.requirements) {
+        hints.push(`    Setup: /open ${doc.requirements.path}`);
+      }
+    }
   }
 
   if (hints.length > 0) {

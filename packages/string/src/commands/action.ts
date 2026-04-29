@@ -36,6 +36,15 @@ export async function executeAction(
   loader: Loader,
   extraEnv?: Record<string, string>,
 ): Promise<CommandResult> {
+  // Append "Setup info: /open <path>" to error content when the current doc
+  // has a requirements file registered. Surfaces the setup doc at the moment
+  // it's most likely to help — when an action just failed.
+  const withSetupHint = (content: string): string => {
+    const reqs = session.currentDoc?.requirements;
+    if (!reqs) return content;
+    return `${content}\n\nSetup info: /open ${reqs.path}`;
+  };
+
   // Build short alias map from field definitions (e.g. {c: 'city'})
   const shortToLong: Record<string, string> = {};
   for (const f of action.fields) {
@@ -228,11 +237,13 @@ export async function executeAction(
     const names = [...unresolvedVars];
     const list = names.map(n => `  $${n}`).join('\n');
     return err(
-      `Unresolved environment variable${names.length > 1 ? 's' : ''}:\n${list}\n\n` +
-      `Set ${names.length > 1 ? 'them' : 'it'} with:\n` +
-      names.map(n => `  /set ${n} <value>`).join('\n') + '\n' +
-      `Or export in the shell that runs stringd:\n` +
-      names.map(n => `  export ${n}=...`).join('\n'),
+      withSetupHint(
+        `Unresolved environment variable${names.length > 1 ? 's' : ''}:\n${list}\n\n` +
+        `Set ${names.length > 1 ? 'them' : 'it'} with:\n` +
+        names.map(n => `  /set $${n} = "..."`).join('\n') + '\n' +
+        `Or export in the shell that runs stringd:\n` +
+        names.map(n => `  export ${n}=...`).join('\n'),
+      ),
       'INVALID_PAYLOAD',
     );
   }
@@ -265,12 +276,15 @@ export async function executeAction(
       return ok(rendered);
     }
 
-    // CLI: return raw output
+    // CLI: return raw output. On non-zero exit, append setup hint when the
+    // doc has a requirements file — common cause is a missing CLI tool the
+    // app's requirements.md tells you to install.
     if (action.method === 'cli') {
+      const failed = actionResult.status !== 0;
       return {
-        ok: actionResult.status === 0,
-        code: actionResult.status === 0 ? undefined : `EXIT_${actionResult.status}` as StringErrorCode,
-        content: actionResult.source,
+        ok: !failed,
+        code: failed ? `EXIT_${actionResult.status}` as StringErrorCode : undefined,
+        content: failed ? withSetupHint(actionResult.source) : actionResult.source,
       };
     }
 
@@ -292,7 +306,7 @@ export async function executeAction(
     const { content: rendered } = await render(responseDoc, undefined, loader.home, loader);
     return ok(rendered);
   } catch (e) {
-    if (e instanceof StringError) return err(e.message, e.code);
+    if (e instanceof StringError) return err(withSetupHint(e.message), e.code);
     throw e;
   }
 }

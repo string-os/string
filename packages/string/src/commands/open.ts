@@ -187,28 +187,9 @@ export async function cmdOpen(
       ? toWorkspacePath(new URL(loaded.uri).pathname, loader.home)
       : loaded.uri;
     const openLabel = blockId ? `${displayPath}#${blockId}` : displayPath;
-    const { content: rendered, autoShortcuts } = await render(doc, blockId, loader.home, loader);
+    const envScope = deriveEnvScope(session.name);
+    const { content: rendered, autoShortcuts } = await render(doc, blockId, loader.home, loader, envScope);
     session.setAutoShortcuts(autoShortcuts);
-
-    // Check frontmatter `requires: [VAR1, VAR2]` — warn about missing env vars
-    const requires = doc.frontmatter.requires as string[] | undefined;
-    let requiresWarning = '';
-    if (requires && Array.isArray(requires) && !blockId) {
-      const envScope = deriveEnvScope(session.name);
-      const missing = requires.filter(name => {
-        if (loader.envStore.get(name, envScope) !== undefined) return false;
-        if (process.env[name] !== undefined) return false;
-        return true;
-      });
-      if (missing.length > 0) {
-        requiresWarning = '\n\n[!] Missing required environment variable' +
-          (missing.length > 1 ? 's' : '') + ': ' +
-          missing.map(n => `$${n}`).join(', ') + '\n' +
-          'Set ' + (missing.length > 1 ? 'them' : 'it') + ' with: ' +
-          missing.map(n => `/set ${n} <value>`).join(', ') +
-          '\nSee setup instructions in this document.';
-      }
-    }
 
     // Default action: auto-execute if frontmatter declares one
     const defaultAction = doc.frontmatter.default as string | undefined;
@@ -217,12 +198,12 @@ export async function cmdOpen(
       if (action) {
         const actionResult = await executeAction(action, '', session, loader);
         if (actionResult.ok) {
-          return ok(`Opened ${openLabel}\n---\n${rendered}${requiresWarning}\n\n---\n\n${actionResult.content}`);
+          return ok(`Opened ${openLabel}\n---\n${rendered}\n\n---\n\n${actionResult.content}`);
         }
       }
     }
 
-    return ok(`Opened ${openLabel}\n---\n${rendered}${requiresWarning}`);
+    return ok(`Opened ${openLabel}\n---\n${rendered}`);
   } catch (e) {
     if (e instanceof StringError) {
       // Add recovery hints for common errors
@@ -249,7 +230,8 @@ export async function cmdBack(session: Session, loader: Loader): Promise<Command
     const displayPath = doc.uri.startsWith('file://')
       ? toWorkspacePath(new URL(doc.uri).pathname, loader.home)
       : doc.uri;
-    const { content: rendered, autoShortcuts } = await render(doc, prev.blockId, loader.home, loader);
+    const envScope = deriveEnvScope(session.name);
+    const { content: rendered, autoShortcuts } = await render(doc, prev.blockId, loader.home, loader, envScope);
     session.setAutoShortcuts(autoShortcuts);
 
     // Default action on /back (same as /open)
@@ -269,7 +251,8 @@ export async function cmdBack(session: Session, loader: Loader): Promise<Command
     const displayPath = prev.doc.uri.startsWith('file://')
       ? toWorkspacePath(new URL(prev.doc.uri).pathname, loader.home)
       : prev.doc.uri;
-    const { content: rendered, autoShortcuts } = await render(prev.doc, prev.blockId, loader.home, loader);
+    const envScope = deriveEnvScope(session.name);
+    const { content: rendered, autoShortcuts } = await render(prev.doc, prev.blockId, loader.home, loader, envScope);
     session.setAutoShortcuts(autoShortcuts);
     return ok(`Back to ${displayPath}\n---\n${rendered}`);
   }
@@ -298,7 +281,8 @@ export async function cmdRefresh(session: Session, loader: Loader): Promise<Comm
     const displayPath = doc.uri.startsWith('file://')
       ? toWorkspacePath(new URL(doc.uri).pathname, loader.home)
       : doc.uri;
-    const { content: rendered, autoShortcuts } = await render(doc, blockId, loader.home, loader);
+    const envScope = deriveEnvScope(session.name);
+    const { content: rendered, autoShortcuts } = await render(doc, blockId, loader.home, loader, envScope);
     session.setAutoShortcuts(autoShortcuts);
 
     // Default action on refresh (same as /open)

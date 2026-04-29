@@ -279,47 +279,100 @@ await section('/source command — converted document preserves rawSource', asyn
   assert(!info.content.includes('converted from HTML'), '/info does not show converted for local file');
 });
 
-// ─── [!requirements] directive + auto-detect ────────────────────────────────
+// ─── [!requirements] directive + auto-detect (no auto-prepend; error path only) ─
 
-await section('requirements — auto-detect sibling requirements.md (local)', async () => {
-  const tmpDir = fs.mkdtempSync('/tmp/string-req-auto-');
-  fs.writeFileSync(path.join(tmpDir, 'string.md'), '# App\n\nNo directive declared.\n');
-  fs.writeFileSync(path.join(tmpDir, 'requirements.md'), '# Setup\n\nGet an API key from example.com.\n');
-
-  const b = new Browser({ home: tmpDir });
-  const r = await b.exec(`/open ${path.join(tmpDir, 'string.md')}`);
-  assert(r.ok, 'open succeeds');
-  assert(r.content.includes('[setup] /open requirements.md'), 'auto-detected sibling shows in setup hint');
-
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-});
-
-await section('requirements — no auto-detect when sibling absent', async () => {
-  const tmpDir = fs.mkdtempSync('/tmp/string-req-none-');
-  fs.writeFileSync(path.join(tmpDir, 'string.md'), '# App\n\nZero-config app.\n');
-
-  const b = new Browser({ home: tmpDir });
-  const r = await b.exec(`/open ${path.join(tmpDir, 'string.md')}`);
-  assert(r.ok, 'open succeeds');
-  assert(!r.content.includes('[setup]'), 'no setup hint when no requirements file');
-
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-});
-
-await section('requirements — explicit directive overrides auto-detect', async () => {
-  const tmpDir = fs.mkdtempSync('/tmp/string-req-explicit-');
-  fs.writeFileSync(path.join(tmpDir, 'string.md'), '# App\n\n[!requirements](docs/install.md)\n');
+await section('requirements — directive parsed, body line stripped', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-req-strip-');
+  fs.writeFileSync(path.join(tmpDir, 'string.md'),
+    '# App\n\n[!requirements](docs/install.md)\n\nBody content here.\n');
   fs.mkdirSync(path.join(tmpDir, 'docs'));
   fs.writeFileSync(path.join(tmpDir, 'docs', 'install.md'), '# Install\n');
-  // Sibling that would auto-detect — directive should win
-  fs.writeFileSync(path.join(tmpDir, 'requirements.md'), '# Auto-detected\n');
 
   const b = new Browser({ home: tmpDir });
   const r = await b.exec(`/open ${path.join(tmpDir, 'string.md')}`);
   assert(r.ok, 'open succeeds');
-  assert(r.content.includes('[setup] /open docs/install.md'), 'directive path wins over sibling');
-  assert(!r.content.includes('[setup] /open requirements.md'), 'sibling path not shown');
-  assert(!r.content.includes('[!requirements]'), 'directive line stripped from body');
+  assert(!r.content.includes('[!requirements]'), 'directive line stripped from rendered body');
+  assert(!r.content.includes('[setup]'), 'no auto-prepended setup hint (author-controlled)');
+  assert(r.content.includes('Body content here.'), 'body content preserved');
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('requirements — frontmatter requires: missing → [!] warning', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-req-missing-env-');
+  fs.writeFileSync(path.join(tmpDir, 'string.md'),
+    '---\nname: testapp\ntype: app\nrequires:\n  - TESTAPP_TOKEN\n  - TESTAPP_REGION\n---\n\n# App\n\nBody.\n');
+  fs.writeFileSync(path.join(tmpDir, 'requirements.md'), '# Setup\n');
+
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec(`/open ${path.join(tmpDir, 'string.md')}`);
+  assert(r.ok, 'open succeeds');
+  assert(r.content.includes('[!] Missing required env'), 'missing-env warning emitted');
+  assert(r.content.includes('$TESTAPP_TOKEN'), 'first missing var named');
+  assert(r.content.includes('$TESTAPP_REGION'), 'second missing var named');
+  assert(r.content.includes('Setup: /open requirements.md'),
+    'links at requirements.md (auto-detected) when sibling exists');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('requirements — env all set → no warning', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-req-set-env-');
+  fs.writeFileSync(path.join(tmpDir, 'string.md'),
+    '---\nname: testapp\ntype: app\nrequires:\n  - TESTAPP_TOKEN\n---\n\n# App\n');
+
+  const b = new Browser({ home: tmpDir });
+  // Open via app: topic so env scope is app-scoped
+  await b.exec('/set $TESTAPP_TOKEN = "secret"', 'app:testapp');
+  // Register the package so /open app:testapp resolves
+  await b.exec(`/install --app ${path.join(tmpDir, 'string.md')}`);
+  const r = await b.exec('/open app:testapp', 'app:testapp');
+  assert(r.ok, 'open succeeds');
+  assert(!r.content.includes('Missing required env'), 'no warning when env is set');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('requirements — action error appends setup hint', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-req-err-hint-');
+  // CLI action that always exits non-zero. Doc has a sibling requirements.md
+  // so the runtime knows where to point.
+  fs.writeFileSync(path.join(tmpDir, 'string.md'), [
+    '---',
+    'name: failapp',
+    'type: app',
+    '---',
+    '',
+    '# Fail App',
+    '',
+    '```act.boom',
+    'CLI bash -c "exit 7"',
+    '```',
+  ].join('\n'));
+  fs.writeFileSync(path.join(tmpDir, 'requirements.md'), '# Setup\n');
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'string.md')}`);
+  const r = await b.exec('/act.boom');
+  assert(!r.ok, 'action fails with non-zero exit');
+  assert(r.content.includes('Setup info: /open requirements.md'),
+    'setup hint appended on error');
+});
+
+await section('requirements — action error has no hint when no requirements doc', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-req-err-noreqs-');
+  fs.writeFileSync(path.join(tmpDir, 'string.md'), [
+    '# Fail App',
+    '',
+    '```act.boom',
+    'CLI bash -c "exit 7"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'string.md')}`);
+  const r = await b.exec('/act.boom');
+  assert(!r.ok, 'action fails');
+  assert(!r.content.includes('Setup info'),
+    'no setup hint when no requirements doc registered');
 });
