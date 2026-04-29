@@ -29,6 +29,12 @@ export interface LoadedDocument {
   includes: IncludeDirective[];
   /** Action directives defined in this document */
   actions: ActionDirective[];
+  /** Requirements/setup doc, if any. `path` is the doc-relative form (what
+   *  to show in hints and pass to /open); `uri` is the resolved canonical URI.
+   *  Populated by an explicit `[!requirements](path)` directive, or — for
+   *  local file:// documents only — by auto-detecting a sibling
+   *  `requirements.md`. Web docs must declare it explicitly. */
+  requirements?: { path: string; uri: string };
   /** Warnings from resolution (e.g. unknown shortcut invocations) */
   warnings: string[];
 }

@@ -32,7 +32,7 @@ const REF_DEF_LINE_RE = /^\[[^\]]+\]:\s+\S/;
 const BLOCK_OPEN_RE = /^<!-- #[a-zA-Z0-9_-]+ -->$/;
 const BLOCK_CLOSE_RE = /^<!-- \/[a-zA-Z0-9_-]+ -->$/;
 // SFMD directive lines ([!menu:...], [!nav:...], [!include:...])
-const DIRECTIVE_LINE_RE = /^\[!(menu|nav|include):[a-zA-Z0-9_-]+[^\]]*\]\(.*\)$/;
+const DIRECTIVE_LINE_RE = /^\[!(menu|nav|include):[a-zA-Z0-9_-]+[^\]]*\]\(.*\)$|^\[!requirements\]\(.*\)$/;
 
 // ─── Include Expansion ────────────────────────────────────────────────────────
 
@@ -311,6 +311,9 @@ export async function render(
     }).join(' | ');
     hints.push(`[actions] ${actionHints}`);
     hints.push(`          /act.<name> --help for details`);
+  }
+  if (!blockId && doc.requirements) {
+    hints.push(`[setup] /open ${doc.requirements.path}`);
   }
 
   if (hints.length > 0) {

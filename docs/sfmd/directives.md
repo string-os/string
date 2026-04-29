@@ -123,11 +123,115 @@ need to know the underlying file structure.
 An include with explicit path MAY topic a specific block:
 
 ```markdown
-[!include:pricing](./products.md#pricing)
+[!include:pricing](products.md#pricing)
 ```
 
 Only the content of the `#pricing` block from `products.md` is
 included.
+
+---
+
+## Requirements directive
+
+Points at a setup/install document for this app or tool. Recommended
+(not required) — the convention is that any prerequisite work an agent
+or operator needs to do once at install time (API keys, registration,
+external accounts, runtime deps) lives in `requirements.md`, separate
+from the always-loaded `string.md`. Keeps per-turn context small.
+
+### Syntax
+
+```markdown
+[!requirements](path)
+```
+
+- No identifier — a document declares at most one requirements doc.
+- `path` — relative path to the setup document.
+
+### Auto-detection (local files only)
+
+For documents loaded from `file://`, if a sibling file named
+`requirements.md` exists next to the document, the runtime registers
+it as the requirements doc automatically — no directive needed.
+
+```
+my-app/
+├── string.md          ← agent-facing, loaded every turn
+└── requirements.md    ← auto-detected, loaded only on /open
+```
+
+Web documents (loaded from `https://`) MUST declare the directive
+explicitly; the runtime cannot probe sibling URLs over HTTP.
+
+An explicit directive always overrides auto-detection — useful when
+the setup doc lives elsewhere or has a different name.
+
+### Runtime behavior
+
+When a requirements doc is registered, `/open` of the parent document
+prepends a one-line hint:
+
+```
+[setup] /open requirements.md
+```
+
+This tells the agent where to read setup info if an action fails on
+missing credentials or unmet dependencies.
+
+### Example
+
+```markdown
+# Moltbook 🦞
+
+The social network for AI agents.
+
+[!requirements](docs/install.md)
+```
+
+Or rely on auto-detection:
+
+```
+moltbook/
+├── string.md
+└── requirements.md    ← auto-registered
+```
+
+### Rules
+
+1. The directive MUST be on its own line.
+2. `path` MUST be a relative path or absolute URI to a valid Markdown file.
+3. A document MUST declare at most one `[!requirements]` directive — later occurrences are ignored.
+4. Auto-detection applies only to `file://` documents, only for the conventional name `requirements.md`.
+5. An explicit directive overrides auto-detection.
+6. In a CommonMark viewer, the directive renders as a regular link.
+
+---
+
+## Path notation
+
+Directive and link paths SHOULD use bare relative form, not `./`:
+
+```markdown
+[!nav:main](nav/main.md)            ← preferred
+[!nav:main](./nav/main.md)          ← discouraged
+[!include:footer](partials/foot.md) ← preferred
+[Setup](requirements.md)            ← preferred
+```
+
+The leading `./` is shell-shaped baggage; in Markdown contexts, bare
+relative paths are unambiguous (`.md` extension distinguishes a file
+from a registry name like `app:weather`). Both forms resolve identically,
+but the bare form is the documented convention.
+
+| Path | Meaning |
+|------|---------|
+| `foo.md` | Relative to current document |
+| `dir/foo.md` | Relative subdirectory |
+| `/abs/foo.md` | Absolute filesystem path |
+| `https://...` | External URL |
+| `app:name` | Installed app (registry lookup) |
+| `tool:name` | Installed tool (registry lookup) |
+| `@shortcut` | Resolved via document's shortcuts |
 
 ---
 
@@ -147,5 +251,6 @@ Currently defined directive types:
 |------|---------|
 | `nav` | Register a navigation menu |
 | `include` | Include content from another file |
+| `requirements` | Point at this app/tool's setup doc |
 
 Unknown directive types SHOULD be ignored by parsers.

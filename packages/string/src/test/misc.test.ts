@@ -278,3 +278,48 @@ await section('/source command — converted document preserves rawSource', asyn
   const info = await b.exec('/info');
   assert(!info.content.includes('converted from HTML'), '/info does not show converted for local file');
 });
+
+// ─── [!requirements] directive + auto-detect ────────────────────────────────
+
+await section('requirements — auto-detect sibling requirements.md (local)', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-req-auto-');
+  fs.writeFileSync(path.join(tmpDir, 'string.md'), '# App\n\nNo directive declared.\n');
+  fs.writeFileSync(path.join(tmpDir, 'requirements.md'), '# Setup\n\nGet an API key from example.com.\n');
+
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec(`/open ${path.join(tmpDir, 'string.md')}`);
+  assert(r.ok, 'open succeeds');
+  assert(r.content.includes('[setup] /open requirements.md'), 'auto-detected sibling shows in setup hint');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('requirements — no auto-detect when sibling absent', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-req-none-');
+  fs.writeFileSync(path.join(tmpDir, 'string.md'), '# App\n\nZero-config app.\n');
+
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec(`/open ${path.join(tmpDir, 'string.md')}`);
+  assert(r.ok, 'open succeeds');
+  assert(!r.content.includes('[setup]'), 'no setup hint when no requirements file');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('requirements — explicit directive overrides auto-detect', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-req-explicit-');
+  fs.writeFileSync(path.join(tmpDir, 'string.md'), '# App\n\n[!requirements](docs/install.md)\n');
+  fs.mkdirSync(path.join(tmpDir, 'docs'));
+  fs.writeFileSync(path.join(tmpDir, 'docs', 'install.md'), '# Install\n');
+  // Sibling that would auto-detect — directive should win
+  fs.writeFileSync(path.join(tmpDir, 'requirements.md'), '# Auto-detected\n');
+
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec(`/open ${path.join(tmpDir, 'string.md')}`);
+  assert(r.ok, 'open succeeds');
+  assert(r.content.includes('[setup] /open docs/install.md'), 'directive path wins over sibling');
+  assert(!r.content.includes('[setup] /open requirements.md'), 'sibling path not shown');
+  assert(!r.content.includes('[!requirements]'), 'directive line stripped from body');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});

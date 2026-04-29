@@ -104,6 +104,28 @@ export async function resolve(
   // [Label][@id] → [@id Label](href) if shortcut known; warn if not.
   const { resolvedSource, warnings } = resolveInvocations(source, shortcuts, menus);
 
+  // ── Requirements: explicit directive wins, else auto-detect for local ────
+  // file:// only. Web docs (https://) must declare [!requirements] explicitly
+  // since we can't probe sibling URLs.
+  let requirements: { path: string; uri: string } | undefined;
+  if (parsed.requirements) {
+    requirements = {
+      path: parsed.requirements,
+      uri: loader.resolve(parsed.requirements, uri),
+    };
+  } else if (uri.startsWith('file://')) {
+    const sibling = loader.resolve('requirements.md', uri);
+    if (sibling.startsWith('file://')) {
+      const siblingPath = sibling.slice('file://'.length);
+      try {
+        const fs = await import('fs');
+        if (fs.existsSync(siblingPath)) {
+          requirements = { path: 'requirements.md', uri: sibling };
+        }
+      } catch { /* fs unavailable — skip auto-detect */ }
+    }
+  }
+
   return {
     uri,
     source: resolvedSource,
@@ -115,6 +137,7 @@ export async function resolve(
     menus,
     includes: parsed.includes,
     actions: parsed.actions,
+    requirements,
     warnings: [...parseWarnings, ...warnings],
   };
 }

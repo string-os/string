@@ -80,6 +80,8 @@ export interface ParseResult {
   /** Markdown reference definitions: name → URL (includes both standard and @-prefixed) */
   references: Map<string, string>;
   actions: ActionDirective[];
+  /** Path declared via `[!requirements](path)` — at most one per document. */
+  requirements?: string;
   errors: ParseError[];
 }
 
@@ -100,6 +102,9 @@ const INCLUDE_RE = /^\[!include:([a-zA-Z0-9_-]+)\]\(([^)]*)\)$/;
 const MENU_RE = /^\[!menu:([a-zA-Z0-9_-]+)\]\(([^)]+)\)$/;
 // [!nav:name](path)   — preferred alias
 const NAV_RE = /^\[!nav:([a-zA-Z0-9_-]+)\]\(([^)]+)\)$/;
+// [!requirements](path) — points at this app/tool's setup doc.
+// No id: an app/tool has at most one requirements doc.
+const REQUIREMENTS_RE = /^\[!requirements\]\(([^)]+)\)$/;
 // [!include](path) or [!menu](path) — invalid, missing identifier
 const DIRECTIVE_NO_ID_RE = /^\[!(include|menu|nav)\]\(([^)]+)\)$/;
 // [@shortcut_id Label](href)
@@ -118,6 +123,7 @@ export function parse(source: string): ParseResult {
   const shortcuts: Shortcut[] = [];
   const references = new Map<string, string>();
   const actions: ActionDirective[] = [];
+  let requirements: string | undefined;
 
   const blockIdsSeen = new Set<string>();
   const shortcutIdsSeen = new Set<string>();
@@ -285,6 +291,14 @@ export function parse(source: string): ParseResult {
         menus.push({ name: menuMatch[1], path: menuMatch[2], line: lineNum });
         continue;
       }
+
+      // [!requirements](path) — first occurrence wins; later ones ignored
+      // since a doc has at most one requirements file
+      const reqMatch = line.match(REQUIREMENTS_RE);
+      if (reqMatch) {
+        if (requirements === undefined) requirements = reqMatch[1];
+        continue;
+      }
     }
 
     // ── Shortcuts are scanned on every line ─────────────────────────────────
@@ -335,7 +349,7 @@ export function parse(source: string): ParseResult {
     // Orphan response templates (no matching action) are silently ignored
   }
 
-  return { blocks, includes, menus, shortcuts, references, actions, errors };
+  return { blocks, includes, menus, shortcuts, references, actions, requirements, errors };
 }
 
 // ─── Action Block Parser ────────────────────────────────────────────────────
