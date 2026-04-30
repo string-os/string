@@ -7,12 +7,8 @@ title: String Documentation
 ## Getting Started
 
 - [Quick Start](./start/quickstart.md) — install and run your first app in 5 minutes
-- [Showcase](./start/showcase.md) — example apps with demo output
 - [Agent Integration](./start/agent-integration.md) — connect String to your agent framework
-
-## Build String Apps
-
-- [Writing Apps](./build/writing-apps.md) — turn any API into a String App
+- [Writing your first app](./start/writing-an-app.md) — the minimum to author your own app
 
 ## Cookbook
 

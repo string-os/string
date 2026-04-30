@@ -1,6 +1,6 @@
 [@home Docs Home](../index.md)
 [@start Getting Started](../start/quickstart.md)
-[@build Build Apps](../build/writing-apps.md)
+[@build Write an App](../start/writing-an-app.md)
 [@cookbook Cookbook](https://github.com/string-os/cookbook)
 [@sfmd SFMD Spec](../sfmd/overview.md)
 [@runtime Runtime](../runtime/overview.md)
