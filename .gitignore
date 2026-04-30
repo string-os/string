@@ -6,6 +6,7 @@ dist/
 .stringd/
 .env
 .env.local
+packages/compiler/examples/*/config.json
 *.log
 coverage/
 .vscode/
