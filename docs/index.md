@@ -16,7 +16,7 @@ title: String Documentation
 
 ## Cookbook
 
-[**String Cookbook**](./cookbook.md) — installable example apps + tutorial chapters. Lives in a separate repo ([`string-os/cookbook`](https://github.com/string-os/cookbook)) so you can `git clone` it and start running real SFMD apps in five lines.
+Example apps and tutorials live in a separate repo: [`string-os/cookbook`](https://github.com/string-os/cookbook). Clone it and `string '/install --app ./apps/<name>/string.md'` to try them.
 
 ## SFMD Specification
 
