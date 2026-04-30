@@ -16,11 +16,7 @@ title: String Documentation
 
 ## Cookbook
 
-- [Weather](./cookbook/weather.md) — simplest example, start here
-- [Anatomy](./cookbook/anatomy.md) — how an SFMD app is structured
-- [Compare](./cookbook/compare.md) — MCP vs Function Calling vs String
-- [Client Library](./cookbook/client-library.md) — embed String in your framework
-- [Porting](./cookbook/porting.md) — port a real API to a String App
+[**String Cookbook**](./cookbook.md) — installable example apps + tutorial chapters. Lives in a separate repo ([`string-os/cookbook`](https://github.com/string-os/cookbook)) so you can `git clone` it and start running real SFMD apps in five lines.
 
 ## SFMD Specification
 

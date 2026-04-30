@@ -1,7 +1,7 @@
 [@home Docs Home](../index.md)
 [@start Getting Started](../start/quickstart.md)
 [@build Build Apps](../build/writing-apps.md)
-[@cookbook Cookbook](../cookbook/weather.md)
+[@cookbook Cookbook](../cookbook.md)
 [@sfmd SFMD Spec](../sfmd/overview.md)
 [@runtime Runtime](../runtime/overview.md)
 [@reference Reference](../reference/protocol.md)
