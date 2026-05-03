@@ -77,27 +77,52 @@ title: Packages
 ### /install
 
 ```
-/install ./weather.md              # 로컬 파일에서 설치
-/install --app ./weather.md        # 명시적으로 앱으로 설치
-/install --tool ./translate.md     # 명시적으로 도구로 설치
-/install https://example.com/a.md  # URL에서 설치
-/install                           # 현재 열린 문서를 설치
+/install ./weather.md                   # 로컬 파일
+/install --app ./weather.md             # 명시적으로 앱
+/install --tool ./translate.md          # 명시적으로 도구
+/install https://example.com/a.md       # 단일 마크다운 URL
+/install https://hub.example/api/install/cookbook/weather  # install manifest URL
+/install --link https://hub.example/api/install/cookbook/weather  # URL 단축키로 등록 (로컬 복사 X)
+/install --as weather-2 ./other.md      # 로컬 이름 강제 지정
+/install                                # 현재 열린 문서를 설치
 ```
 
 **동작:**
-1. 소스 문서를 로드 (로컬 파일 또는 HTTP)
-2. frontmatter에서 `name`과 `type` 파싱
-3. `~/.string/packages/{name}/string.md`로 복사
-4. `config.json`에 레지스트리 등록
+1. 소스를 로드 (로컬 파일, 단일 markdown URL, 또는 install manifest URL — [install-manifest.md](./install-manifest.md))
+2. frontmatter에서 `name`, `namespace`, `type` 파싱
+3. 충돌 검사 ((namespace, name) 기준 — 아래 "충돌 처리")
+4. **원자적 설치:** `packages/.{name}.tmp/`에 staging → 모든 파일 검증/복사 성공 후에만 `packages/{name}/`로 atomic rename. 실패 시 staging 삭제, 기존 설치본 그대로
+5. `config.json`에 레지스트리 등록
 
 **타입 판별 우선순위:**
 1. `--app` / `--tool` 플래그 (명시적)
 2. frontmatter `type` 필드
-3. 둘 다 없으면 에러 + 안내
+3. install manifest의 frontmatter
+4. 모두 없으면 에러 + 안내
 
-**이름 결정:**
-1. frontmatter `name` 필드
-2. 없으면 파일명에서 파생 (`weather.md` → `weather`)
+**이름 결정 (로컬 레지스트리 키):**
+1. `--as <local-name>` 플래그 (명시적)
+2. frontmatter `name` 필드
+3. 없으면 파일명에서 파생 (`weather.md` → `weather`)
+
+**충돌 처리:**
+
+이미 같은 로컬 이름으로 설치된 패키지가 있으면 frontmatter의
+`(namespace, name)`을 비교한다.
+
+- 같은 (namespace, name) → **재설치**로 간주, 덮어쓰기 (버전 업그레이드)
+- 다른 (namespace, name) → **충돌**로 간주, 거부. 메시지에 `--as`로 다른 이름 사용하거나 기존 것을 `/uninstall`하라는 안내
+
+이 덕분에 `cookbook/weather`와 `stringhub/weather`처럼 같은 `name`을 쓰는
+다른 publisher의 앱을 `--as`만 다르게 주면 나란히 설치할 수 있다.
+
+**플래그:**
+
+| 플래그 | 효과 |
+|--------|------|
+| `--app` / `--tool` | frontmatter `type` 명시적 override |
+| `--as <local-name>` | 로컬 레지스트리 키 강제 지정. 같은 (ns, name) 충돌 회피용 |
+| `--link` | URL을 그대로 레지스트리에 등록, 로컬 복사 안 함. `/open app:<name>`마다 publisher 서버에서 fetch. http(s) URL 전용 |
 
 ### /uninstall
 
@@ -109,7 +134,8 @@ title: Packages
 **동작:**
 1. `config.json`에서 레지스트리 항목 삭제
 2. `~/.string/packages/{name}/` 디렉토리 삭제
-3. `apps/{name}/` (런타임 상태)는 삭제하지 않음
+3. **좀비 토픽 청소:** 해당 패키지를 가리키던 모든 토픽을 `/topics`에서 제거 (Map에서 삭제 — close만 하면 빈 shell이 누적됨). 출력에 정리된 토픽 이름이 함께 표시된다
+4. `apps/{name}/` (런타임 상태)는 삭제하지 않음 — 같은 이름으로 재설치하면 환경변수가 그대로 살아 있다
 
 ---
 
@@ -184,6 +210,18 @@ packages/gmail/
 `string.md`가 열린다. 내부에서 `/open compose.md` 등으로
 다른 페이지로 이동.
 
+**로컬 설치 동작 (`/install ./gmail/`)**: `string.md` 옆에 있는
+모든 `.md` 파일이 `packages/{name}/` 아래로 함께 복사된다.
+Sub-directory 구조 (`nav/main.md` 같은)는 manifest 기반 설치에서
+명시적으로 선언해야 한다 — 로컬 설치는 같은 디렉토리의
+top-level `.md`만 자동으로 가져간다.
+
+**원격 설치 동작 (manifest URL)**: publisher가 [install
+manifest](./install-manifest.md)에 `files[]`를 선언해 놓으면
+sub-directory 포함 모든 파일이 staging 디렉토리에 받아진 뒤
+원자적으로 live 위치로 swap된다. 도중에 어느 한 파일이라도
+실패하면 staging은 폐기되고 기존 설치본은 그대로 유지된다.
+
 ---
 
 ## 환경변수 ($var) 스코프
@@ -232,6 +270,7 @@ app:gmail:personal → apps/gmail/personal/env.json  # 개인 토큰
 ```yaml
 ---
 name: gmail                          # 패키지 이름 (필수)
+namespace: cookbook                  # publisher 식별자 — 충돌 검사용 (권장)
 type: app                            # app 또는 tool (필수)
 description: Gmail inbox management  # 설명
 default: inbox                       # /open 시 자동 실행할 액션
@@ -242,14 +281,18 @@ env:                                 # 필요한 환경변수 선언
 
 | 필드 | 용도 | 필수 |
 |------|------|------|
-| `name` | 패키지 이름 (`/install` 시 디렉토리명) | 권장 |
+| `name` | 패키지 이름 (`/install` 시 기본 레지스트리 키) | 권장 |
+| `namespace` | publisher 식별자. `(namespace, name)`이 패키지의 canonical identity. 두 publisher가 같은 `name`을 써도 namespace가 다르면 충돌 검사가 통과한다 | 권장 |
 | `type` | `app` 또는 `tool` | `/install` 시 필요 |
 | `description` | 설명 | 선택 |
-| `default` | 기본 액션 ID | 선택 |
+| `default` | 기본 액션 ID. `/open`, `/refresh`, `/back` 시 자동 실행 | 선택 |
 | `env` | 필요한 `$var` 선언 + 설명 | 선택 |
 
 `name`과 `type`이 없으면 `/install` 시 플래그로 명시하거나
-파일명에서 유추한다.
+파일명에서 유추한다. `namespace`가 없는 패키지도 설치 가능하지만
+같은 `name`을 쓰는 다른 패키지와 나란히 설치하기 어려워진다.
+
+자세한 의미는 [SFMD Frontmatter](../sfmd/frontmatter.md) 참조.
 
 ---
 
@@ -301,11 +344,15 @@ string app:gmail:personal '/act.inbox'
 | 로컬 `/install`, `/uninstall` | 구현 완료 |
 | `config.json` 레지스트리 | 구현 완료 |
 | `$var` 스코프 캐스케이드 | 구현 완료 |
-| 원격 레지스트리 (검색, 다운로드) | 미구현 |
+| Install manifest (HTTP source) | 구현 완료 ([스펙](./install-manifest.md)) |
+| `--link` URL 단축키 설치 | 구현 완료 |
+| `--as` 로컬 이름 override | 구현 완료 |
+| (namespace, name) 충돌 검사 | 구현 완료 |
+| 원자적 설치 (staging + atomic rename) | 구현 완료 |
 | 패키지 버전 관리 | 미구현 |
 | 의존성 (패키지 간 참조) | 미구현 |
 | 서명 / 신뢰 체계 | 미구현 |
 
-현재는 "파일 복사 + JSON 등록"의 단순한 구조.
-원격 레지스트리가 추가되면 `@string/gmail` 같은 패키지명으로
-설치하는 것도 가능해진다.
+원격 레지스트리는 install manifest를 emit하는 임의의 HTTP source면
+어디든 가능 (StringHub, 자체 GitHub Pages 등). 자세한 contract는
+[install-manifest.md](./install-manifest.md).

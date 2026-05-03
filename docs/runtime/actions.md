@@ -460,10 +460,13 @@ If the AI runs `/act.get_weather --city "Tokyo"` after opening the
 page, only the response is returned — the document content is
 already in the AI's context from the initial open.
 
-### On refresh
+### On refresh and back
 
 `/refresh` re-renders the document and re-runs the default action,
-producing the combined output again.
+producing the combined output again. `/back` does the same when it
+returns to a document that declares a default — re-running on
+return ensures live data (feeds, dashboards, inboxes) is fresh, not
+the cached snapshot from the last visit.
 
 ### Why document-declared
 
@@ -488,4 +491,4 @@ only. The AI decides what to do next.
 | **Assignment** | `{var} = {Response.body.field}` — session variable |
 | **Output** | All non-assignment lines — rendered as Markdown |
 | **Help** | `/act.name --help` — on-demand schema |
-| **Default action** | `default: name` in frontmatter — runs on `/open` and `/refresh` |
+| **Default action** | `default: name` in frontmatter — runs on `/open`, `/refresh`, and `/back` |

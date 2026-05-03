@@ -301,6 +301,10 @@ flags.
 
 ### Author writes
 
+The `for:`/`end:` directive below is response-template syntax (see
+[Actions](./actions.md#response-template)). It only has meaning
+inside an `act.<id>.response` fenced block — not in document body.
+
 ```markdown
 [Read post]({act-url})
 

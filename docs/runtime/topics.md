@@ -375,11 +375,19 @@ Filter by type:
 2 web topics open.
 ```
 
-Available type filters: `file`, `web`, `app`, `bash`.
+Available type filters: `file`, `web`, `app`, `bash`. Filtering by
+an unknown type is rejected with a clear message rather than
+silently returning an empty list.
+
+`/sessions` is a plural-form alias of `/topics` (same output, same
+type filter). `/session list` is a legacy alias kept for older
+agents — new code should prefer `/topics`.
 
 ### Closing topics
 
-`/close` without arguments closes the current topic:
+`/close` without arguments closes the **document** in the current
+topic — the topic itself remains open as a doc-less shell that
+`/open` can re-occupy without recreating session state:
 
 ```
 <𝒞=string:web:docs>
@@ -387,14 +395,21 @@ Available type filters: `file`, `web`, `app`, `bash`.
 </𝒞>
 ```
 
-`/close` with a topic name closes that topic from anywhere:
+To remove a topic entirely (drop its history, vars, bash session,
+and unlist it from `/topics`), use `/session close <name>`:
 
 ```
 <𝒞=string:file:main>
-/close bash:dev
-/close web:research
+/session close bash:dev
+/session close web:research
 </𝒞>
 ```
+
+The last remaining topic cannot be closed this way — there must
+always be at least one. As a side effect, `/uninstall <pkg>`
+automatically removes any topic whose current document points at
+the package being deleted, so users don't have to clean up
+zombie topics manually.
 
 Closing discards the topic's state — history, variables, and
 (for bash) the shell process. The topic can be reopened, but
@@ -529,6 +544,7 @@ different file path already creates an independent topic.
 | **Document paths** | Relative to the document's own location |
 | **State** | History, location, auth — all per topic |
 | **`/exec`** | Stateless one-shot shell command from topic's base path |
-| **`/topics [type]`** | List active topics, optionally filter by type |
-| **`/close [topic]`** | Close current or specified topic |
+| **`/topics [type]`** | List active topics, optionally filter by type. `/sessions` and `/session list` are aliases. |
+| **`/close`** | Close the document in the current topic (topic itself remains) |
+| **`/session close <name>`** | Remove a topic entirely from the topic list |
 | **New tab** | `/open --tab name url` — deep-copy state into new topic |

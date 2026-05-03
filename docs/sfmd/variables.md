@@ -203,4 +203,6 @@ same name within that topic's scope.
 7. Only `{var}` can be on the left side of assignment.
 8. `{var}` is session-scoped. `$VAR` is persistent per-user (with process.env fallback).
 9. Topic `{var}` overrides `$VAR` of the same name in that scope.
-10. Response paths support dot-and-bracket notation: `body.items[0].name`.
+10. Response paths accept three array-index forms, all equivalent:
+    `body.items[0].name`, `body.items.0.name`, and `$.body.items[0].name`
+    (leading `$.` is ignored for JSONPath compatibility).

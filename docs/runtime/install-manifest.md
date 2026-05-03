@@ -2,7 +2,7 @@
 
 A registry-agnostic JSON format that an HTTP source can return so the daemon's `/install` command knows how to fetch and stage the package without flag input from the agent.
 
-> **Status:** working draft. Implemented in `loader.ts` (manifest detection) and `installer.ts` (delivery dispatch). Needs colleague sign-off before docs go canonical.
+> **Status:** v1 shipping. Implemented in `loader.ts` (manifest detection, `install_hint` surfacing, path validation) and `installer.ts` (atomic staging, delivery dispatch). Schema additions in v1.x are backwards-compatible — unknown fields are ignored by the daemon.
 
 ## Why
 
@@ -25,17 +25,24 @@ When `/install <url>` fetches a URL and the response is JSON matching this shape
       "content": "...inline markdown..." }   //   content lets a manifest carry small files inline
   ],
   "delivery": "local" | "link" | "any",      // OPTIONAL — install mode hint (see below)
+  "install_hint": "Run `/install ...` to ..." // OPTIONAL — markdown shown only on pre-install browse
   // ── any other fields are ignored by the daemon ──
 }
 ```
 
 ### `files[]`
 
-The `path: 'string.md'` entry is the package root. Daemon reads its content (via `url` or inline `content`) as the SFMD document.
+The `path: 'string.md'` entry is the package root and is REQUIRED. Daemon reads its content (via `url` or inline `content`) as the SFMD document. A manifest whose `files[]` is missing the `string.md` entry is rejected with a clear error before SFMD parsing — without this guard the raw JSON would propagate to the parser as the package source and surface as a misleading "Cannot determine package type" message.
 
 Other entries are package members. Daemon stores them under `packages/{name}/{path}` for local installs.
 
-Path values must not contain `..`, must not be absolute, and must not contain `\0`. Daemon rejects manifests violating this.
+Path values must not contain `..`, must not be absolute (no leading `/` or `\`), and must not contain `\0`. Validation runs **before any file is fetched or written** — a single bad path aborts the whole install before the network or filesystem is touched, so a malicious manifest can never leave half-written files behind.
+
+### `install_hint`
+
+Optional markdown string the daemon appends below the package's `string.md` content **only when the manifest URL is opened pre-install** (i.e. via `/open <manifest-url>` to browse what the package contains). It does NOT enter the persisted package source — once `/install` runs, future `/open app:<name>` reads from the local `string.md` and the hint never echoes back.
+
+Typical use: a marketplace surfaces "Run `/install <url>` to install this app" as a one-line nudge for agents browsing the catalog.
 
 ### `delivery`
 
@@ -73,8 +80,18 @@ Agent flags always win over manifest hints:
 | `--link` | Force link mode even if manifest says `delivery: 'local'`. |
 | (future) `--local` | Force download even if manifest says `delivery: 'link'`. |
 | `--app` / `--tool` | Override frontmatter `type`. Same as before. |
+| `--as <local-name>` | Override the local registry key. Lets two apps that share `(namespace, name)`'s `name` part install side-by-side under different local handles. Independent of manifest contents. |
 
 This keeps power users in control while letting publishers opt into zero-flag UX.
+
+## Atomic staging
+
+Multi-file installs stage every fetched file under
+`packages/.{name}.tmp/`, then atomically rename to `packages/{name}/`
+once all files have been validated and written. If any step fails
+(bad manifest path, network drop, malformed file), the staging
+directory is wiped and the existing `packages/{name}/` (if any) is
+untouched. Agents never observe a partially-installed package.
 
 ## Why this isn't registry coupling
 
@@ -132,12 +149,11 @@ If `delivery` had been `"link"`, step 4 would skip; `config.json` would register
 
 ## Reference implementation
 
-- `packages/string/src/loader.ts` — JSON manifest detection in `loadHttp`.
-- `packages/string/src/installer.ts` — `readManifestDelivery()` helper, dispatch via `shouldLink`.
-- `packages/string/src/commands/packages.ts` — `--link` flag plumbing (tristate: true / undefined / future false).
+- `packages/string/src/loader.ts` — JSON manifest detection in `loadHttp`, `install_hint` surfacing, missing-`string.md` early bail.
+- `packages/string/src/installer.ts` — `readManifestDelivery()` helper, atomic stage-and-rename, manifest path validation.
+- `packages/string/src/commands/packages.ts` — `--link`, `--as` flag plumbing (`--link` tristate: true / undefined / future false).
 
 ## Open questions
 
 - **`delivery: 'any'`** — current implementation defaults this to local. Should it be configurable per-daemon?
 - **Manifest versioning** — no `version` field currently. Add one if the spec evolves?
-- **Tests** — daemon test suite has no HTTP-source coverage today (review §5). Add a fixture-based test before this lands.

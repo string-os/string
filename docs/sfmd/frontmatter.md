@@ -45,9 +45,30 @@ SFMD frontmatter but have no effect in a plain CommonMark viewer.
 | Field | Type | Description |
 |-------|------|-------------|
 | `name` | string | App or tool name (fallback: filename) |
+| `namespace` | string | Publisher identifier (e.g. `cookbook`, `stringhub`). Combined with `name`, forms the package's canonical identity for collision detection at install time. |
+| `type` | string | `app` or `tool` — for registry classification |
 | `default` | string | Action to run on open (`act.{value}`) |
-| `category` | string | `app` or `tool` — for registry classification |
 | `env` | list | Required environment variables |
+
+### namespace + name as identity
+
+When two publishers ship apps that share the same `name` (e.g.
+`cookbook/weather` and `stringhub/weather`), the `(namespace, name)`
+pair is what tells them apart. The runtime uses this pair on `/install`
+to decide whether an existing local entry is a re-install of the same
+package (allowed, in-place upgrade) or a different package colliding
+on the same local name (rejected, with a hint to use `--as`).
+
+`namespace` is optional. Apps without a namespace can still install,
+but two such apps that share `name` will collide rather than coexist.
+
+### type field
+
+Replaces the older `category` field. Accepts `app` or `tool`. Used by
+`/install` to decide registry placement (`apps[]` vs `tools[]` in
+`config.json`) and by `/open app:<name>` / `/tool:<name>` to look the
+package up. If frontmatter `type` is missing, the agent must pass
+`--app` or `--tool` explicitly at install time.
 
 ### env field
 
@@ -88,6 +109,8 @@ Content starts here.
 ```markdown
 ---
 name: weather
+namespace: cookbook
+type: app
 description: Real-time weather dashboard
 default: get_weather
 ---
@@ -102,6 +125,7 @@ default: get_weather
 ```markdown
 ---
 name: translate
+type: tool
 default: translate
 env:
   - DEEPL_KEY: "DeepL API key"
@@ -109,6 +133,23 @@ env:
     default: en
 ---
 ```
+
+---
+
+## Convention: package root file
+
+When packaging an app or tool for distribution (publishing or local
+`/install`), the entry-point document MUST be named `string.md`. The
+runtime locates a package by reading
+`{home}/packages/{name}/string.md` and uses that file's frontmatter
+to resolve the package's identity, type, default action, and env
+declarations. Sibling `.md` files in the same directory are treated
+as additional pages of a multi-file package and copied alongside
+during install.
+
+`/open app:<name>` and `/open tool:<name>` always resolve to the
+registered package's `string.md`; navigation to other pages is
+relative to that file.
 
 ---
 

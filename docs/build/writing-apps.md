@@ -1,16 +1,24 @@
 ---
-title: Writing Skills
+title: Writing Apps and Tools
 ---
 
-# Writing Skills
+# Writing Apps and Tools
 
-A skill is a single SFMD (`.md`) file that defines actions an AI agent can execute. Skills are the primary way to extend String's capabilities.
+An **app** or **tool** is one or more SFMD (`.md`) files that define
+actions an AI agent can execute. Apps are document-rooted (the agent
+opens a page and acts from within it); tools are global verbs callable
+from any topic. The package format and frontmatter are the same — only
+the `type` field differs.
 
-## Basic Structure
+## Basic structure
+
+The entry-point file MUST be named `string.md`:
 
 ```markdown
 ---
 name: my-tool
+namespace: cookbook
+type: tool
 default: run
 ---
 
@@ -27,10 +35,30 @@ CLI echo "Hello, $ARGS"
 
 | Field | Required | Description |
 |-------|----------|-------------|
-| `name` | Yes | Tool identifier (used in `/tool:name`) |
-| `default` | No | Action to run when tool is invoked without specifying one |
+| `name` | Yes | Local identifier (`/tool:name` or `/open app:name`) |
+| `namespace` | Recommended | Publisher identifier — combines with `name` to form the package's canonical identity. Lets two publishers ship `weather` without collision (e.g. `cookbook/weather` vs. `stringhub/weather`) |
+| `type` | Yes | `app` or `tool`. Apps live in `apps[]` registry; tools in `tools[]` |
+| `default` | No | Action to run on `/open`, `/refresh`, and `/back` |
 | `description` | No | Human-readable description |
 | `env` | No | Required environment variables |
+
+### Multi-file packages
+
+For larger apps, place additional `.md` files alongside `string.md`:
+
+```
+my-app/
+├── string.md          ← entry-point (required)
+├── compose.md         ← navigated to via /open compose.md
+├── thread.md
+└── nav/
+    └── main.md        ← navigation menu
+```
+
+`/install ./my-app/` copies every top-level `.md` next to `string.md`
+into `packages/{name}/`. Files in sub-directories (like `nav/main.md`)
+are kept only when published via an [install manifest](../runtime/install-manifest.md)
+that lists them explicitly in `files[]`.
 
 ## Action Types
 

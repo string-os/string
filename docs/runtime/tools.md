@@ -345,7 +345,8 @@ env:                          # Required environment variables
   - TARGET_LANG: "Topic language code"
     default: en               # Optional default value
 
-category: tool                # tool | app
+type: tool                    # tool | app — used by /install for registry placement
+namespace: cookbook           # publisher identifier (combined with name = canonical identity)
 tags: [translation, i18n]     # Search tags for registry
 ---
 ```
@@ -370,16 +371,21 @@ The same frontmatter fields work in app documents:
 ```yaml
 ---
 name: gmail
+namespace: cookbook
+type: app
 description: "Email client"
 env:
   - GMAIL_TOKEN: "OAuth access token"
-category: app
 ---
 ```
 
-Whether String treats the document as a tool or app depends on how
-it's accessed — `/tool:name` vs `/open app:name` — not the
-`category` field. The `category` is metadata for the registry.
+The `type` field decides where `/install` registers the package
+(`apps[]` vs `tools[]` in `config.json`). At call time, the dispatch
+verb (`/tool:name` vs. `/open app:name`) determines which registry
+String looks the package up in. A package can technically be reached
+either way once registered, but the convention is to match: tools use
+`type: tool` and are invoked via `/tool:`, apps use `type: app` and
+are opened via `/open app:`.
 
 ---
 

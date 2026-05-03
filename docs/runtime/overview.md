@@ -48,6 +48,8 @@ New capabilities come from new documents, not new commands.
 | 11 | [Transport](./11-transport.md) | ChanFlow channel tags, AI ↔ String communication |
 | 12 | [Response Format](./12-response-format.md) | Response structure and formatting |
 | 13 | [Tools](./13-tools.md) | /tool invocation, cmd blocks, tool vs app |
+| 14 | [Packages](./packages.md) | `/install`, `/uninstall`, registry, multi-file apps, namespace identity |
+| 15 | [Install Manifest](./install-manifest.md) | JSON contract for HTTP-source installs |
 
 ---
 

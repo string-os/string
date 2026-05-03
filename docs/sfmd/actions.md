@@ -376,7 +376,7 @@ The info string is `act.` + action ID + `.response`.
 
 ### Template lines
 
-A response template contains four types of lines, recognized in
+A response template contains six types of lines, recognized in
 this order:
 
 **1. Assignment lines** — store values from the response:
@@ -410,7 +410,25 @@ decode: base64
 Currently supported: `base64`, `none`. After decoding, the buffer
 holds the decoded bytes.
 
-**4. To directive** — write the buffer to a file:
+**4. For/end directive** — iterate over an array in the response:
+
+```
+for: post in Response.body.posts
+- [{post.title}](act:read?id={post.id}) — by {post.author.name}
+end:
+```
+
+`for: <var> in <path>` opens a loop. `<path>` is resolved against the
+response (same path syntax as assignment lines and `save:`). `<var>`
+binds each element to a name that can be referenced inside the loop
+as `{var}` or `{var.field}` for object elements. `end:` closes the
+nearest open loop.
+
+Loops MAY be empty (zero iterations produce zero output). If `<path>`
+resolves to a non-array value, the loop produces a warning line and
+no output. Loops MUST NOT be nested in v0.1.
+
+**5. To directive** — write the buffer to a file:
 
 ```
 to: {filename}
@@ -421,7 +439,7 @@ variable) substitution. After writing, no output is produced by
 default — the author should add an explicit output line for any
 user-visible success message.
 
-**5. Output lines** — everything else:
+**6. Output lines** — everything else:
 
 ```
 ## Weather in {city}
@@ -491,9 +509,11 @@ Response data is accessed using dot-and-bracket notation:
 | `{Response.status}` | HTTP status code |
 | `{Response.body}` | Entire response body |
 
-Array indices use `[N]` syntax and are zero-based. Paths that
-resolve to `undefined` (missing key, out-of-range index) produce
-an empty string in output lines.
+Array indices accept either `[N]` or bare-digit `.N` form, both
+zero-based: `body.items[0].name` and `body.items.0.name` are
+equivalent. A leading `$.` is allowed and ignored (JSONPath
+compatibility). Paths that resolve to `undefined` (missing key,
+out-of-range index) produce an empty string in output lines.
 
 ### Execution behavior
 
