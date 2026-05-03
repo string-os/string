@@ -126,7 +126,24 @@ export async function cmdOpen(
       const registeredUri = loader.envStore.getPackage(registryType, registryName);
       if (registeredUri) {
         uri = registeredUri;
+      } else if (appMatch || toolMatch) {
+        // Explicit app:/tool: form must resolve from the registry. If we let
+        // it fall through to path resolution, the colon-prefixed string ends
+        // up joined onto the cwd (e.g. "packages/translate/app:translate"),
+        // which surfaces as a confusing ENOENT instead of the real cause.
+        const installed = Object.keys(loader.envStore.listPackages(registryType));
+        const label = registryType === 'apps' ? 'App' : 'Tool';
+        const hint = installed.length
+          ? `\nInstalled ${registryType}: ${installed.join(', ')}`
+          : `\nNo ${registryType} installed yet. Use /install <source> to add one.`;
+        return err(
+          `${label} '${registryName}' is not installed. ` +
+          `Run /install <source> to install it.${hint}`,
+          'NOT_FOUND'
+        );
       }
+      // Bare-name miss falls through silently — same string may also be a
+      // valid relative path (legacy behavior preserved).
     }
   }
 
@@ -191,6 +208,11 @@ export async function cmdOpen(
     const { content: rendered, autoShortcuts } = await render(doc, blockId, loader.home, loader, envScope);
     session.setAutoShortcuts(autoShortcuts);
 
+    // displaySuffix is appended at the very end — purely cosmetic, not
+    // persisted, not parsed. Currently used to surface install-hint when
+    // /open targets a marketplace manifest URL (pre-install browse).
+    const suffix = loaded.displaySuffix ?? '';
+
     // Default action: auto-execute if frontmatter declares one
     const defaultAction = doc.frontmatter.default as string | undefined;
     if (defaultAction && !blockId) {
@@ -198,12 +220,12 @@ export async function cmdOpen(
       if (action) {
         const actionResult = await executeAction(action, '', session, loader);
         if (actionResult.ok) {
-          return ok(`Opened ${openLabel}\n---\n${rendered}\n\n---\n\n${actionResult.content}`);
+          return ok(`Opened ${openLabel}\n---\n${rendered}\n\n---\n\n${actionResult.content}${suffix}`);
         }
       }
     }
 
-    return ok(`Opened ${openLabel}\n---\n${rendered}`);
+    return ok(`Opened ${openLabel}\n---\n${rendered}${suffix}`);
   } catch (e) {
     if (e instanceof StringError) {
       // Add recovery hints for common errors

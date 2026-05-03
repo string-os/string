@@ -14,10 +14,24 @@ import { EnvStore } from './env-store.js';
 export interface LoadResult {
   /** Canonical URI — always absolute (file:// or https://) */
   uri: string;
-  /** Raw markdown source */
+  /** Raw markdown source — pristine; this is what gets persisted on /install. */
   source: string;
   /** Original source before conversion (e.g. raw HTML before htmlToMarkdown) */
   rawSource?: string;
+  /**
+   * Optional markdown to append AT DISPLAY TIME ONLY (not stored, not parsed
+   * for actions). Currently used by manifest-aware HTTP loads to surface an
+   * install hint to agents browsing a marketplace URL. Empty / undefined for
+   * file:// loads so installed apps don't carry stale hints.
+   */
+  displaySuffix?: string;
+}
+
+/** A single entry in the install-manifest's files[] array. */
+interface ManifestFile {
+  path: string;
+  url?: string;
+  content?: string;
 }
 
 export interface ActionResult extends LoadResult {
@@ -44,12 +58,34 @@ export interface LoaderOptions {
   htmlToMarkdown?: HtmlToMarkdown;
 }
 
+/**
+ * Hook the Browser registers so package commands (e.g. /uninstall) can ask
+ * "close any session whose currentUri matches this predicate" without taking
+ * a Browser reference. Returns the names of sessions it closed, for reporting.
+ *
+ * Why on Loader: dispatch passes (input, session, loader, topicType); commands
+ * see the loader but not the Browser. Threading Browser through every command
+ * just for one cleanup path is overkill. The loader already has lifetime
+ * matching the Browser, so it's a natural rendezvous.
+ */
+export type SessionCleanup = (predicate: (uri: string) => boolean) => string[];
+
 export class Loader {
   readonly home: string;
   readonly accessMode: AccessMode;
   readonly envStore: EnvStore;
+  /** Set by Browser at construction. Optional — non-Browser embeddings skip. */
+  sessionCleanup?: SessionCleanup;
   private readonly allowHttp: boolean;
   private readonly htmlToMarkdown: HtmlToMarkdown | null;
+
+  // In-memory cache of install manifests keyed by the URL they were fetched
+  // from. Lets resolve() route relative paths through manifest.files[] for
+  // linked installs (where sibling .md files don't sit next to string.md
+  // in URL space — they're at arbitrary URLs the manifest declares).
+  // Bounded; see {@link rememberManifest}.
+  private readonly manifestCache = new Map<string, ManifestFile[]>();
+  private static readonly MANIFEST_CACHE_MAX = 64;
 
   constructor(options: LoaderOptions = {}) {
     this.home = options.home ?? process.cwd();
@@ -57,6 +93,15 @@ export class Loader {
     this.accessMode = options.accessMode ?? 'full';
     this.envStore = new EnvStore(this.home);
     this.htmlToMarkdown = options.htmlToMarkdown ?? null;
+  }
+
+  private rememberManifest(url: string, files: ManifestFile[]): void {
+    // Evict oldest if at capacity (Map preserves insertion order).
+    if (this.manifestCache.size >= Loader.MANIFEST_CACHE_MAX) {
+      const oldest = this.manifestCache.keys().next().value;
+      if (oldest !== undefined) this.manifestCache.delete(oldest);
+    }
+    this.manifestCache.set(url, files);
   }
 
   /**
@@ -266,6 +311,18 @@ export class Loader {
     }
 
     if (baseUri?.startsWith('https://') || baseUri?.startsWith('http://')) {
+      // Manifest-aware resolution: if baseUri was loaded as an install
+      // manifest, look up the relative path in its files[]. This is the
+      // only sensible mapping for linked installs (the install URL is a
+      // catalog endpoint, not a directory — joining "submolts.md" onto
+      // .../api/install/foo/bar yields a 404).
+      const manifestFiles = this.manifestCache.get(baseUri);
+      if (manifestFiles) {
+        const entry = manifestFiles.find((f) => f.path === topic);
+        if (entry?.url) return entry.url;
+        // No matching entry: fall through to URL join (404 will surface
+        // a clear "Not found" rather than silently returning bogus data).
+      }
       const base = new URL(baseUri);
       return new URL(topic, base).toString();
     }
@@ -305,7 +362,7 @@ export class Loader {
     let res: Response;
     try {
       res = await fetch(uri, {
-        headers: { Accept: 'text/markdown, text/plain' },
+        headers: { Accept: 'application/json, text/markdown, text/plain' },
       });
     } catch (err) {
       throw new StringError('LOAD_ERROR', `Network error fetching ${uri}: ${(err as Error).message}`);
@@ -320,11 +377,72 @@ export class Loader {
 
     let source = await res.text();
     let rawSource: string | undefined;
+    let displaySuffix: string | undefined;
+
+    // Detect install manifest: { files: [{path, url}|{path, content}], ... }
+    // Marketplace endpoints (e.g. /api/install/{ns}/{app}) return this shape.
+    // Extract string.md content for SFMD resolution; preserve original JSON in
+    // rawSource so installer can iterate files[] and download the rest.
+    try {
+      const manifest = JSON.parse(source);
+      if (manifest && Array.isArray(manifest.files)) {
+        // Remember every manifest URL we see so future relative /open or
+        // shortcut resolution can route through manifest.files[] instead
+        // of joining against the install URL's parent (which is wrong for
+        // linked external apps where sibling files live at arbitrary urls).
+        this.rememberManifest(uri, manifest.files as ManifestFile[]);
+
+        const entry = manifest.files.find((f: { path: string }) => f.path === 'string.md');
+        if (!entry) {
+          // The shape said "I am a manifest" (files[] array present), but it
+          // forgot the canonical entry. Without this guard we fall through
+          // with the raw JSON as `source`, which the SFMD parser then fails
+          // to parse, ultimately surfacing as "Cannot determine package type"
+          // — a misleading recovery hint that sends users in the wrong
+          // direction (the docs even tell them to add --app, which doesn't
+          // help). Bail early with the actual cause.
+          const declared = manifest.files
+            .map((f: { path?: unknown }) => typeof f?.path === 'string' ? f.path : null)
+            .filter((p: unknown): p is string => typeof p === 'string')
+            .slice(0, 5)
+            .join(', ');
+          throw new StringError(
+            'LOAD_ERROR',
+            `Manifest at ${uri} is missing a "string.md" entry in files[]. ` +
+            `Every package must have a string.md root file.` +
+            (declared ? `\nDeclared paths: ${declared}` : '')
+          );
+        }
+
+        rawSource = source;
+        if (typeof entry.content === 'string') {
+          source = entry.content;
+        } else if (typeof entry.url === 'string') {
+          const r = await fetch(entry.url, { headers: { Accept: 'text/markdown, text/plain' } });
+          if (!r.ok) {
+            throw new StringError('LOAD_ERROR', `HTTP ${r.status} fetching entry ${entry.url}`);
+          }
+          source = await r.text();
+        }
+        // Optional install_hint: shown only for manifest-URL /open (i.e.
+        // pre-install browsing). We carry it as a separate displaySuffix
+        // rather than mutating source, so /install writes the pristine
+        // string.md to disk — once installed, /open uses file://, no
+        // manifest, no hint echoing back at agents who already installed.
+        if (typeof manifest.install_hint === 'string' && manifest.install_hint.trim()) {
+          displaySuffix = '\n\n---\n\n' + manifest.install_hint.trim() + '\n';
+        }
+      }
+    } catch (err) {
+      if (err instanceof StringError) throw err;
+      // Not JSON — leave source as-is (plain markdown response)
+    }
+
     if (this.htmlToMarkdown && isHtmlResponse(res)) {
       rawSource = source;
       source = this.htmlToMarkdown(source, uri);
     }
-    return { uri, source, rawSource };
+    return { uri, source, rawSource, displaySuffix };
   }
 }
 

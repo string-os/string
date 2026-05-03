@@ -551,6 +551,15 @@ await section('Response template: walkJsonPath supports array indices', async ()
   assert(walkJsonPath(obj, '$.candidates[0].content.parts[0].inlineData.data') === 'first', 'leading $ stripped');
   assert(walkJsonPath(obj, 'candidates[5].content') === undefined, 'out-of-bounds returns undefined');
   assert(walkJsonPath(obj, 'candidates[0].missing.key') === undefined, 'missing key returns undefined');
+
+  // Bare-digit form: `candidates.0.content.parts.0.inlineData.data` — used by
+  // some hub-published apps and shown in public docs (build/writing-apps.md).
+  // Regression: walkJsonPath previously required `[N]` and silently returned
+  // empty for the dot-N form.
+  assert(walkJsonPath(obj, 'candidates.0.content.parts.0.inlineData.data') === 'first', 'bare-digit array index');
+  assert(walkJsonPath(obj, 'candidates.1.content.parts.0.inlineData.data') === 'other-cand', 'bare-digit second candidate');
+  // Mixed forms should both work.
+  assert(walkJsonPath(obj, 'candidates[0].content.parts.1.inlineData.data') === 'second', 'mixed bracket + bare digit');
 });
 
 await section('Action body template substitution: JSON string escaping', async () => {

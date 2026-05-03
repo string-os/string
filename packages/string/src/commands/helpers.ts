@@ -140,7 +140,8 @@ export function substituteVars(input: string, session: Session): { result: strin
  *
  * Supported syntax:
  *   `body.location.name`              — nested object property access
- *   `candidates[0].content`           — object property + array index
+ *   `candidates[0].content`           — bracket array index
+ *   `results.0.latitude`              — bare-digit array index (dot-separated)
  *   `parts[0].inlineData.data`        — chained array indices
  *   `$.candidates[0].content`         — leading `$.` (JSONPath convention) is allowed and ignored
  *
@@ -149,15 +150,18 @@ export function substituteVars(input: string, session: Session): { result: strin
  * is "extract one value from a known shape", not a query engine.
  */
 export function walkJsonPath(obj: unknown, pathStr: string): unknown {
-  // Tokenize: keys (`name`) and array indices (`[N]`) interleaved, optionally
-  // separated by `.`. Leading `$.` or `$` is stripped.
+  // Tokenize: keys (`name`), bracket indices (`[N]`), and bare-digit indices
+  // (`results.0`) interleaved, optionally separated by `.`. Leading `$.` is
+  // stripped. Bare-digit support exists because public docs and several
+  // hub-published apps use the dot-N form (e.g. `results.0.latitude`).
   const cleaned = pathStr.replace(/^\$\.?/, '');
   const tokens: (string | number)[] = [];
-  const re = /([a-zA-Z_][\w-]*)|\[(\d+)\]/g;
+  const re = /([a-zA-Z_][\w-]*)|\[(\d+)\]|(\d+)/g;
   let m;
   while ((m = re.exec(cleaned)) !== null) {
     if (m[1] !== undefined) tokens.push(m[1]);
     else if (m[2] !== undefined) tokens.push(parseInt(m[2], 10));
+    else if (m[3] !== undefined) tokens.push(parseInt(m[3], 10));
   }
   let current: unknown = obj;
   for (const tok of tokens) {

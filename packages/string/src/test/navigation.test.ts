@@ -169,7 +169,7 @@ await section('Session management', async () => {
   const list = await b.exec('/session');
   assert(list.ok, 'session list ok');
   assert(list.content.includes('* main'), 'main session marked active');
-  assert(list.content.includes('sessions:'), 'sessions header shown');
+  assert(list.content.includes('Active topics:'), 'topics header shown');
 
   // /session list also works
   const list2 = await b.exec('/session list');
@@ -212,6 +212,50 @@ await section('Session management', async () => {
   const fromAlpha = await b2.exec('/session', 'alpha');
   assert(fromAlpha.content.includes('* alpha'), '* marker on caller session');
   assert(!fromAlpha.content.includes('* beta'), 'beta not marked active');
+});
+
+await section('/topics — alias of /sessions, formatted listing (Round 2 #2)', async () => {
+  const b = mkBrowser();
+  await b.exec('/info', 'main');     // file:main
+  await b.exec('/info', 'web:docs'); // web:docs
+
+  const r = await b.exec('/topics');
+  assert(r.ok, '/topics ok');
+  assert(r.content.includes('Active topics:'), 'header present');
+  assert(r.content.includes('main'), 'main listed');
+  assert(r.content.includes('web:docs'), 'web:docs listed');
+  // Type column derived from session name
+  assert(/main\s+file/.test(r.content), 'main typed as file');
+  assert(/web:docs\s+web/.test(r.content), 'web:docs typed as web');
+  assert(/2 topics open\./.test(r.content), 'count line correct');
+
+  // /sessions plural alias
+  const rPlural = await b.exec('/sessions');
+  assert(rPlural.ok, '/sessions ok');
+  assert(rPlural.content === r.content, '/sessions output matches /topics');
+});
+
+await section('/topics <type> — filter by topic type (Round 2 #2)', async () => {
+  const b = mkBrowser();
+  await b.exec('/info', 'main');         // file:main
+  await b.exec('/info', 'web:docs');     // web:docs
+  await b.exec('/info', 'web:research'); // web:research
+
+  const r = await b.exec('/topics web');
+  assert(r.ok, '/topics web ok');
+  assert(r.content.includes('web:docs'), 'web:docs listed');
+  assert(r.content.includes('web:research'), 'web:research listed');
+  assert(!r.content.includes('main'), 'main not listed');
+  assert(/2 web topics open\./.test(r.content), 'filtered count present');
+
+  const rApp = await b.exec('/topics app');
+  assert(rApp.ok, '/topics app ok (no app topics)');
+  assert(rApp.content.includes('No app topics open'), 'empty filter has friendly message');
+
+  const rBad = await b.exec('/topics bogus');
+  assert(!rBad.ok, '/topics with invalid type fails fast');
+  assert(rBad.content.includes('Unknown topic type'), 'error names the unknown type');
+  assert(rBad.content.includes('file, web, app, bash'), 'error lists valid types');
 });
 
 await section('Error handling', async () => {

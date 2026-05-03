@@ -192,9 +192,11 @@ export function cmdHelp(session: Session, mode?: 'bash'): CommandResult {
   lines.push('/append <path>               Append to file');
   lines.push('/verify <path>#block         Verify block exists and show content');
   lines.push('');
-  lines.push('### Sessions');
-  lines.push('/session                     List sessions in current scheme');
-  lines.push('/session close [name]        Close a session');
+  lines.push('### Topics (sessions)');
+  lines.push('/topics                      List active topics');
+  lines.push('/topics <type>               Filter by type: file, web, app, bash');
+  lines.push('/sessions                    Alias of /topics');
+  lines.push('/session close [name]        Close a session by name');
   lines.push('');
   lines.push('### Tools');
   lines.push('/tool:<name>                  Run tool (default action)');

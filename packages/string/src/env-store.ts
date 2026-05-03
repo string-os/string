@@ -13,7 +13,7 @@
  * Resolution order (most specific wins): config → app → global
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { readFileSync, writeFileSync, mkdirSync, statSync } from 'fs';
 import { join, dirname } from 'path';
 
 export interface EnvScope {
@@ -23,7 +23,8 @@ export interface EnvScope {
 
 export class EnvStore {
   private readonly baseDir: string; // String user home — root for config/apps
-  private readonly fileCache = new Map<string, Record<string, unknown>>();
+  // mtime-keyed cache: invalidates if file was edited (or deleted) outside this process.
+  private readonly fileCache = new Map<string, { mtimeMs: number; data: Record<string, unknown> }>();
 
   constructor(home: string) {
     this.baseDir = home;
@@ -147,17 +148,28 @@ export class EnvStore {
   // ── File I/O ────────────────────────────────────────────────────────────────
 
   private readJson(filePath: string): Record<string, unknown> {
-    if (this.fileCache.has(filePath)) return this.fileCache.get(filePath)!;
+    // Check on-disk mtime first. If the file was deleted or modified outside
+    // this process (e.g. user did `rm -rf ~/.string`), our cached copy is stale
+    // and reusing it would resurrect data the user just deleted.
+    let mtimeMs: number | null = null;
+    try {
+      mtimeMs = statSync(filePath).mtimeMs;
+    } catch {
+      // File missing — drop any cached copy and return empty.
+      this.fileCache.delete(filePath);
+      return {};
+    }
+    const cached = this.fileCache.get(filePath);
+    if (cached && cached.mtimeMs === mtimeMs) return cached.data;
+
     try {
       const data = JSON.parse(readFileSync(filePath, 'utf-8'));
       if (typeof data === 'object' && data !== null && !Array.isArray(data)) {
-        this.fileCache.set(filePath, data as Record<string, unknown>);
+        this.fileCache.set(filePath, { mtimeMs, data: data as Record<string, unknown> });
         return data as Record<string, unknown>;
       }
-    } catch { /* file doesn't exist yet — that's fine */ }
-    const empty: Record<string, unknown> = {};
-    this.fileCache.set(filePath, empty);
-    return empty;
+    } catch { /* unreadable — fall through to empty */ }
+    return {};
   }
 
   private writeJson(filePath: string, data: Record<string, unknown>): void {
@@ -166,7 +178,8 @@ export class EnvStore {
       // be world-readable on shared machines.
       mkdirSync(dirname(filePath), { recursive: true, mode: 0o700 });
       writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', { mode: 0o600 });
-      this.fileCache.set(filePath, data);
+      const mtimeMs = statSync(filePath).mtimeMs;
+      this.fileCache.set(filePath, { mtimeMs, data });
     } catch (e) {
       console.error(`[EnvStore] Failed to write ${filePath}: ${e}`);
     }
