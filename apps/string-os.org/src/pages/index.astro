@@ -2,34 +2,6 @@
 const installCommand = `npm install -g @string-os/string`;
 const skillUrl = `https://string-os.org/skill.md`;
 
-const skillMdSnippet = `---
-title: String — Install Skill
----
-
-# Install String
-
-This document tells you how to install and start using String.
-
-## 1. Install
-\`\`\`bash
-npm install -g @string-os/string
-\`\`\`
-
-## 2. Start the daemon
-\`\`\`bash
-string --daemon start
-\`\`\`
-
-## 3. Install an app
-\`\`\`bash
-string file:setup '/install --app ./apps/weather/string.md'
-\`\`\`
-
-## 4. Use it
-\`\`\`bash
-string app:weather '/act.now --city Seoul'
-\`\`\``;
-
 const weatherApp = `---
 name: weather
 type: app
@@ -65,6 +37,14 @@ Tokyo, 5-day forecast:
   Thu: ⛅ +25°C
   Fri: ☀️ +29°C
 </𝒞>`;
+
+const surfaces = [
+  { kind: 'read',       domain: 'documents',   verb: '/open file.md' },
+  { kind: 'structured', domain: 'apps',        verb: '/act.<name>' },
+  { kind: 'remote',     domain: 'the web',     verb: '/open https://…' },
+  { kind: 'write',      domain: 'editing',     verb: '/edit · /write' },
+  { kind: 'execution',  domain: 'shell · API', verb: '/exec · act.cli' },
+];
 ---
 
 <!doctype html>
@@ -72,16 +52,15 @@ Tokyo, 5-day forecast:
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="String OS — apps for AI agents. Just markdown. Works in any agent. Up to 99% fewer tokens." />
-    <meta property="og:title" content="String OS — Apps for AI agents. Just markdown." />
-    <meta property="og:description" content="An AI-native runtime where capabilities are markdown documents. Up to 99% fewer tokens, ~50% fewer task errors." />
+    <meta name="description" content="String — a universal surface for AI agent work. One interface to read, navigate, act, and edit across documents, apps, and the web." />
+    <meta property="og:title" content="String — a surface for agent work" />
+    <meta property="og:description" content="The web gave humans a universal surface for information. String gives AI agents a universal surface for work." />
     <meta property="og:url" content="https://string-os.org" />
     <meta property="og:type" content="website" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
-    <title>String — Apps for AI agents. Just markdown.</title>
+    <title>String — a surface for agent work</title>
   </head>
   <body>
-    <!-- Top nav -->
     <nav class="top">
       <a class="brand" href="/">String</a>
       <div class="nav-links">
@@ -91,90 +70,71 @@ Tokyo, 5-day forecast:
       </div>
     </nav>
 
-    <!-- Hero -->
-    <section class="section hero">
-      <div class="eyebrow">String OS</div>
-      <h1>Apps for AI agents.<br/><span class="accent">Just markdown.</span></h1>
+    <!-- HERO -->
+    <header class="hero">
+      <h1>
+        A surface for<br/>
+        <span class="accent">agent work.</span>
+      </h1>
       <p class="lede">
-        An AI-native runtime where every capability is a markdown document.
-        One interface for every tool. Up to <b>99% fewer tokens</b>,
-        ~<b>50% fewer task errors</b>.
+        The web gave humans a universal surface for information.
+        String aims to give AI agents a universal surface for work —
+        one interface to <b>read, navigate, act, and edit</b>
+        across documents, apps, and the web.
       </p>
       <div class="cta-row">
         <a class="cta primary" href="https://docs.string-os.org">Read the docs →</a>
         <a class="cta secondary" href="https://github.com/string-os/string">GitHub</a>
       </div>
-      <div class="hero-install">
-        <code>{installCommand}</code>
+      <a class="hero-skill" href={skillUrl}>
+        <span class="hero-skill-label">Drop this URL into your AI agent →</span>
+        <code class="hero-skill-url">{skillUrl.replace(/^https?:\/\//, '')}</code>
+      </a>
+    </header>
+
+    <!-- THE PATTERN — flowing prose, no eyebrow -->
+    <section class="flow">
+      <p>
+        Today's agent tooling is islands. MCP, function calling, every framework
+        lives in its own world. Each integration is a code project; each tool
+        has its own shape. The agent learns each one separately, and pays for
+        the schema in every call.
+      </p>
+      <p>
+        String's bet is simpler. Every capability — a document, an app, a remote
+        URL, an editable file — gets the <em>same</em> shape. The agent reads
+        a markdown file the way it reads a webpage. Actions live inline.
+        Navigation is by link. State is scoped per topic. New capability =
+        new markdown file. No host config, no restart, same interface in any
+        agent.
+      </p>
+    </section>
+
+    <!-- FIVE SURFACES — quick visual taxonomy -->
+    <section class="surfaces-section">
+      <h2>Five surfaces. One runtime.</h2>
+      <p class="body">
+        Different domains an agent works against — the same primitives address
+        them all.
+      </p>
+      <div class="surfaces">
+        {surfaces.map(s => (
+          <div class="surface">
+            <div class="surface-kind">{s.kind}</div>
+            <div class="surface-domain">{s.domain}</div>
+            <code class="surface-verb">{s.verb}</code>
+          </div>
+        ))}
       </div>
     </section>
 
-    <!-- What is String -->
-    <section class="section define">
-      <div class="eyebrow">What is String OS?</div>
-      <h2>Capabilities are documents, not programs.</h2>
+    <!-- A REAL APP — code + session -->
+    <section class="demo">
+      <h2>A real app, end to end.</h2>
       <p class="body">
-        Every tool an AI agent uses today has its own interface — REST APIs need endpoint
-        URLs and JSON schemas, MCP servers need protocol negotiation, CLI tools need
-        argument parsing. Each integration is a code project.
+        Below: a weather app — the entire app — and an agent session calling
+        it. The agent reads the same file you do.
       </p>
-      <p class="body">
-        String makes every capability a markdown file. The agent reads it the same way
-        it reads a webpage. Actions live inline. Navigation is by link. State is
-        scoped per app. New capability = new markdown file. No host config. No restart.
-        Same interface in any agent.
-      </p>
-
-      <div class="diagram">
-        <div class="node user">AI agent</div>
-        <div class="arrow">↔</div>
-        <div class="node runtime">String runtime<br/><span>open · act · nav</span></div>
-        <div class="arrow">↔</div>
-        <div class="node apps">
-          <span class="md-card">weather.md</span>
-          <span class="md-card">moltbook.md</span>
-          <span class="md-card">gmail.md</span>
-        </div>
-      </div>
-    </section>
-
-    <!-- The artifact: skill.md -->
-    <section class="section artifact">
-      <div class="eyebrow">Drop this into your AI agent.</div>
-      <h2>One link. Your agent installs String and starts using apps.</h2>
-
-      <div class="link-card">
-        <div class="link-label">Share this URL with any AI agent:</div>
-        <code class="link-url">{skillUrl}</code>
-      </div>
-
-      <div class="split">
-        <div class="split-col">
-          <div class="col-label">skill.md (excerpt)</div>
-          <pre class="code"><code>{skillMdSnippet}</code></pre>
-        </div>
-        <div class="split-col">
-          <div class="col-label">What the agent does</div>
-          <ol class="steps">
-            <li>Reads the skill.md document</li>
-            <li>Runs <code>npm install -g @string-os/string</code></li>
-            <li>Starts the daemon</li>
-            <li>Installs apps from URLs or local paths</li>
-            <li>Calls <code>/act.&lt;name&gt;</code> on any app — same interface every time</li>
-          </ol>
-        </div>
-      </div>
-    </section>
-
-    <!-- The artifact: an app -->
-    <section class="section app-demo">
-      <div class="eyebrow">A String App</div>
-      <h2>This file is the entire app.</h2>
-      <p class="body">
-        50 lines of markdown. Read it, fork it, audit it, edit it. The agent reads the
-        same file you do.
-      </p>
-
       <div class="split">
         <div class="split-col">
           <div class="col-label">apps/weather/string.md</div>
@@ -187,11 +147,28 @@ Tokyo, 5-day forecast:
       </div>
     </section>
 
-    <!-- Why String -->
-    <section class="section why">
-      <div class="eyebrow">Why String?</div>
-      <h2>Cheaper to run. Better at the task.</h2>
+    <!-- DROP-IN (skill.md is the primary action; direct install is the footnote) -->
+    <section class="install">
+      <h2>Hand any AI agent this URL.</h2>
+      <p class="body">
+        The agent reads it, installs String, and starts using apps. No SDK,
+        no protocol negotiation, no per-agent integration code.
+      </p>
 
+      <a class="skill-pointer" href={skillUrl}>
+        <div class="skill-label">Drop this URL into your AI agent →</div>
+        <code class="skill-url">{skillUrl}</code>
+      </a>
+
+      <p class="install-direct">
+        Or install directly (for humans driving String themselves):
+        <code>{installCommand}</code>
+      </p>
+    </section>
+
+    <!-- WHY IT PAYS OFF — quieter than before, mid-page -->
+    <section class="numbers">
+      <h2>Why it pays off.</h2>
       <div class="metrics">
         <div class="metric">
           <div class="metric-num">50–99<span class="unit">%</span></div>
@@ -206,7 +183,7 @@ Tokyo, 5-day forecast:
           <div class="metric-label">fewer task errors</div>
           <div class="metric-detail">
             Agents read markdown all day. Familiar interface plus self-discovery
-            (next actions are right in the response) cut wrong-tool failures.
+            (next actions appear in the response) cut wrong-tool failures.
           </div>
         </div>
         <div class="metric">
@@ -218,7 +195,7 @@ Tokyo, 5-day forecast:
           </div>
         </div>
         <div class="metric">
-          <div class="metric-num">50<span class="unit"> lines</span></div>
+          <div class="metric-num">~50<span class="unit"> lines</span></div>
           <div class="metric-label">per app, on average</div>
           <div class="metric-detail">
             An app is a markdown file. No build step, no schema, no host process.
@@ -226,39 +203,17 @@ Tokyo, 5-day forecast:
           </div>
         </div>
       </div>
-
       <p class="footnote">
         Numbers from early benchmarks comparing equivalent task completion across
-        MCP, function calling, and String. Detailed methodology in the docs.
+        MCP, function calling, and String. Methodology in the docs.
       </p>
     </section>
 
-    <!-- The deeper insight -->
-    <section class="section insight">
-      <div class="eyebrow">The deeper pattern</div>
-      <h2>The web for AI agents.</h2>
-      <p class="body big">
-        The web works because pages link to pages. AI tooling today is islands —
-        MCP, function calling, every framework lives in its own world.
+    <!-- CLOSING -->
+    <section class="close">
+      <p class="close-line">
+        Same primitives. Same shape. <span class="accent">The agent learns String once and uses everything.</span>
       </p>
-      <p class="body big">
-        String unifies them with two verbs an agent already knows:
-        <code>/open</code> any document, <code>/act</code> on any capability.
-        Responses contain links. Links open more documents. Capabilities compose
-        the same way pages do.
-      </p>
-      <p class="body big accent-line">
-        That's the whole game.
-      </p>
-    </section>
-
-    <!-- Get started -->
-    <section class="section start">
-      <div class="eyebrow">Get started</div>
-      <h2>Three commands.</h2>
-      <pre class="code wide"><code>{`npm install -g @string-os/string
-string --daemon start
-string file:setup '/install --app ./apps/weather/string.md'`}</code></pre>
       <div class="cta-row">
         <a class="cta primary" href="https://docs.string-os.org">Read the docs →</a>
         <a class="cta secondary" href="https://github.com/string-os/string">GitHub</a>
@@ -267,7 +222,7 @@ string file:setup '/install --app ./apps/weather/string.md'`}</code></pre>
     </section>
 
     <footer class="footer">
-      <div>String OS · open source · MIT</div>
+      <div>String · open source · MIT</div>
       <div class="footer-links">
         <a href="https://docs.string-os.org">Docs</a>
         <a href="https://github.com/string-os/string">GitHub</a>
@@ -288,9 +243,6 @@ string file:setup '/install --app ./apps/weather/string.md'`}</code></pre>
         --line: #1f2330;
         --code-bg: #0a0c11;
         --code-fg: #c9d1d9;
-        --keyword: #ff7b54;
-        --string: #b8d68c;
-        --comment: #6b7280;
       }
 
       * { box-sizing: border-box; }
@@ -303,7 +255,7 @@ string file:setup '/install --app ./apps/weather/string.md'`}</code></pre>
         color: var(--fg);
         font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
         font-size: 17px;
-        line-height: 1.55;
+        line-height: 1.6;
         -webkit-font-smoothing: antialiased;
         text-rendering: optimizeLegibility;
       }
@@ -315,6 +267,7 @@ string file:setup '/install --app ./apps/weather/string.md'`}</code></pre>
         font-size: 14px;
       }
 
+      /* ── Top nav ────────────────────────────────────────────────────────── */
       .top {
         position: sticky;
         top: 0;
@@ -332,68 +285,104 @@ string file:setup '/install --app ./apps/weather/string.md'`}</code></pre>
       .nav-links a { color: var(--fg-muted); font-size: 15px; transition: color 0.15s; }
       .nav-links a:hover { color: var(--fg); }
 
-      .section {
-        max-width: 1100px;
+      /* ── Section rhythm — varied, not slide-uniform ─────────────────────── */
+      header.hero,
+      section {
+        max-width: 920px;
         margin: 0 auto;
-        padding: 120px 32px;
-        border-bottom: 1px solid var(--line);
+        padding: 80px 32px;
       }
+      header.hero { padding-top: 120px; padding-bottom: 96px; }
+      section.flow { padding-top: 0; padding-bottom: 56px; }
+      section.surfaces-section { padding-top: 56px; padding-bottom: 80px; }
+      section.demo { padding-top: 80px; padding-bottom: 80px; background: var(--bg-2); max-width: none; }
+      section.demo > * { max-width: 920px; margin-left: auto; margin-right: auto; }
+      section.install { padding-top: 88px; padding-bottom: 80px; }
+      section.numbers { padding-top: 80px; padding-bottom: 80px; background: var(--bg-2); max-width: none; }
+      section.numbers > * { max-width: 920px; margin-left: auto; margin-right: auto; }
+      section.close { padding-top: 96px; padding-bottom: 96px; text-align: center; }
 
-      .eyebrow {
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        font-size: 13px;
-        color: var(--accent);
-        font-weight: 600;
-        margin-bottom: 24px;
-      }
-
+      /* ── Hero ───────────────────────────────────────────────────────────── */
       h1 {
-        font-size: clamp(48px, 7vw, 88px);
+        font-size: clamp(44px, 6vw, 72px);
         line-height: 1.05;
         letter-spacing: -0.025em;
         font-weight: 700;
-        margin: 0 0 32px 0;
+        margin: 0 0 28px 0;
       }
       h1 .accent { color: var(--accent); }
 
-      h2 {
-        font-size: clamp(36px, 5vw, 60px);
-        line-height: 1.1;
-        letter-spacing: -0.02em;
-        font-weight: 700;
-        margin: 0 0 32px 0;
-      }
-
       .lede {
-        font-size: 22px;
-        line-height: 1.5;
+        font-size: clamp(18px, 1.6vw, 22px);
+        line-height: 1.55;
         color: var(--fg-muted);
-        max-width: 680px;
-        margin: 0 0 40px 0;
+        max-width: 720px;
+        margin: 0 0 36px 0;
       }
       .lede b { color: var(--fg); font-weight: 600; }
 
-      .body {
-        font-size: 19px;
-        line-height: 1.6;
-        color: var(--fg-muted);
-        max-width: 760px;
-        margin: 0 0 24px 0;
+      .hero-skill {
+        margin-top: 48px;
+        padding: 18px 22px;
+        background: linear-gradient(135deg, rgba(255, 180, 84, 0.08), rgba(255, 123, 84, 0.04));
+        border: 1px solid rgba(255, 180, 84, 0.3);
+        border-radius: 12px;
+        max-width: 540px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        transition: border-color 0.15s, transform 0.1s;
       }
-      .body.big { font-size: 24px; line-height: 1.5; max-width: 820px; }
-      .body code { background: var(--code-bg); padding: 2px 8px; border-radius: 4px; color: var(--accent); font-size: 0.92em; }
-      .body.big code { font-size: 0.86em; }
-      .accent-line { color: var(--accent); font-weight: 600; }
+      .hero-skill:hover {
+        border-color: rgba(255, 180, 84, 0.55);
+        transform: translateY(-1px);
+      }
+      .hero-skill-label { font-size: 13px; color: var(--fg-muted); }
+      .hero-skill-url {
+        font-size: 18px;
+        font-weight: 600;
+        color: var(--accent);
+        font-family: "JetBrains Mono", ui-monospace, monospace;
+        word-break: break-all;
+      }
 
-      .cta-row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; }
+      /* ── Flow prose (no eyebrow, just paragraphs that lead from hero) ──── */
+      section.flow p {
+        font-size: 19px;
+        line-height: 1.7;
+        color: var(--fg-muted);
+        max-width: 720px;
+        margin: 0 0 22px 0;
+      }
+      section.flow p em { color: var(--fg); font-style: italic; font-weight: 500; }
+
+      /* ── Headings (smaller than before; less keynote) ───────────────────── */
+      h2 {
+        font-size: clamp(28px, 3vw, 38px);
+        line-height: 1.2;
+        letter-spacing: -0.015em;
+        font-weight: 700;
+        margin: 0 0 20px 0;
+      }
+
+      .body {
+        font-size: 17px;
+        line-height: 1.65;
+        color: var(--fg-muted);
+        max-width: 680px;
+        margin: 0 0 28px 0;
+      }
+      .body code { background: var(--code-bg); padding: 2px 8px; border-radius: 4px; color: var(--accent); font-size: 0.92em; }
+
+      /* ── CTAs ───────────────────────────────────────────────────────────── */
+      .cta-row { display: flex; gap: 14px; flex-wrap: wrap; align-items: center; justify-content: inherit; }
       .cta {
         display: inline-flex;
         align-items: center;
-        padding: 14px 24px;
+        padding: 12px 22px;
         border-radius: 8px;
         font-weight: 600;
-        font-size: 16px;
+        font-size: 15px;
         transition: transform 0.1s, background 0.15s;
       }
       .cta:hover { transform: translateY(-1px); }
@@ -402,96 +391,66 @@ string file:setup '/install --app ./apps/weather/string.md'`}</code></pre>
       .cta.secondary { background: var(--bg-3); color: var(--fg); border: 1px solid var(--line); }
       .cta.secondary:hover { background: #1d2230; }
 
-      .hero-install {
-        margin-top: 56px;
-        padding: 18px 22px;
-        background: var(--code-bg);
+      /* ── Surfaces grid ──────────────────────────────────────────────────── */
+      .surfaces {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+        gap: 12px;
+        margin-top: 24px;
+      }
+      .surface {
+        padding: 18px 18px 16px;
+        background: var(--bg-2);
         border: 1px solid var(--line);
         border-radius: 10px;
-        font-family: "JetBrains Mono", ui-monospace, monospace;
-        color: var(--fg-muted);
-        max-width: 480px;
-        font-size: 15px;
-      }
-      .hero-install::before { content: "$ "; color: var(--fg-dim); }
-
-      /* Diagram */
-      .diagram {
         display: flex;
-        align-items: center;
-        gap: 24px;
-        margin-top: 56px;
-        padding: 40px 32px;
-        background: var(--bg-2);
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        flex-wrap: wrap;
+        flex-direction: column;
+        gap: 6px;
       }
-      .node {
-        flex: 1;
-        min-width: 180px;
-        padding: 24px;
-        background: var(--bg-3);
-        border: 1px solid var(--line);
-        border-radius: 10px;
-        text-align: center;
-        font-weight: 600;
-      }
-      .node.runtime { border-color: var(--accent); }
-      .node span { display: block; font-weight: 400; color: var(--fg-muted); font-size: 14px; margin-top: 6px; font-family: monospace; }
-      .arrow { color: var(--fg-dim); font-size: 24px; }
-      .node.apps { display: flex; flex-direction: column; gap: 8px; padding: 16px; }
-      .md-card {
-        display: block;
-        padding: 8px 12px;
-        background: var(--bg-2);
-        border-radius: 6px;
-        font-family: monospace;
-        font-size: 14px;
-        color: var(--accent);
-        font-weight: 400;
-      }
-
-      /* Link card (skill.md prominent) */
-      .link-card {
-        margin: 32px 0 56px;
-        padding: 28px 32px;
-        background: linear-gradient(135deg, rgba(255, 180, 84, 0.08), rgba(255, 123, 84, 0.04));
-        border: 1px solid rgba(255, 180, 84, 0.3);
-        border-radius: 14px;
-      }
-      .link-label { color: var(--fg-muted); font-size: 14px; margin-bottom: 8px; }
-      .link-url {
-        font-size: clamp(20px, 3vw, 28px);
+      .surface-kind {
+        font-size: 11px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
         color: var(--accent);
         font-weight: 600;
-        word-break: break-all;
+      }
+      .surface-domain {
+        font-size: 17px;
+        font-weight: 600;
+        color: var(--fg);
+      }
+      .surface-verb {
+        font-size: 13px;
+        color: var(--fg-muted);
+        background: var(--code-bg);
+        padding: 4px 8px;
+        border-radius: 4px;
+        align-self: flex-start;
+        margin-top: 4px;
       }
 
-      /* Split layout for code/explanation */
+      /* ── Split panes (code + session) ───────────────────────────────────── */
       .split {
         display: grid;
         grid-template-columns: 1fr 1fr;
-        gap: 24px;
-        margin-top: 32px;
+        gap: 20px;
+        margin-top: 28px;
       }
       .split-col { min-width: 0; }
       .col-label {
-        font-size: 13px;
+        font-size: 12px;
         color: var(--fg-dim);
-        margin-bottom: 10px;
+        margin-bottom: 8px;
         text-transform: uppercase;
         letter-spacing: 0.05em;
         font-weight: 500;
       }
-      @media (max-width: 800px) {
-        .split { grid-template-columns: 1fr; }
-      }
+      @media (max-width: 800px) { .split { grid-template-columns: 1fr; } }
 
-      /* Code blocks */
+      /* ── Code blocks ────────────────────────────────────────────────────── */
       pre.code {
         margin: 0;
-        padding: 24px 28px;
+        padding: 20px 24px;
         background: var(--code-bg);
         border: 1px solid var(--line);
         border-radius: 10px;
@@ -499,91 +458,90 @@ string file:setup '/install --app ./apps/weather/string.md'`}</code></pre>
         line-height: 1.6;
         color: var(--code-fg);
       }
-      pre.code.wide {
-        max-width: 760px;
-        margin: 0 0 40px 0;
-      }
+      pre.code.wide { max-width: 640px; margin: 0 0 32px 0; }
       pre.code.terminal { color: var(--fg-muted); }
-      pre.code code { font-size: 14px; }
+      pre.code code { font-size: 13px; }
 
-      /* Steps */
-      .steps {
-        list-style: none;
-        padding: 0;
-        margin: 0;
-        counter-reset: step;
+      /* ── Skill pointer (primary CTA on the install section) ─────────────── */
+      .skill-pointer {
+        display: block;
+        margin: 8px 0 28px;
+        padding: 26px 32px;
+        background: linear-gradient(135deg, rgba(255, 180, 84, 0.1), rgba(255, 123, 84, 0.05));
+        border: 1px solid rgba(255, 180, 84, 0.4);
+        border-radius: 14px;
+        max-width: 640px;
+        transition: border-color 0.15s, transform 0.1s;
       }
-      .steps li {
-        position: relative;
-        padding: 14px 0 14px 44px;
-        font-size: 16px;
-        color: var(--fg-muted);
-        line-height: 1.5;
-        counter-increment: step;
-        border-bottom: 1px solid var(--line);
+      .skill-pointer:hover {
+        border-color: rgba(255, 180, 84, 0.65);
+        transform: translateY(-1px);
       }
-      .steps li:last-child { border-bottom: none; }
-      .steps li::before {
-        content: counter(step);
-        position: absolute;
-        left: 0;
-        top: 14px;
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        background: var(--bg-3);
-        border: 1px solid var(--accent);
+      .skill-label { color: var(--fg-muted); font-size: 14px; margin-bottom: 10px; }
+      .skill-url {
+        font-size: clamp(18px, 2.2vw, 26px);
         color: var(--accent);
-        font-size: 13px;
-        font-weight: 700;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-family: monospace;
+        font-weight: 600;
+        word-break: break-all;
       }
-      .steps li code { background: var(--code-bg); padding: 2px 6px; border-radius: 4px; color: var(--accent); font-size: 13px; }
 
-      /* Metrics */
+      /* Direct-install footnote on the install section */
+      .install-direct {
+        font-size: 14px;
+        color: var(--fg-dim);
+        max-width: 640px;
+        margin: 0;
+      }
+      .install-direct code {
+        font-size: 13px;
+        background: var(--code-bg);
+        padding: 3px 8px;
+        border-radius: 4px;
+        color: var(--fg-muted);
+        margin-left: 4px;
+      }
+
+      /* ── Numbers / metrics ──────────────────────────────────────────────── */
       .metrics {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
-        gap: 20px;
-        margin: 48px 0 32px;
+        gap: 16px;
+        margin: 28px 0 24px;
       }
       .metric {
-        padding: 32px 28px;
-        background: var(--bg-2);
+        padding: 24px 22px;
+        background: var(--bg);
         border: 1px solid var(--line);
-        border-radius: 14px;
+        border-radius: 12px;
       }
       .metric-num {
-        font-size: 64px;
+        font-size: 44px;
         font-weight: 700;
         line-height: 1;
-        letter-spacing: -0.03em;
+        letter-spacing: -0.02em;
         color: var(--accent);
         margin-bottom: 8px;
       }
       .metric-num .unit {
-        font-size: 28px;
+        font-size: 22px;
         color: var(--fg-muted);
         font-weight: 500;
         margin-left: 4px;
       }
       .metric-label {
-        font-size: 17px;
+        font-size: 16px;
         font-weight: 600;
         color: var(--fg);
-        margin-bottom: 12px;
+        margin-bottom: 8px;
       }
       .metric-detail {
-        font-size: 15px;
-        line-height: 1.5;
+        font-size: 14px;
+        line-height: 1.55;
         color: var(--fg-muted);
       }
       @media (max-width: 700px) {
         .metrics { grid-template-columns: 1fr; }
-        .metric-num { font-size: 56px; }
+        .metric-num { font-size: 38px; }
       }
       .footnote {
         font-size: 13px;
@@ -593,24 +551,29 @@ string file:setup '/install --app ./apps/weather/string.md'`}</code></pre>
         line-height: 1.5;
       }
 
-      /* Insight section */
-      .section.insight { background: linear-gradient(180deg, var(--bg) 0%, var(--bg-2) 100%); }
-      .section.insight h2 { font-size: clamp(40px, 6vw, 72px); }
+      /* ── Close ──────────────────────────────────────────────────────────── */
+      .close-line {
+        font-size: clamp(22px, 2.6vw, 30px);
+        line-height: 1.4;
+        color: var(--fg-muted);
+        max-width: 760px;
+        margin: 0 auto 32px;
+      }
+      .close-line .accent { color: var(--fg); font-weight: 600; }
+      section.close .cta-row { justify-content: center; }
 
-      /* Hero */
-      .section.hero { padding-top: 80px; padding-bottom: 140px; }
-
-      /* Footer */
+      /* ── Footer ─────────────────────────────────────────────────────────── */
       .footer {
         max-width: 1100px;
         margin: 0 auto;
-        padding: 40px 32px 60px;
+        padding: 32px 32px 56px;
         display: flex;
         justify-content: space-between;
         font-size: 14px;
         color: var(--fg-dim);
         flex-wrap: wrap;
         gap: 16px;
+        border-top: 1px solid var(--line);
       }
       .footer-links { display: flex; gap: 24px; }
       .footer-links a:hover { color: var(--fg); }

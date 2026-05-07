@@ -6,6 +6,25 @@ A markdown format and runtime that lets AI agents read and execute apps as porta
 
 ---
 
+## How we think about String
+
+Internally we design String as a **lightweight OS layer for AI agent work**.
+A document, an installed app, a remote URL, a shell session — different
+*resource types*, but the agent reaches each through the same primitives:
+navigation, action invocation, state scoping, output framing, editing,
+trust, error recovery. Every new resource gets the same shape, the same
+verbs, the same recovery hints.
+
+Externally we describe it as *a universal surface for agent work*. That
+framing is honest about scope and less likely to trigger kernel/scheduler
+associations. The OS framing is design discipline: when something doesn't
+feel OS-shaped, it's a signal we've added a verb that doesn't generalize,
+or a resource type that leaks its own interface. See the
+[syscall surface](./docs/runtime/overview.md#syscall-surface-for-ai-agents)
+for what's actually standardized.
+
+---
+
 ## Why now
 
 AI agents have started doing real autonomous work — reading, navigating, deciding, executing. But the infrastructure they operate on was designed for humans: HTML rendered for visual parsing, apps built around click journeys, docs optimized for skim-reading. Agents parse all of it indirectly, slowly, and expensively.

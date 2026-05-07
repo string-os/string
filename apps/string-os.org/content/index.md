@@ -1,41 +1,42 @@
 ---
-title: String — One interface for every tool an AI uses
+title: String — A surface for agent work
 ---
 
 # String
 
-One interface for every tool an AI uses.
+One interface to **read, navigate, act, and edit** — across documents, apps, and the web.
+
+The web gave humans a universal surface for information. String aims to give AI agents the same — for *work*.
 
 [!nav:main](./nav/main.md)
 
-## Give String to your AI agent
-
-Share this link with your AI agent. It will install String and start using apps:
-
-[string-os.org/skill.md](./skill.md)
-
-That's it. Your agent reads the skill, installs String, and can use any String App.
-
 ---
 
-## What is String?
+## If you're an AI agent
 
-Every tool an AI agent uses has a different interface. REST APIs need endpoint URLs, auth headers, JSON body schemas. MCP servers need protocol negotiation. CLI tools need argument parsing.
-
-String makes every tool look the same:
-
-```
-/act.feed                              # read a social network
-/act.now --city Seoul                  # check weather
-/act.send --to bob --content "done"    # send a message
-/act.generate --prompt "a red cat"     # generate an image
-```
-
-Same pattern. Same `/act`. The agent doesn't need to know whether the tool wraps a REST API, a shell command, or a device on your network.
+Follow [skill.md](./skill.md). It walks through install, calling, app discovery, and error handling in order — written for you to execute.
 
 ## How it works
 
-A String App is a markdown file. It declares what it can do with action blocks. String parses them and dispatches commands.
+String standardizes a small set of primitives — navigation, action invocation, state scoping, output framing, editing, trust, recovery — and exposes them through two verbs:
+
+- `/open` — see something (a document, a page, an app, a URL, a block)
+- `/act` — do something (call a capability, invoke an action)
+
+Different resource types get the **same shape**:
+
+| Resource | Read | Act |
+|---|---|---|
+| Document | `/open file.md` | `/act.<name>` if defined |
+| Installed app | `/open app:weather` | `/act.now --city Seoul` |
+| Web URL | `/open https://docs.example.com` | (link traversal) |
+| Shell session | `/open bash:dev` | `/exec ls` |
+
+The agent learns these verbs once and uses them everywhere. See the
+[syscall surface](https://docs.string-os.org/runtime/overview/#syscall-surface-for-ai-agents)
+for what's actually standardized.
+
+## A String app is one markdown file
 
 ````markdown
 ---
@@ -44,35 +45,29 @@ name: weather
 type: app
 ---
 
-# Weather
-
 ```act.now
 GET https://wttr.in/{city}?format=%l:+%C+%t+%w&m
   city, -c: string (required) "City name"
 ```
 ````
 
-Install it, use it:
+Install and call:
 
 ```bash
-string file:setup '/install --app ./weather/index.md'
+npm install -g @string-os/string
+string file:setup '/install --app ./weather.md'
 string app:weather '/act.now --city Seoul'
 ```
 
 ```
-seoul: Sunny +20C 6km/h
+Seoul: ☀️ +20°C
 ```
 
-No server. No SDK. One markdown file, one `/act` command.
+No server. No SDK. The file is the deliverable.
 
-## Install
+## More
 
-```bash
-npm install -g @string-os/string
-```
-
-## Links
-
-- [Documentation](https://docs.string-os.org)
-- [Install Skill for AI agents](./skill.md)
-- [Source Code](https://github.com/string-os/string)
+- [Documentation](https://docs.string-os.org) — full guide
+- [Runtime overview](https://docs.string-os.org/runtime/overview/) — primitives and syscall surface
+- [Install skill for AI agents](./skill.md)
+- [GitHub](https://github.com/string-os/string)
