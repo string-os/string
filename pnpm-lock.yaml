@@ -30,6 +30,18 @@ importers:
         specifier: ^0.34.5
         version: 0.34.5
 
+  apps/string-os.org:
+    dependencies:
+      '@string-os/astro-sfmd':
+        specifier: ^0.1.1
+        version: 0.1.1(astro@6.2.2(@types/node@24.12.2)(rollup@4.60.3)(tsx@4.21.0))
+      astro:
+        specifier: ^6.1.7
+        version: 6.2.2(@types/node@24.12.2)(rollup@4.60.3)(tsx@4.21.0)
+      marked:
+        specifier: ^18.0.1
+        version: 18.0.3
+
   packages/client:
     devDependencies:
       '@types/node':
