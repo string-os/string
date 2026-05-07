@@ -294,12 +294,14 @@ export async function render(
     },
   );
 
-  // 6. Prepend hints and warnings
+  // 6. Prepend navigation hints and actionable runtime warnings.
+  // Authoring diagnostics (parse errors, unknown shortcut definitions) are
+  // intentionally NOT prepended here — they live on doc.warnings, surface via
+  // /info, and ride out on meta.warnings so JSON consumers can read them.
+  // Putting them in the body breaks reading flow (esp. for docs that *describe*
+  // shortcut syntax — every example would trigger a warning at the top).
   const hints: string[] = [];
 
-  if (!blockId && doc.warnings.length > 0) {
-    for (const w of doc.warnings) hints.push(`[!] ${w}`);
-  }
   if (!blockId && doc.menus.size > 0) {
     const menuNames = [...doc.menus.keys()].join(', ');
     hints.push(`[nav] ${menuNames} — /nav <name>`);

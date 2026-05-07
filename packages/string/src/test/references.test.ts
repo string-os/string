@@ -123,3 +123,99 @@ await section('Reference definitions — inside code blocks ignored', async () =
   const result = parse(src);
   assert(result.references.size === 0, 'ref inside code block not parsed');
 });
+
+await section('Shortcut invocations — fenced code blocks are literal', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-fence-');
+  const testFile = path.join(tmpDir, 'doc.md');
+  // Documentation page that *describes* shortcut syntax. The example
+  // `[Home][@main.home]` lives inside a fenced code block and must not
+  // trigger an "Unknown shortcut" warning.
+  fs.writeFileSync(testFile, [
+    '# Shortcuts Guide',
+    '',
+    'Use the syntax:',
+    '',
+    '```',
+    '[Home][@main.home]',
+    '[Auth][@api.auth]',
+    '```',
+    '',
+    'That is all.',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec(`/open ${testFile}`);
+  assert(r.ok, 'open ok');
+  assert(!r.content.includes('Unknown shortcut'), 'no warning in body for fenced examples');
+  assert(!r.content.includes('[!]'), 'no diagnostic line prepended');
+  assert(r.content.includes('[Home][@main.home]'), 'fenced example preserved verbatim');
+  // The current document should carry no warnings since all [@id]-shaped
+  // tokens were inside a code block.
+  const doc = b.currentSession.currentDoc;
+  assert(doc?.warnings.length === 0, 'no warnings on document');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+await section('Shortcut invocations — inline code is literal', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-inline-');
+  const testFile = path.join(tmpDir, 'doc.md');
+  fs.writeFileSync(testFile, [
+    '# Page',
+    '',
+    'Write `[Label][@unknown]` inline to refer to the syntax.',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec(`/open ${testFile}`);
+  assert(r.ok, 'open ok');
+  assert(!r.content.includes('Unknown shortcut'), 'inline code does not trigger warning');
+  assert(r.content.includes('`[Label][@unknown]`'), 'inline code preserved');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+await section('Shortcut invocations — backslash escape opts out', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-escape-');
+  const testFile = path.join(tmpDir, 'doc.md');
+  fs.writeFileSync(testFile, [
+    '# Page',
+    '',
+    'To show literal syntax in prose: \\[Label\\]\\[@id\\] resolves to nothing.',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec(`/open ${testFile}`);
+  assert(r.ok, 'open ok');
+  assert(!r.content.includes('Unknown shortcut'), 'escaped form does not trigger warning');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+await section('Warnings — body stays clean, surfaced via meta + /info', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-warning-');
+  const testFile = path.join(tmpDir, 'doc.md');
+  // Real (unintentional) unknown shortcut in prose — should generate a
+  // warning that lives on meta.warnings + /info, but NOT in the body.
+  fs.writeFileSync(testFile, [
+    '# Page',
+    '',
+    'See [Home][@missing.home] for details.',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec(`/open ${testFile}`);
+  assert(r.ok, 'open ok');
+  // Body must not contain the warning marker.
+  assert(!r.content.includes('[!] Unknown shortcut'), 'warning not in body');
+  assert(!r.content.startsWith('[!]'), 'no [!] prepend at top of body');
+  // The document carries the warning for diagnostic surfaces.
+  const warnings = b.currentSession.currentDoc?.warnings ?? [];
+  assert(warnings.length === 1, 'one warning on document');
+  assert(warnings[0].includes('@missing.home'), 'warning identifies the missing shortcut');
+  // /info surfaces the warning to authors who want to see it.
+  const info = await b.exec('/info');
+  assert(info.content.includes('@missing.home'), '/info shows the warning');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
