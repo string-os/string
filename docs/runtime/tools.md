@@ -2,8 +2,6 @@
 title: Tools
 ---
 
-# Tools
-
 Tools are utilities AI invokes without leaving its current context.
 Unlike apps — which you enter and explore — tools come to you.
 

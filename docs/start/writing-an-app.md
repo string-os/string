@@ -2,8 +2,6 @@
 title: Writing your first app
 ---
 
-# Writing your first app
-
 A String app is one Markdown file. The file declares actions; the runtime turns those actions into `/act.*` commands the agent can call. No build step, no scaffolding.
 
 ## Minimal skeleton

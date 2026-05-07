@@ -2,8 +2,6 @@
 title: SFMD Overview
 ---
 
-# SFMD Overview
-
 **SFMD** (String Flavored Markdown) is a set of extensions to CommonMark designed for AI agent interaction.
 
 ---

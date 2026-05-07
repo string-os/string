@@ -2,8 +2,6 @@
 title: Actions
 ---
 
-# Actions
-
 Actions are how AI does things through String — calling APIs, running
 commands, submitting data. An action is declared inside a document,
 invoked with a single line, and its response comes back as Markdown.

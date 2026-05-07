@@ -1,0 +1,19 @@
+{
+  "name": "@string-os/docs",
+  "private": true,
+  "type": "module",
+  "version": "0.0.1",
+  "scripts": {
+    "dev": "astro dev",
+    "start": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro"
+  },
+  "dependencies": {
+    "@astrojs/starlight": "^0.38.4",
+    "@string-os/astro-sfmd": "file:../../../astro-sfmd",
+    "astro": "^6.1.9",
+    "sharp": "^0.34.5"
+  }
+}

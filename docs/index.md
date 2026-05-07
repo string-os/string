@@ -2,8 +2,6 @@
 title: String Documentation
 ---
 
-# String Documentation
-
 ## Getting Started
 
 - [Quick Start](./start/quickstart.md) — install and run your first app in 5 minutes

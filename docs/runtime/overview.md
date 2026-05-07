@@ -2,8 +2,6 @@
 title: String
 ---
 
-# String
-
 **String is an operating system for AI.**
 
 It sits on top of existing operating systems and the web, giving AI agents

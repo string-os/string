@@ -2,8 +2,6 @@
 title: The Model
 ---
 
-# The Model
-
 String has two layers: a **context layer** and an **action layer**.
 
 The context layer is what AI sees — Markdown. The action layer is what

@@ -1,8 +1,6 @@
 ---
-title: 10 — Shell Execution
+title: Shell Execution
 ---
-
-# 10 — Shell Execution
 
 Two modes of shell execution in String.
 

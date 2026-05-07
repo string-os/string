@@ -2,8 +2,6 @@
 title: Topics
 ---
 
-# Topics
-
 A topic is a session. Every command an AI sends through String is
 directed at a specific topic — a file, a web tab, or an app instance.
 Each topic maintains its own state independently.

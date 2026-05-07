@@ -2,8 +2,6 @@
 title: Errors
 ---
 
-# Errors
-
 When something goes wrong, String tells the AI what happened and
 what it can do about it. Errors are plain text — readable, actionable,
 and consistent across all commands.

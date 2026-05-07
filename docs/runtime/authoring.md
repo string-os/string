@@ -2,8 +2,6 @@
 title: Authoring
 ---
 
-# Authoring
-
 This is a guide for writing SFMD documents — whether you're a human
 setting up a String app or an AI generating documents for other AI
 agents to use.

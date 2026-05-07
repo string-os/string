@@ -2,8 +2,6 @@
 title: Why String
 ---
 
-# Why String
-
 ## AI doesn't have an operating system
 
 Humans have macOS, Windows, Linux. An operating system that takes the

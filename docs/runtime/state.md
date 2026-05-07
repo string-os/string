@@ -2,8 +2,6 @@
 title: State
 ---
 
-# State
-
 State is what turns a document into an application.
 
 A static document has content. An application has content that changes

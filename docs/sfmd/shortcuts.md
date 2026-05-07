@@ -2,8 +2,6 @@
 title: Shortcuts
 ---
 
-# Shortcuts
-
 Shortcuts are named references that give stable, short identifiers
 to URIs. They follow CommonMark's reference link pattern with an
 `@` prefix.

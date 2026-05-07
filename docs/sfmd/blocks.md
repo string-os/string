@@ -2,8 +2,6 @@
 title: Blocks
 ---
 
-# Blocks
-
 Blocks are named regions within a document. They make sections
 independently addressable — a block can be read or replaced
 without loading the full document.

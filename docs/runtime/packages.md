@@ -2,8 +2,6 @@
 title: Packages
 ---
 
-# Packages
-
 패키지는 String에서 앱과 도구를 배포하는 단위다.
 하나의 SFMD 문서(또는 문서 디렉토리)가 하나의 패키지다.
 

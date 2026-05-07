@@ -2,8 +2,6 @@
 title: Agent Integration
 ---
 
-# Agent Integration
-
 String provides four ways for AI agents to interact with documents and skills. Pick the one that matches how your agent runs.
 
 ## 1. CLI Pipe
