@@ -21,8 +21,8 @@ importers:
         specifier: ^0.38.4
         version: 0.38.5(astro@6.2.2(@types/node@24.12.2)(rollup@4.60.3)(tsx@4.21.0))
       '@string-os/astro-sfmd':
-        specifier: file:../../../astro-sfmd
-        version: file:../astro-sfmd(astro@6.2.2(@types/node@24.12.2)(rollup@4.60.3)(tsx@4.21.0))
+        specifier: ^0.1.1
+        version: 0.1.1(astro@6.2.2(@types/node@24.12.2)(rollup@4.60.3)(tsx@4.21.0))
       astro:
         specifier: ^6.1.9
         version: 6.2.2(@types/node@24.12.2)(rollup@4.60.3)(tsx@4.21.0)
@@ -789,8 +789,8 @@ packages:
   '@shikijs/vscode-textmate@10.0.2':
     resolution: {integrity: sha512-83yeghZ2xxin3Nj8z1NMd/NCuca+gsYXswywDy5bHvwlWL8tpTQmzGeUuHd9FC3E/SBEMvzJRwWEOz5gGes9Qg==}
 
-  '@string-os/astro-sfmd@file:../astro-sfmd':
-    resolution: {directory: ../astro-sfmd, type: directory}
+  '@string-os/astro-sfmd@0.1.1':
+    resolution: {integrity: sha512-vreiB+Qe1C+RfTL3N9z7YnOTJ/R4PbJK5kqgWIrmX20VICY1axsKrDbZDUmNjyVonMUoK+mFClizaN0gY6mBSQ==}
     peerDependencies:
       astro: ^6.0.0
 
@@ -2878,7 +2878,7 @@ snapshots:
 
   '@shikijs/vscode-textmate@10.0.2': {}
 
-  '@string-os/astro-sfmd@file:../astro-sfmd(astro@6.2.2(@types/node@24.12.2)(rollup@4.60.3)(tsx@4.21.0))':
+  '@string-os/astro-sfmd@0.1.1(astro@6.2.2(@types/node@24.12.2)(rollup@4.60.3)(tsx@4.21.0))':
     dependencies:
       astro: 6.2.2(@types/node@24.12.2)(rollup@4.60.3)(tsx@4.21.0)
       marked: 18.0.3
