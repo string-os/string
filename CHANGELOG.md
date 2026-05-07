@@ -1,5 +1,49 @@
 # Changelog
 
+## v0.1.2 (2026-05-07)
+
+Documentation-friendliness pass: docs that *describe* SFMD syntax no longer
+have their illustrative examples mistaken for real shortcuts/warnings.
+
+```
+@string-os/core    0.1.2
+@string-os/string  0.1.2
+```
+
+(Other packages unchanged at 0.1.0. Note: `0.1.1` was a botched publish of
+`@string-os/string` where pnpm's `workspace:*` placeholder leaked into the
+published `package.json`. `string@0.1.1` was unpublished; `core@0.1.1`
+remains in the registry but has been deprecated. Use 0.1.2.)
+
+### `@string-os/core`
+
+- Parser now skips inline code spans (`` `[@id Label](path)` ``) when
+  scanning for shortcut definitions. Fenced code blocks were already
+  skipped — this closes the inline gap.
+
+### `@string-os/string`
+
+- **Diagnostics out of body.** Unknown-shortcut and parse warnings no
+  longer prepend `[!] ...` lines onto rendered content. They live on
+  `LoadedDocument.warnings`, surface via `/info`, and ride out on
+  `meta.warnings` (new `SessionMeta` field) for JSON consumers.
+- **Code-aware shortcut resolution.** The runtime now masks fenced code
+  blocks, inline code, and backslash-escaped brackets (`\[`, `\]`,
+  `\@`) before resolving `[Label][@id]` invocations. Authors can write
+  literal SFMD examples in prose without triggering "Unknown shortcut"
+  warnings.
+- **Auto-shortcuts respect code regions.** `buildSlugMap` no longer
+  generates auto-shortcuts for plain links inside fenced or inline code
+  — `` `[GitHub](https://github.com)` `` shown as a syntax example is
+  treated as text, not turned into `@github`.
+- **`/ls` rejects non-file topics.** When called against `web:`, `app:`,
+  or `bash:` topics, `/ls` returns a clear redirect message pointing to
+  `/open` and `/nav` instead of leaking a filesystem boundary error.
+- Sequential-session model documented in `docs/runtime/topics.md` —
+  parallel commands within the same topic race on the "current document"
+  basis used for relative-path resolution. Use distinct topics for
+  parallel reads.
+
 ## v0.1.0 (2026-05-03)
 
 First public npm release.
