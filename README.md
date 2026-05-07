@@ -45,27 +45,13 @@ One file. Live data. Three link styles. Typed action commands. No HTML parsing, 
 
 ## Quick Start
 
-> **Note:** The npm packages are being prepared. For now, run from source.
-
 ```bash
-# Clone and install
-git clone https://github.com/string-os/string.git
-cd string
-pnpm install
-pnpm -r build
-
-# Run your first command
-alias string='node packages/string/dist/cli.js'
+npm install -g @string-os/string
 echo '# Hello, SFMD' > /tmp/hello.md
 string file:hello '/open /tmp/hello.md'
 ```
 
-Once the npm packages are published:
-
-```bash
-npm install -g @string-os/string
-string file:main '/open ./README.md'
-```
+Full guide: [docs.string-os.org/start/quickstart](https://docs.string-os.org/start/quickstart/).
 
 ### As an MCP server (Claude Desktop, Cursor, etc.)
 
@@ -114,7 +100,7 @@ console.log(result.content);  // the rendered document
 console.log(result.meta);     // current document metadata
 ```
 
-This is the same client the CLI uses internally. It speaks the [stringd protocol v0.1](./docs/stringd-protocol-v0.1.md), which is the source of truth for any other-language client (Python, Go, etc.).
+This is the same client the CLI uses internally. It speaks the [stringd protocol v0.1](https://docs.string-os.org/reference/protocol/), which is the source of truth for any other-language client (Python, Go, etc.).
 
 ---
 
@@ -195,7 +181,7 @@ Four integration paths, one runtime:
 1. **In-process library** — `import { Browser } from '@string-os/string'`. No daemon, no HTTP. Best for tight integration like MCP.
 2. **MCP server** — `@string-os/string-mcp` wraps the in-process Browser for Claude Desktop, Cursor, and any MCP-aware client.
 3. **CLI** — `string file:main '/open ./doc.md'`. The CLI is itself an `@string-os/client` consumer that talks to a local `stringd` daemon.
-4. **Custom client** — any program in any language that speaks the [stringd protocol v0.1](./docs/stringd-protocol-v0.1.md). `@string-os/client` is the reference TypeScript client; Python and other-language clients follow the same wire spec.
+4. **Custom client** — any program in any language that speaks the [stringd protocol v0.1](https://docs.string-os.org/reference/protocol/). `@string-os/client` is the reference TypeScript client; Python and other-language clients follow the same wire spec.
 
 Add a feature once, it works everywhere.
 
@@ -228,7 +214,7 @@ string daemon --log 4000         # Enable logging, custom port
 
 **Tool** — no view of its own. You call it with `/tool:name` and it runs in your current context, returning output. Think: a shell command.
 
-Both are `.md` files with action blocks. The difference is how they're accessed, not how they're written. See [Tools guide](./docs/runtime/13-tools.md) for details.
+Both are `.md` files with action blocks. The difference is how they're accessed, not how they're written. See [Tools guide](https://docs.string-os.org/runtime/tools/) for details.
 
 ### Topic types
 
@@ -255,17 +241,15 @@ Both are `.md` files with action blocks. The difference is how they're accessed,
 | `/set {var} = "value"` | Set session variable |
 | `/set $VAR = "value"` | Set persistent variable |
 
-## Writing skills
+## Writing apps
 
-A skill is a single `.md` file with action definitions. Any AI agent can fetch and use it:
+An app is a single `.md` file with action definitions. Any AI agent can fetch and use it:
 
 ````markdown
 ---
 name: git
 default: run
 ---
-
-# Git
 
 Run git commands.
 
@@ -274,16 +258,18 @@ CLI git $ARGS
 ```
 ````
 
-See the [Writing Skills guide](./docs/writing-skills.md) for more.
+See the [Writing your first app guide](https://docs.string-os.org/start/writing-an-app/) for more.
 
 ## Documentation
 
-- [Quick Start](./docs/quickstart.md)
-- [Agent Integration](./docs/agent-integration.md)
-- [Writing Skills](./docs/writing-skills.md)
-- [Runtime reference docs](./docs/runtime/) — runtime behavior and design
-- [stringd protocol v0.1](./docs/stringd-protocol-v0.1.md) — wire protocol for any-language clients
-- [SFMD Spec](https://github.com/string-os/sfmd) — format specification for parser implementors
+Full docs at **[docs.string-os.org](https://docs.string-os.org)**. The Markdown source lives at [`docs/`](./docs/) in this repo and is built into the site by [`apps/docs/`](./apps/docs/).
+
+- [Quick Start](https://docs.string-os.org/start/quickstart/)
+- [Agent Integration](https://docs.string-os.org/start/agent-integration/)
+- [Writing your first app](https://docs.string-os.org/start/writing-an-app/)
+- [Runtime](https://docs.string-os.org/runtime/overview/) — design, model, and runtime behavior
+- [stringd protocol v0.1](https://docs.string-os.org/reference/protocol/) — wire protocol for any-language clients
+- [SFMD Spec](https://docs.string-os.org/sfmd/overview/) — format specification for parser implementors
 - [Cookbook](https://github.com/string-os/cookbook) — practical examples
 
 ## Contributing
