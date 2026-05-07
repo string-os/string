@@ -38,6 +38,21 @@ Topics give AI the same capability.
 Three topics, three independent sessions. The AI can switch between
 them freely. Each one remembers where it is.
 
+A topic is a **sequential session** — its state (current document,
+history, variables) is mutated by each command in order. Issuing two
+commands against the *same* topic in parallel is a race: whichever
+finishes last wins, and any relative-path resolution that depended on
+the first command's "current document" can land on the wrong base.
+
+For parallel reads, use distinct topics:
+
+```
+<𝒞=string:web:doc1>/open https://a/page1.md</𝒞>
+<𝒞=string:web:doc2>/open https://a/page2.md</𝒞>
+```
+
+Sequential commands within the same topic are always safe.
+
 ---
 
 ## Topic syntax

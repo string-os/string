@@ -104,7 +104,7 @@ export async function dispatch(
     case 'refresh': return cmdRefresh(session, loader);
     case 'info':    return cmdInfo(parsed.args, session, loader);
     case 'source':  return cmdSource(session);
-    case 'ls':      return cmdLs(parsed.args, session, loader);
+    case 'ls':      return cmdLs(parsed.args, session, loader, topicType);
     case 'write':   return cmdWrite(parsed.args, parsed.body, session, loader);
     case 'append':  return cmdAppend(parsed.args, parsed.body, session, loader);
     case 'edit':    return cmdEdit(parsed.args, parsed.body, session, loader);

@@ -219,3 +219,68 @@ await section('Warnings — body stays clean, surfaced via meta + /info', async 
 
   fs.rmSync(tmpDir, { recursive: true });
 });
+
+await section('Parser — shortcut definitions inside inline code are ignored', async () => {
+  // Inline-code examples like `[@id Label](path)` in prose should not be parsed
+  // as real shortcut definitions. This is what runtime/navigation.md does when
+  // describing the SFMD shortcut syntax.
+  const src = [
+    '# Doc about shortcuts',
+    '',
+    'Each line follows the shortcut syntax: `[@id Label](path)`.',
+    '',
+    'You can also write `[@home Home](/index.md)` inline.',
+  ].join('\n');
+
+  const result = parse(src);
+  assert(result.shortcuts.length === 0, 'no shortcuts harvested from inline code examples');
+});
+
+await section('Parser — shortcut definitions inside fenced code are ignored', async () => {
+  const src = [
+    '# Doc about shortcuts',
+    '',
+    '```',
+    '[@home Home](/index.md)',
+    '[@about About](/about.md)',
+    '```',
+  ].join('\n');
+
+  const result = parse(src);
+  assert(result.shortcuts.length === 0, 'no shortcuts harvested from fenced examples');
+});
+
+await section('/nav page — illustrative examples in code do not pollute output', async () => {
+  // Reproduces the reviewer's complaint: a doc that explains shortcut syntax
+  // (with `[@id Label](path)` examples in code) should have an empty /nav
+  // page output, not a "template-like" listing of placeholder ids.
+  const tmpDir = fs.mkdtempSync('/tmp/string-nav-doc-');
+  const testFile = path.join(tmpDir, 'doc.md');
+  fs.writeFileSync(testFile, [
+    '# Shortcut Syntax',
+    '',
+    'Each line follows the shortcut syntax: `[@id Label](path)`.',
+    '',
+    '```',
+    '[@home Home](/index.md)',
+    '```',
+    '',
+    'Also see [GitHub](https://github.com) (in code: `[GitHub](https://github.com)`).',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${testFile}`);
+  const r = await b.exec('/nav page');
+  assert(r.ok, 'nav page ok');
+  // No author "Shortcuts:" section should appear — the placeholder example
+  // `[@id Label](path)` from inline code must not be harvested.
+  assert(!r.content.includes('Shortcuts:'), 'no author-shortcuts section (examples were in code)');
+  assert(!r.content.includes('@home'), 'no fenced-example shortcut leaks into output');
+  // The plain GitHub link outside code is auto-shortcutted; the one inside
+  // backticks is not. Two @github tokens (one auto-shortcut entry + one in
+  // the backticked example string) is wrong; expect exactly one.
+  const githubMatches = r.content.match(/@github/g) ?? [];
+  assert(githubMatches.length === 1, 'auto-shortcut @github appears exactly once (only the prose occurrence)');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});

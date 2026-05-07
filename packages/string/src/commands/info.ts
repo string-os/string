@@ -6,7 +6,7 @@ import fsPromises from 'fs/promises';
 import path from 'path';
 import type { Loader } from '../loader.js';
 import type { Session } from '../session.js';
-import type { CommandResult } from '../types.js';
+import type { CommandResult, TopicType } from '../types.js';
 import { parseTopic } from '../types.js';
 import { renderActions } from '../renderer.js';
 import {
@@ -233,9 +233,36 @@ export function cmdHelp(session: Session, mode?: 'bash'): CommandResult {
 
 // ─── /ls ──────────────────────────────────────────────────────────────────────
 
-export async function cmdLs(args: string, session: Session, loader: Loader): Promise<CommandResult> {
+export async function cmdLs(
+  args: string,
+  session: Session,
+  loader: Loader,
+  topicType?: TopicType,
+): Promise<CommandResult> {
   const home = loader.home;
   const topic = args.trim() || '.';
+
+  // /ls is filesystem-only. Web/app/bash topics have no filesystem listing
+  // semantics — surface a clear redirect rather than letting the user hit
+  // an opaque boundary error or "not found". Decision precedence:
+  //   1. Explicit topicType (passed from daemon for new topics)
+  //   2. Active document URI (set after /open lands somewhere)
+  //   3. session.name parse (handles bare "main" → file:main)
+  let kind: TopicType | null = null;
+  if (topicType) {
+    kind = topicType;
+  } else if (session.currentUri?.startsWith('http://') || session.currentUri?.startsWith('https://')) {
+    kind = 'web';
+  } else {
+    kind = parseTopic(session.name)?.type ?? 'file';
+  }
+  if (kind !== 'file') {
+    return err(
+      `/ls is not available for ${kind} topics — there is no filesystem to list.\n` +
+      `Use /open <link>, /open @shortcut, or /nav to traverse the current document.`,
+      'INVALID_TARGET',
+    );
+  }
 
   const resolved = resolveFilePath(topic, home, session.currentUri, session.cwdOverride);
 

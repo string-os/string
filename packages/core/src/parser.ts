@@ -112,6 +112,53 @@ const SHORTCUT_RE = /\[(@[a-zA-Z0-9_-]+)\s+([^\]]+)\]\(([^)]+)\)/g;
 // [name]: url — Markdown reference definition (standard + @-prefixed)
 const REF_DEF_RE = /^\[([^\]]+)\]:\s+<?([^\s>]+)>?/;
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+
+/**
+ * Mask inline code spans (`...`) with same-length runs of a placeholder char so
+ * regex scans run against a string of identical length but with backticks and
+ * their content replaced. Preserves character offsets so callers can still
+ * reason about positions in the original line.
+ *
+ * Skipping inline code matters for shortcut/reference detection because docs
+ * about SFMD itself contain illustrative `[@id Label](path)`-shaped tokens
+ * inside inline code — we do not want those treated as real definitions.
+ */
+function maskInlineCode(line: string): string {
+  // Walk char-by-char to find paired backtick runs (CommonMark inline code).
+  // A run of N backticks opens; the closing run must be exactly N backticks.
+  const out = line.split('');
+  let i = 0;
+  while (i < out.length) {
+    if (out[i] !== '`') { i++; continue; }
+    // Measure opening run length
+    let openLen = 0;
+    while (i + openLen < out.length && out[i + openLen] === '`') openLen++;
+    // Find matching closer
+    let j = i + openLen;
+    while (j < out.length) {
+      if (out[j] === '`') {
+        let closeLen = 0;
+        while (j + closeLen < out.length && out[j + closeLen] === '`') closeLen++;
+        if (closeLen === openLen) {
+          // Mask everything from i to j+closeLen-1 with spaces (preserve length)
+          for (let k = i; k < j + closeLen; k++) out[k] = ' ';
+          i = j + closeLen;
+          break;
+        }
+        j += closeLen;
+      } else {
+        j++;
+      }
+    }
+    if (j >= out.length) {
+      // Unclosed — leave as-is and advance past the opener
+      i += openLen;
+    }
+  }
+  return out.join('');
+}
+
 // ─── Parser ───────────────────────────────────────────────────────────────────
 
 export function parse(source: string): ParseResult {
@@ -301,11 +348,14 @@ export function parse(source: string): ParseResult {
       }
     }
 
-    // ── Shortcuts are scanned on every line ─────────────────────────────────
+    // ── Shortcuts are scanned on every line, but inline code is masked so
+    //    illustrative `[@id Label](path)` examples in prose are not treated
+    //    as real definitions (matters for docs that describe SFMD itself). ─
     const originalLine = lines[i];
+    const lineForScan = maskInlineCode(originalLine);
     let shortcutMatch;
     SHORTCUT_RE.lastIndex = 0;
-    while ((shortcutMatch = SHORTCUT_RE.exec(originalLine)) !== null) {
+    while ((shortcutMatch = SHORTCUT_RE.exec(lineForScan)) !== null) {
       const rawId = shortcutMatch[1]; // includes the @
       const id = rawId.slice(1);      // strip the @
       const label = shortcutMatch[2];
@@ -322,6 +372,8 @@ export function parse(source: string): ParseResult {
     }
 
     // ── Reference definitions: [name]: url ──────────────────────────────
+    // REF_DEF_RE is anchored to line start, so inline code that appears
+    // mid-line cannot collide with it; trimmed `line` is sufficient.
     const refDefMatch = line.match(REF_DEF_RE);
     if (refDefMatch) {
       const refName = refDefMatch[1];

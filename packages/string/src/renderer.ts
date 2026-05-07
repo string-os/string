@@ -507,6 +507,47 @@ interface SlugMapResult {
 }
 
 /**
+ * Compute non-resolvable code regions in source — fenced code blocks and inline
+ * code spans. Returns sorted [start, end) intervals so callers can skip matches
+ * that fall inside any of them. Critical for buildSlugMap so plain-URL examples
+ * inside doc code blocks (e.g. `[GitHub](https://github.com)` shown as syntax
+ * sample) do not get auto-shortcutted as @github.
+ */
+function findCodeRegions(source: string): Array<[number, number]> {
+  const ranges: Array<[number, number]> = [];
+
+  // Fenced code blocks (``` or ~~~). Greedy non-greedy.
+  const fenceRe = /```[\s\S]*?```|~~~[\s\S]*?~~~/g;
+  let m: RegExpExecArray | null;
+  while ((m = fenceRe.exec(source)) !== null) {
+    ranges.push([m.index, m.index + m[0].length]);
+  }
+
+  // Inline code (`...`) — only on lines outside fenced blocks. Skip any inline
+  // backtick run whose match index falls inside a fenced range.
+  const inlineRe = /`[^`\n]+`/g;
+  while ((m = inlineRe.exec(source)) !== null) {
+    const idx = m.index;
+    let inFence = false;
+    for (const [s, e] of ranges) {
+      if (idx >= s && idx < e) { inFence = true; break; }
+    }
+    if (!inFence) ranges.push([idx, idx + m[0].length]);
+  }
+
+  ranges.sort((a, b) => a[0] - b[0]);
+  return ranges;
+}
+
+function isInsideRanges(idx: number, ranges: Array<[number, number]>): boolean {
+  for (const [s, e] of ranges) {
+    if (idx < s) return false;       // sorted — early exit
+    if (idx >= s && idx < e) return true;
+  }
+  return false;
+}
+
+/**
  * Build a map of string offset → slug for plain https links,
  * plus a reverse map of slug → href for shortcut resolution.
  */
@@ -518,10 +559,16 @@ function buildSlugMap(source: string): SlugMapResult {
   const slugCount = new Map<string, number>();
   let linkCounter = 1;
 
+  const codeRegions = findCodeRegions(source);
+
   PLAIN_LINK_RE.lastIndex = 0;
   let match: RegExpExecArray | null;
 
   while ((match = PLAIN_LINK_RE.exec(source)) !== null) {
+    // Skip matches that fall inside a code block or inline code span — those
+    // are illustrative examples in doc text, not real links to auto-shortcut.
+    if (isInsideRanges(match.index, codeRegions)) continue;
+
     const label = match[1];
     const href = match[2];
     // Only auto-slug full URLs (https?://), act: action shortcuts, or very long paths
