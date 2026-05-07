@@ -28,7 +28,7 @@ Every `string` call wraps stdout in:
 </𝒞>
 ```
 
-Read the payload between the markers. The opener tells you which topic the call ran in. Use `--json` if you'd rather receive `{"ok":bool,"code":string|null,"content":string,"meta":object|null}`.
+Read the payload between the markers. The opener tells you which topic the call ran in.
 
 ## 3. Call shape
 
