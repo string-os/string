@@ -2,8 +2,6 @@
 title: Transport
 ---
 
-# Transport
-
 String communicates through messages. Each message has three
 core elements — regardless of how they're encoded on the wire.
 

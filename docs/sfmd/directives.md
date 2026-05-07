@@ -2,8 +2,6 @@
 title: Directives
 ---
 
-# Directives
-
 Directives are metadata declarations that use Markdown link syntax.
 They tell the runtime about document structure but are not rendered
 as content.

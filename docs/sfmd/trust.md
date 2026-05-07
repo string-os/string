@@ -2,8 +2,6 @@
 title: Trust and Execution (SFMD v0.1)
 ---
 
-# Trust and Execution (SFMD v0.1)
-
 **Status:** Informative. This document describes the trust and execution model used by the reference runtime, [String](https://github.com/string-os/string). It is not part of the SFMD format specification. Other runtimes may implement different models.
 
 **Why separate.** The SFMD format specification defines how a document is structured and parsed. Execution — deciding which actions are allowed to run, with what permissions, and what happens when an untrusted document is opened — is the runtime's responsibility. This mirrors how HTML is enforced by browsers (CSP, same-origin, sandbox), not by the HTML spec itself.

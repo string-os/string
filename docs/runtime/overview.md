@@ -2,8 +2,6 @@
 title: String
 ---
 
-# String
-
 **String is an operating system for AI.**
 
 It sits on top of existing operating systems and the web, giving AI agents
@@ -28,6 +26,35 @@ while remaining 100% CommonMark compatible.
 - `/act` — do something (call an API, run a workflow, submit data)
 
 New capabilities come from new documents, not new commands.
+
+---
+
+## Syscall surface for AI agents
+
+If String is an operating environment, the part that's actually
+*standardized* is small enough to list. Think of it as the syscall
+surface an agent reaches for, regardless of which underlying resource
+it is talking to.
+
+| Surface | What it standardizes | Primary primitives |
+|---|---|---|
+| **Navigation** | how an agent moves between documents, pages, and blocks | `/open`, `/back`, `/nav`, `[!nav:]`, `[@shortcut]` |
+| **Action invocation** | how an agent calls a capability | `/act.<name>`, action blocks, typed args, `/act.<name> --help` |
+| **State scoping** | what is remembered, where, and for how long | topics (`file:`, `web:`, `app:`, `bash:`), session vars, env scopes |
+| **Output framing** | how the agent recognizes its own results | `<𝒞=string:topic>…</𝒞>` markers around every payload |
+| **Editing semantics** | how an agent writes back to the world | `/write`, `/append`, `/edit`, `/undo`, `/verify`, block-level edits |
+| **Trust and permissions** | what an agent is allowed to run | action allowlist, `--allow-shell`, `[!requirements]`, signed packages (v0.2) |
+| **Recovery and error hints** | how an agent knows what to do when things break | typed error codes, missing-env hints, `/info` diagnostics, `meta.warnings` |
+
+Every resource type — a local document, an installed app, a remote URL,
+a shell session — exposes some subset of these surfaces with the same
+verbs. An agent that learns String once can read a doc, drive an app,
+browse the web, and edit a file without re-learning a new interface for
+each domain.
+
+That's why the runtime feels OS-shaped from the inside, even though
+externally the right framing is closer to *a universal surface for
+agent work* — see [string-os.org](https://string-os.org).
 
 ---
 

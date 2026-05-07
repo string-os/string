@@ -2,8 +2,6 @@
 title: Editing
 ---
 
-# Editing
-
 String is not read-only. AI creates, modifies, and manages documents
 as a core part of its workflow — writing reports, updating configs,
 building SFMD apps, maintaining notes.

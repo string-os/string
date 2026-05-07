@@ -2,8 +2,6 @@
 title: Actions
 ---
 
-# Actions
-
 Actions define executable operations within a document. They are
 written as fenced code blocks with an `act.` info string prefix.
 

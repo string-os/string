@@ -85,6 +85,7 @@ interface SessionMeta {
   history_length: number;
   block_id: string | null;
   converted: boolean;
+  warnings: string[];
 }
 
 // ─── State ────────────────────────────────────────────────────────────────────
@@ -145,6 +146,7 @@ function buildMeta(browser: Browser, topic: string): SessionMeta | null {
     history_length: sess.historyLength,
     block_id: sess.currentBlockId ?? null,
     converted: !!doc.rawSource,
+    warnings: doc.warnings,
   };
 }
 
@@ -155,7 +157,7 @@ function buildSessionSummary(runtime: RuntimeEntry, topic: string, state: TopicS
     created: state.created,
     ...buildMeta(runtime.browser, topic) ?? {
       uri: null, title: null, menus: [], actions: [],
-      history_length: 0, block_id: null,
+      history_length: 0, block_id: null, converted: false, warnings: [],
     },
   };
 }

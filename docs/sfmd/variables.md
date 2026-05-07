@@ -2,8 +2,6 @@
 title: Variables
 ---
 
-# Variables
-
 Variables are named references that are substituted with values
 at runtime. SFMD defines the syntax for referencing variables —
 storage and resolution are handled by the runtime.

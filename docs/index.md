@@ -2,25 +2,15 @@
 title: String Documentation
 ---
 
-# String Documentation
-
 ## Getting Started
 
 - [Quick Start](./start/quickstart.md) — install and run your first app in 5 minutes
-- [Showcase](./start/showcase.md) — example apps with demo output
 - [Agent Integration](./start/agent-integration.md) — connect String to your agent framework
-
-## Build String Apps
-
-- [Writing Apps](./build/writing-apps.md) — turn any API into a String App
+- [Writing your first app](./start/writing-an-app.md) — the minimum to author your own app
 
 ## Cookbook
 
-- [Weather](./cookbook/weather.md) — simplest example, start here
-- [Anatomy](./cookbook/anatomy.md) — how an SFMD app is structured
-- [Compare](./cookbook/compare.md) — MCP vs Function Calling vs String
-- [Client Library](./cookbook/client-library.md) — embed String in your framework
-- [Porting](./cookbook/porting.md) — port a real API to a String App
+Example apps and tutorials live in a separate repo: [`string-os/cookbook`](https://github.com/string-os/cookbook). Clone it and `string '/install --app ./apps/<name>/string.md'` to try them.
 
 ## SFMD Specification
 

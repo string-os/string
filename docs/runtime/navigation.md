@@ -2,8 +2,6 @@
 title: Navigation
 ---
 
-# Navigation
-
 Navigation is how AI moves through String — between documents,
 within documents, across topics, and back through history. Two
 commands handle everything: `/open` and `/nav`.

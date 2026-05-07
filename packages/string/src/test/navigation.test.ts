@@ -377,3 +377,18 @@ await section('UserRegistry basics', async () => {
   });
   assert(registry.get('neo')?.home === '/workspace/neo-updated', 'duplicate registration updates existing user');
 });
+
+await section('/ls — rejects non-file topics with helpful message', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-ls-web-');
+  const b = new Browser({ home: tmpDir });
+
+  // Switch to a web topic. /ls should refuse with a clear redirect, not
+  // try to walk the filesystem and surface a confusing boundary or
+  // not-found error.
+  const r = await b.exec('/ls /runtime', 'docs', 'web');
+  assert(!r.ok, '/ls fails on web topic');
+  assert(r.content.includes('not available for web'), 'mentions topic kind');
+  assert(r.content.includes('/open') && r.content.includes('/nav'), 'suggests right commands');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});

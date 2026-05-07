@@ -2,8 +2,6 @@
 title: Frontmatter
 ---
 
-# Frontmatter
-
 SFMD documents MAY begin with a YAML frontmatter block.
 
 ---
