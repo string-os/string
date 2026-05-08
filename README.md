@@ -112,6 +112,8 @@ Not yet:
 - Signed packages — **run SFMD files from trusted sources only**
 - Fine-grained capability permissions (default allowlist is restrictive)
 
+**Platform.** Tested on Linux. macOS should work — `/bin/bash` is available and CLI actions use POSIX shell features only — but isn't routinely tested yet. **Windows is not supported in 0.1.x**: the runtime spawns `/bin/bash` for every CLI action. Use WSL on Windows, or wait for portable execution in v0.2.
+
 Trust model in [`SECURITY.md`](./SECURITY.md). The full spec for parser implementors lives in the [SFMD spec repo](https://github.com/string-os/sfmd).
 
 ---

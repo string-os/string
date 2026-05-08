@@ -178,3 +178,11 @@ may include breaking changes — read the release notes before upgrading
 and pin to an exact version (`@string-os/string@0.1.3`) if you need
 stability across upgrades. The `0.2` line is reserved for the first
 post-stabilization release.
+
+### Platform support
+
+Tested on Linux. macOS should work (`/bin/bash` is available; CLI
+actions use POSIX shell features only) but isn't routinely tested yet.
+**Windows is not supported in 0.1.x** — the runtime spawns `/bin/bash`
+for every CLI action and `/exec`. Use WSL on Windows, or wait for
+portable execution in v0.2.
