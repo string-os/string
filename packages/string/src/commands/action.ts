@@ -113,11 +113,13 @@ export async function executeAction(
     payload[key] = sub.result;
   }
 
-  // Resolve @shortcut in flag values
+  // Resolve @shortcut in flag values. Value shortcuts (from {@var}=expr in
+  // response templates) may resolve to a tuple (string[]); URI/body
+  // substitution then accesses elements via {name[N]} syntax.
   for (const [key, val] of Object.entries(payload)) {
     if (typeof val === 'string' && val.startsWith('@')) {
-      const href = session.resolveShortcut(val.slice(1));
-      if (href) payload[key] = href;
+      const resolved = session.resolveShortcut(val.slice(1));
+      if (resolved !== null) payload[key] = resolved;
     }
   }
 
@@ -127,6 +129,14 @@ export async function executeAction(
       payload[field.name] = field.defaultValue;
     }
   }
+
+  // Snapshot the parsed input fields BEFORE URI/body substitution mutates
+  // payload (URI substitution deletes consumed keys to avoid double-sending
+  // them as query/body params). The response template runs *after* execution,
+  // and still wants access to whatever fields the caller passed in — e.g. an
+  // @-shortcut directive that references `{post}` to compose a tuple slug
+  // pairing the input id with each comment id from the response body.
+  const inputFields: Record<string, unknown> = { ...payload };
 
   // Substitute {var} and $var in action URI (path params)
   // Track which fields were consumed by URI substitution (skip required validation for these)
@@ -145,11 +155,17 @@ export async function executeAction(
   };
   const cliSub = (val: string): string => isCli ? shellQuote(val) : encodeURIComponent(val);
 
+  // Stringify a payload value for substitution. Tuples (string[]) join with
+  // commas as a fallback when referenced without an index — visible enough to
+  // debug authorial mistakes (the right form is `{name[N]}`).
+  const stringifyPayloadVal = (v: unknown): string =>
+    Array.isArray(v) ? v.map(String).join(',') : String(v);
+
   // {...args} — serialize remaining payload as --key value flags
   resolvedUri = resolvedUri.replace(/\{\.\.\.args\}/g, () => {
     const parts: string[] = [];
     for (const [k, v] of Object.entries(payload)) {
-      const val = String(v);
+      const val = stringifyPayloadVal(v);
       // For CLI, always shell-quote. For HTTP, URL-encode.
       parts.push(`--${k} ${cliSub(val)}`);
     }
@@ -161,22 +177,38 @@ export async function executeAction(
     return parts.join(' ');
   });
 
-  resolvedUri = resolvedUri.replace(/\{([a-zA-Z_]\w*)\}/g, (_m, name) => {
-    // If the flag matches a path param, consume it
-    if (payload[name] !== undefined) {
-      const val = String(payload[name]);
-      consumedByUri.add(name);
-      delete payload[name];
-      return cliSub(val);
-    }
-    // Try session variable
-    const sessionVal = session.getVar(name);
-    if (sessionVal !== undefined) {
-      consumedByUri.add(name);
-      return cliSub(sessionVal);
-    }
-    return `{${name}}`;
-  });
+  // URI substitution. Supports `{name}` (whole value) and `{name[N]}` (tuple
+  // index). Payload entries are NOT deleted during the replace pass — that
+  // would cause a second `{name}` (or `{name[1]}` after `{name[0]}`) to fall
+  // through as literal. We collect consumed keys and delete them after the
+  // pass completes, so leftover payload doesn't get re-sent as query/body.
+  const uriConsumedFromPayload = new Set<string>();
+  resolvedUri = resolvedUri.replace(
+    /\{([a-zA-Z_]\w*)(?:\[(\d+)\])?\}/g,
+    (_m, name, idxStr) => {
+      if (payload[name] !== undefined) {
+        const val = payload[name];
+        consumedByUri.add(name);
+        uriConsumedFromPayload.add(name);
+        if (idxStr !== undefined) {
+          const idx = parseInt(idxStr, 10);
+          const arr = Array.isArray(val) ? val : [String(val)];
+          const item = idx < arr.length ? String(arr[idx]) : '';
+          return cliSub(item);
+        }
+        return cliSub(stringifyPayloadVal(val));
+      }
+      // Try session variable (no index support — session vars are scalar strings)
+      const sessionVal = session.getVar(name);
+      if (sessionVal !== undefined) {
+        consumedByUri.add(name);
+        return cliSub(sessionVal);
+      }
+      return idxStr !== undefined ? `{${name}[${idxStr}]}` : `{${name}}`;
+    },
+  );
+  // Delete payload entries consumed by URI substitution (after replace pass).
+  for (const k of uriConsumedFromPayload) delete payload[k];
   // $var substitution in URI — resolved from extraEnv → EnvStore
   const envScope = deriveEnvScope(session.name);
   resolvedUri = resolveEnvVars(resolvedUri, loader, envScope, extraEnv);
@@ -214,7 +246,10 @@ export async function executeAction(
   // also resolved (extraEnv → env-store → process.env).
   let resolvedBody: string | undefined;
   if (action.body !== undefined && !isCli) {
-    resolvedBody = substituteBodyTemplate(action.body, payload, session);
+    // Use the input snapshot — URI substitution may have deleted fields that
+    // the body template still wants to reference (e.g. `{reply[0]}` in URI
+    // path AND `{reply[1]}` in body for a tuple-shaped input).
+    resolvedBody = substituteBodyTemplate(action.body, inputFields, session);
     resolvedBody = resolveEnvVars(resolvedBody, loader, envScope, extraEnv);
   }
 
@@ -267,7 +302,7 @@ export async function executeAction(
     // preserving the app's string.md nav/actions/shortcuts so the agent can
     // still call other actions after reading a response.
     if (action.responseTemplate) {
-      const sfmdSource = executeResponseTemplate(action.responseTemplate, actionResult, session, payload);
+      const sfmdSource = executeResponseTemplate(action.responseTemplate, actionResult, session, inputFields);
       const tempDoc = await resolve(`response://${action.id}`, sfmdSource, loader);
       const { content: rendered, autoShortcuts: newShortcuts } = await render(tempDoc, undefined, loader.home, loader);
       const merged = new Map(session.autoShortcuts);
@@ -347,11 +382,23 @@ function substituteBodyTemplate(
   session: Session,
 ): string {
   return template.replace(
-    /(")?\{([a-zA-Z_]\w*)((?:\|[a-zA-Z][a-zA-Z0-9]*)*)\}(")?/g,
-    (match: string, lq: string | undefined, name: string, modifierStr: string, rq: string | undefined): string => {
+    /(")?\{([a-zA-Z_]\w*)(?:\[(\d+)\])?((?:\|[a-zA-Z][a-zA-Z0-9]*)*)\}(")?/g,
+    (match: string, lq: string | undefined, name: string, idxStr: string | undefined, modifierStr: string, rq: string | undefined): string => {
       let resolved: string;
       if (payload[name] !== undefined) {
-        resolved = String(payload[name]);
+        const val = payload[name];
+        if (idxStr !== undefined) {
+          // Tuple index access
+          const idx = parseInt(idxStr, 10);
+          const arr = Array.isArray(val) ? val : [String(val)];
+          resolved = idx < arr.length ? String(arr[idx]) : '';
+        } else if (Array.isArray(val)) {
+          // Tuple referenced without index — fall back to comma-join (visible
+          // for debugging; correct usage is `{name[N]}`).
+          resolved = val.map(String).join(',');
+        } else {
+          resolved = String(val);
+        }
       } else {
         const sessionVal = session.getVar(name);
         if (sessionVal === undefined) return match;
@@ -413,8 +460,12 @@ export async function cmdAction(
   const doc = session.currentDoc;
   if (!doc) return err('No document open. Use /open <uri> first.', 'INVALID_TARGET');
 
-  // No args: list all actions
-  if (!args.trim()) {
+  const trimmed = args.trim();
+
+  // No args, or top-level --help/-h: list every action's full schema. Lets
+  // callers run `/act --help` to inspect the entire action surface in one
+  // shot, instead of `/act.<name> --help` per action.
+  if (!trimmed || trimmed === '--help' || trimmed === '-h') {
     return ok(`Actions\n---\n${renderActions(doc)}`);
   }
 

@@ -52,9 +52,16 @@ export async function cmdOpen(
   // @shortcut resolution
   if (topic.startsWith('@')) {
     const id = topic.slice(1);
-    const href = session.resolveShortcut(id);
-    if (!href) return err(`Shortcut not found: ${topic}`, 'NOT_FOUND');
-    uri = href;
+    const resolved = session.resolveShortcut(id);
+    if (resolved === null) return err(`Shortcut not found: ${topic}`, 'NOT_FOUND');
+    if (Array.isArray(resolved)) {
+      return err(
+        `Shortcut ${topic} is a value tuple, not a navigable target. ` +
+        `Use it as an action argument (e.g. /act.<name> ${topic} ...) instead of /open.`,
+        'INVALID_TARGET',
+      );
+    }
+    uri = resolved;
   }
 
   // act: scheme — dispatch to action handler instead of loading a document.

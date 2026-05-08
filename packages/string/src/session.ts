@@ -17,6 +17,7 @@ export class Session {
   private _history: HistoryEntry[] = [];
   private _variables: Map<string, string> = new Map();
   private _autoShortcuts: Map<string, string> = new Map();
+  private _valueShortcuts: Map<string, string | string[]> = new Map();
   private _bash: BashSession | null = null;
   private _lastUndoPath: string | null = null;
   private _cwdOverride: string | null = null;
@@ -133,6 +134,7 @@ export class Session {
     this._current = null;
     this._cwdOverride = null;
     this._autoShortcuts = new Map();
+    this._valueShortcuts = new Map();
     this.clearVars();
     this.closeBash();
   }
@@ -154,14 +156,30 @@ export class Session {
     return this._autoShortcuts;
   }
 
+  // ── Value Shortcuts (from {@var} = expr directives in response templates) ──
+
+  /**
+   * Set a value shortcut. Distinct from autoShortcuts (URL-based, navigable):
+   * value shortcuts hold scalars or tuples produced by action response templates,
+   * intended for substitution into action arguments (not navigation).
+   */
+  setValueShortcut(id: string, value: string | string[]): void {
+    this._valueShortcuts.set(id, value);
+  }
+
+  get valueShortcuts(): Map<string, string | string[]> {
+    return this._valueShortcuts;
+  }
+
   // ── Shortcut Resolution ────────────────────────────────────────────────────
 
   /**
-   * Resolve a shortcut id (without @) to its href.
-   * Checks page-level shortcuts first, then all menu shortcuts.
-   * Supports namespaced menu shortcuts: "main.overview"
+   * Resolve a shortcut id (without @). Returns a string href (page/auto/menu
+   * shortcuts) or a string/string[] value (value shortcuts from `{@var}=`
+   * directives). Callers that only handle navigable hrefs should reject array
+   * results explicitly.
    */
-  resolveShortcut(id: string): string | null {
+  resolveShortcut(id: string): string | string[] | null {
     const doc = this._current?.doc;
     if (!doc) return null;
 
@@ -170,12 +188,17 @@ export class Session {
       return doc.shortcuts.get(id)!;
     }
 
-    // 2. Auto-generated shortcuts from last render (@slug, @slug-2, @link-1, etc.)
+    // 2. Value shortcuts (explicit producer outputs from {@var} = ...)
+    if (this._valueShortcuts.has(id)) {
+      return this._valueShortcuts.get(id)!;
+    }
+
+    // 3. Auto-generated shortcuts from last render (@slug, @slug-2, @link-1, etc.)
     if (this._autoShortcuts.has(id)) {
       return this._autoShortcuts.get(id)!;
     }
 
-    // 3. Menu shortcuts (namespaced)
+    // 4. Menu shortcuts (namespaced)
     for (const entries of doc.menus.values()) {
       for (const entry of entries) {
         if (entry.id === id) return entry.href;

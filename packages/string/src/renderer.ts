@@ -307,13 +307,12 @@ export async function render(
     hints.push(`[nav] ${menuNames} — /nav <name>`);
   }
   if (!blockId && doc.actions.length > 0) {
-    const actionHints = doc.actions.map(a => {
-      const flags = a.fields.filter(f => f.required).map(f => `--${f.name} <${f.type}>`);
-      const flagStr = flags.length > 0 ? ' ' + flags.join(' ') : '';
-      return `/act.${a.id}${flagStr}`;
-    }).join(' | ');
-    hints.push(`[actions] ${actionHints}`);
-    hints.push(`          /act.<name> --help for details`);
+    // Names only — full signatures are noisy at the top of every render.
+    // Authors should put usage examples in the body (Quick start). For the
+    // exact field list, run `/act.<name> --help` (single) or `/act --help`
+    // (all actions on the current doc).
+    const names = doc.actions.map(a => a.id).join(', ');
+    hints.push(`[actions] ${names}  ·  /act --help (all)  ·  /act.<name> --help`);
   }
   // Missing-env warning: cross-check `requires:` frontmatter against env store.
   // Surfaces a clear "set this var" hint at /open time so the agent doesn't

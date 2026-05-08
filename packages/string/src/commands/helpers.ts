@@ -241,22 +241,124 @@ export function executeResponseTemplate(
   // turns it into a Buffer. `to:` writes whichever it currently is.
   let currentBuffer: string | Buffer | undefined;
 
-  /** Substitute {var} (session) and {field} (payload) in arbitrary text. */
+  // Value-shortcut state: `{@name} = expr` directives register named action
+  // outputs (scalar string or tuple string[]). Inside a `for:` loop the slug
+  // auto-increments per iteration (@name-1, @name-2, ...); outside a loop
+  // there is no suffix (@name). Inline `{@name}` (not on the LHS of `=`)
+  // emits the most recently registered slug name for that base.
+  const currentSlugs = new Map<string, string>();      // base → current slug
+  const slugCounters = new Map<string, number>();      // base → last assigned N
+  const seenSlugBases = new Set<string>();             // bases we've cleared this run
+
+  /** Comma-split that respects {…} nesting (so {@card} = ({a}, {b}) works). */
+  const splitTopLevelCommas = (s: string): string[] => {
+    const parts: string[] = [];
+    let depth = 0;
+    let start = 0;
+    for (let i = 0; i < s.length; i++) {
+      const c = s[i];
+      if (c === '{') depth++;
+      else if (c === '}') depth--;
+      else if (c === ',' && depth === 0) {
+        parts.push(s.slice(start, i).trim());
+        start = i + 1;
+      }
+    }
+    parts.push(s.slice(start).trim());
+    return parts;
+  };
+
+  /** Strip leading `@` (used when an RHS expression yields a slug like `@feed-1`). */
+  const stripLeadingAt = (s: string): string => (s.startsWith('@') ? s.slice(1) : s);
+
+  /**
+   * Register a value shortcut under base name `base`. In for-loop context
+   * (inLoop=true) auto-increment a per-base counter and use slug `base-N`;
+   * else use `base` directly. Records the current slug for inline `{@base}`
+   * emission. Clears any pre-existing `base-*` shortcuts on first encounter
+   * within this template run, so re-running an action with fewer items
+   * doesn't leave stale slugs behind.
+   */
+  const registerValueShortcut = (base: string, value: string | string[], inLoop: boolean): string => {
+    if (!seenSlugBases.has(base)) {
+      seenSlugBases.add(base);
+      // Drop stale `base` and `base-N` from any prior run of this template.
+      const stalePrefix = `${base}-`;
+      for (const key of [...session.valueShortcuts.keys()]) {
+        if (key === base || key.startsWith(stalePrefix)) {
+          session.valueShortcuts.delete(key);
+        }
+      }
+    }
+    let slug: string;
+    if (inLoop) {
+      const next = (slugCounters.get(base) ?? 0) + 1;
+      slugCounters.set(base, next);
+      slug = `${base}-${next}`;
+    } else {
+      slug = base;
+    }
+    session.setValueShortcut(slug, value);
+    currentSlugs.set(base, slug);
+    return slug;
+  };
+
+  /**
+   * Substitute {var} (session) and {field} (payload) in arbitrary text.
+   * Supports `{name[N]}` indexing when the field value is a tuple, mirroring
+   * the URI/body template behavior so authors can reference tuple elements
+   * uniformly across all substitution sites.
+   */
   const substituteVarsAndFields = (input: string): string =>
-    input.replace(/\{([a-zA-Z_]\w*)\}/g, (_m: string, name: string): string => {
-      if (payload && payload[name] !== undefined) return String(payload[name]);
+    input.replace(/\{([a-zA-Z_]\w*)(?:\[(\d+)\])?\}/g, (_m: string, name: string, idxStr: string | undefined): string => {
+      if (payload && payload[name] !== undefined) {
+        const val = payload[name];
+        if (idxStr !== undefined) {
+          const idx = parseInt(idxStr, 10);
+          const arr = Array.isArray(val) ? val : [String(val)];
+          return idx < arr.length ? String(arr[idx]) : '';
+        }
+        return Array.isArray(val) ? val.map(String).join(',') : String(val);
+      }
       const val = session.getVar(name);
-      return val !== undefined ? val : `{${name}}`;
+      if (val !== undefined) return val;
+      return idxStr !== undefined ? `{${name}[${idxStr}]}` : `{${name}}`;
+    });
+
+  /** Substitute {@name} (slug emission) — runs first so the literal "@slug" survives. */
+  const substituteSlugRefs = (input: string): string =>
+    input.replace(/\{@([a-zA-Z_]\w*)\}/g, (_m: string, name: string): string => {
+      const slug = currentSlugs.get(name);
+      return slug !== undefined ? `@${slug}` : `{@${name}}`;
     });
 
   /** Substitute {Response.*} and then {var}/{field} in a single text line. */
   const substituteLine = (line: string): string => {
-    let out = line.replace(/\{Response\.([a-zA-Z_.[\]\d]+)\}/g, (_m: string, p: string): string => {
+    let out = substituteSlugRefs(line);
+    out = out.replace(/\{Response\.([a-zA-Z_.[\]\d]+)\}/g, (_m: string, p: string): string => {
       const val = walkJsonPath(responseObj, p);
       return stringifyValue(val);
     });
     out = substituteVarsAndFields(out);
     return out;
+  };
+
+  /**
+   * Resolve an RHS expression for `{@name} = expr` after all upstream
+   * substitutions (item.field, Response.*, var/field) have run on the line.
+   * Tuple form: `(a, b, c)` → string[]. Otherwise scalar string.
+   */
+  const parseSlugRhs = (rhs: string): string | string[] => {
+    const trimmed = rhs.trim();
+    if (trimmed.startsWith('(') && trimmed.endsWith(')')) {
+      const inner = trimmed.slice(1, -1).trim();
+      if (inner === '') return [];
+      const parts = splitTopLevelCommas(inner);
+      // 1-element tuple normalizes to scalar — `(x)` is the same as `x`.
+      if (parts.length === 1) return stripLeadingAt(parts[0]);
+      return parts.map(stripLeadingAt);
+    }
+    return stripLeadingAt(trimmed);
   };
 
   const outputLines: string[] = [];
@@ -272,6 +374,23 @@ export function executeResponseTemplate(
       const pathStr = assignMatch[2];
       const value = walkJsonPath(responseObj, pathStr);
       session.setVar(varName, stringifyValue(value));
+      continue;
+    }
+
+    // 1b. Value-shortcut assignment (top-level): {@name} = expr
+    //     `expr` may be a tuple `(a, b, ...)` or a scalar. Substitute
+    //     {Response.*} and {var}/{field} first, then parse.
+    const slugAssignMatch = line.match(/^\{@([a-zA-Z_]\w*)\}\s*=\s*(.+)$/);
+    if (slugAssignMatch) {
+      const base = slugAssignMatch[1];
+      const rhsRaw = slugAssignMatch[2];
+      const rhsResolved = substituteVarsAndFields(
+        rhsRaw.replace(/\{Response\.([a-zA-Z_.[\]\d]+)\}/g, (_m: string, p: string): string => {
+          const val = walkJsonPath(responseObj, p);
+          return stringifyValue(val);
+        }),
+      );
+      registerValueShortcut(base, parseSlugRhs(rhsResolved), false);
       continue;
     }
 
@@ -297,8 +416,9 @@ export function executeResponseTemplate(
 
       for (const item of arr) {
         for (const bodyLine of bodyLines) {
-          // Substitute {item.field} with values from the current element
-          let expanded = bodyLine.replace(
+          // Substitute {item.field} first — gives loop-item context to
+          // everything downstream (including {@name} = expr RHS).
+          const itemSubbed = bodyLine.replace(
             /\{([a-zA-Z_]\w*)\.([a-zA-Z_.[\]\d]+)\}/g,
             (_m: string, varRef: string, fieldPath: string): string => {
               if (varRef !== itemVar) return _m;
@@ -306,8 +426,25 @@ export function executeResponseTemplate(
               return stringifyValue(val);
             },
           );
-          expanded = substituteLine(expanded);
-          outputLines.push(expanded);
+
+          // Per-iteration value-shortcut assignment: {@name} = expr
+          // Auto-enumerated (slug = name-1, name-2, ...).
+          const slugLineMatch = itemSubbed.match(/^\{@([a-zA-Z_]\w*)\}\s*=\s*(.+)$/);
+          if (slugLineMatch) {
+            const base = slugLineMatch[1];
+            const rhsRaw = slugLineMatch[2];
+            const rhsResolved = substituteVarsAndFields(
+              rhsRaw.replace(/\{Response\.([a-zA-Z_.[\]\d]+)\}/g, (_m: string, p: string): string => {
+                const val = walkJsonPath(responseObj, p);
+                return stringifyValue(val);
+              }),
+            );
+            registerValueShortcut(base, parseSlugRhs(rhsResolved), true);
+            continue; // directive — no output
+          }
+
+          // Normal output line — slug refs resolve to the current iteration's slug.
+          outputLines.push(substituteLine(itemSubbed));
         }
       }
       continue;
