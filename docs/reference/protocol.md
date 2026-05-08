@@ -28,7 +28,7 @@ If your deployment needs multi-tenant access, remote use, or per-request authent
 
 A **user** is the top-level identity. Each user has a home directory (`user.home`) and an optional allowlist of additional accessible paths. Users are registered via `POST /users` and persist across daemon restarts in `${STRINGD_DATA_DIR}/users.json` (default: `.stringd/users.json` in the daemon's working directory).
 
-A **topic** is the unit of session scope. A topic has the form `type:name` where `type` is one of `file`, `app`, `web`, or `bash`. Optional third segment for app config: `app:weather:korea`. A topic belongs to a user. The runtime maintains per-topic state (current document, variables, history, bash PTY if applicable).
+A **topic** is the unit of session scope. A topic is either a bare name — a free-form `tab` (e.g. `main`, `docs`) — or canonical: `app:name[:config]` (e.g. `app:weather:korea`) or `bash:name` (e.g. `bash:dev`). The bare names `app`, `bash`, `tool`, `system` are reserved as `hub` aggregators. A topic belongs to a user. The runtime maintains per-topic state (current document, variables, history, bash PTY if applicable).
 
 A **command** is a single `/open`, `/act`, `/nav`, `/info`, `/set`, `/edit`, etc. invocation. Commands execute in a topic's context. A client sends one command per `POST /exec` call; the daemon responds with a Server-Sent Events (SSE) stream containing a head event, a content event, and a done event.
 
@@ -114,8 +114,8 @@ The `user_id` query parameter is optional. If omitted, returns sessions across a
   "sessions": [
     {
       "user_id": "default",
-      "topic": "file:main",
-      "topic_type": "file",
+      "topic": "main",
+      "topic_type": "tab",
       "executing": false,
       "queue_length": 0,
       "doc": {
@@ -136,12 +136,12 @@ Ensures a session exists for the given user+topic. Does not execute any command 
 
 **Request:**
 ```json
-{ "user_id": "default", "topic": "file:main" }
+{ "user_id": "default", "topic": "main" }
 ```
 
 **Response 200:**
 ```json
-{ "user_id": "default", "topic": "file:main", "topic_type": "file", "created": true }
+{ "user_id": "default", "topic": "main", "topic_type": "tab", "created": true }
 ```
 
 **Errors:**
@@ -155,7 +155,7 @@ Releases the topic's runtime state and closes any bash PTY.
 
 **Response 200:**
 ```json
-{ "user_id": "default", "topic": "file:main", "deleted": true }
+{ "user_id": "default", "topic": "main", "deleted": true }
 ```
 
 `deleted: false` if the session did not exist.
@@ -180,7 +180,7 @@ This is the primary endpoint. Clients send a command; the daemon returns an SSE 
 ```json
 {
   "cmd": "/open ./README.md",
-  "topic": "file:main",
+  "topic": "main",
   "request_id": "optional-client-request-id"
 }
 ```
@@ -206,7 +206,7 @@ Metadata about the command result. Always sent first.
 
 ```
 event: head
-data: {"ok":true,"code":null,"cmd":"/open ./README.md","request_id":null,"user_id":"default","topic":"file:main","topic_type":"file","meta":{"uri":"file:///home/alice/work/README.md","title":"README","current_block":null}}
+data: {"ok":true,"code":null,"cmd":"/open ./README.md","request_id":null,"user_id":"default","topic": "main","topic_type": "tab","meta":{"uri":"file:///home/alice/work/README.md","title":"README","current_block":null}}
 ```
 
 Fields:
@@ -216,7 +216,7 @@ Fields:
 - `request_id` (string | null): echo of the client's `request_id`, or `null`.
 - `user_id` (string): the user the command ran as.
 - `topic` (string): the topic, canonicalized.
-- `topic_type` (string): one of `"file"`, `"app"`, `"web"`, `"bash"`.
+- `topic_type` (string): one of `"tab"`, `"app"`, `"bash"`, `"hub"`.
 - `meta` (object | null): current document metadata after the command, or `null` if no document is loaded.
   - `uri` (string): absolute URI of the current document.
   - `title` (string | null): document title from frontmatter.
@@ -266,7 +266,7 @@ A topic processes one command at a time. If a second command arrives while the f
 
 **Error 429:**
 ```json
-{ "error": "QUEUE_FULL", "message": "Topic default:file:main has 16 commands queued. Try again later." }
+{ "error": "QUEUE_FULL", "message": "Topic default:main has 16 commands queued. Try again later." }
 ```
 
 If a queued request waits longer than `QUEUE_WAIT_TIMEOUT_MS = 60000` (1 minute), it times out:

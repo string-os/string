@@ -10,8 +10,8 @@ Best for: shell scripts, simple automation, AI agents with command execution.
 
 ```bash
 # Topic mode: string <topic> '<command>'
-string file:main '/open ./index.md'
-string file:main '/act.search --query "hello"'
+string main '/open ./index.md'
+string main '/act.search --query "hello"'
 string app:weather '/act.forecast --city "Seoul"'
 ```
 
@@ -21,10 +21,10 @@ The CLI auto-starts a daemon process. Multiple commands share the same session s
 
 | Topic | Use Case |
 |--------|----------|
-| `file:name` | Local file browsing and editing |
-| `app:name` | Installed SFMD apps |
-| `web:name` | Web browsing (HTML → Markdown) |
-| `bash:name` | Interactive shell sessions |
+| `name` | Tab — free-form session for files, web, mixed |
+| `app:name` | Installed SFMD apps (canonical) |
+| `bash:name` | Interactive shell sessions (canonical) |
+| `app`, `bash`, `tool`, `system` | Reserved hub aggregators |
 
 ### Environment Variables
 
@@ -129,7 +129,7 @@ if (!(await ping(port))) {
 
 await ensureUser(port, { id: userId, home });
 
-const result = await exec(port, userId, 'file:main', '/open ./index.md');
+const result = await exec(port, userId, 'main', '/open ./index.md');
 console.log(result.ok);       // true on success
 console.log(result.code);     // null on success, string error code on failure
 console.log(result.content);  // the command output
@@ -159,7 +159,7 @@ curl http://localhost:3100/health
 curl -N -X POST http://localhost:3100/exec \
   -H "X-User-Id: default" \
   -H "Content-Type: application/json" \
-  -d '{"cmd": "/open index.md", "topic": "file:main"}'
+  -d '{"cmd": "/open index.md", "topic": "main"}'
 ```
 
 The SSE response contains `head`, `content`, and `done` events. See the [protocol spec](./stringd-protocol-v0.1.md) for the full schema.

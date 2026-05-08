@@ -55,7 +55,7 @@ For HTTP, optionally add a sibling `act.<id>.response` block to template the res
 ## Install and try
 
 ```bash
-string file:setup '/install --app ./hello.md'
+string setup '/install --app ./hello.md'
 string app:hello '/act.greet --name World'
 # → Hello, World!
 ```

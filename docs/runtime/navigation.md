@@ -443,11 +443,11 @@ History is scoped to the topic. Navigating in one topic doesn't
 affect another:
 
 ```
-<𝒞=string:web:docs>
+<𝒞=string:docs>
 /open @api              → docs tab history grows
 </𝒞>
 
-<𝒞=string:web:research>
+<𝒞=string:research>
 /back                   → research tab history, unaffected by docs
 </𝒞>
 ```

@@ -245,7 +245,7 @@ The scope is determined by the current topic:
 
 | Topic | Stores in |
 |--------|-----------|
-| `file:main` | Global (`config.json`) |
+| `main` | Global (`config.json`) |
 | `app:weather` | App scope (`apps/weather/env.json`) |
 | `app:weather:korea` | Config scope (`apps/weather/korea/env.json`) |
 

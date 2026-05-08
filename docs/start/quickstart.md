@@ -14,15 +14,15 @@ string --help
 ## 1. Open a Document
 
 ```bash
-string file:main '/open ./README.md'
+string main '/open ./README.md'
 ```
 
-This starts a String daemon (if not running), creates a `file:main` session, and opens the README. The AI sees the document rendered as clean Markdown with navigation hints.
+This starts a String daemon (if not running), creates a `main` session, and opens the README. The AI sees the document rendered as clean Markdown with navigation hints.
 
 ## 2. Browse the Web
 
 ```bash
-string web:docs '/open https://example.com'
+string docs '/open https://example.com'
 ```
 
 String fetches the URL, converts HTML to Markdown, and presents it with auto-generated shortcuts for links.
@@ -47,8 +47,8 @@ CLI git $ARGS
 Install and use it:
 
 ```bash
-string file:main '/install --tool ./git.md'
-string file:main '/tool:git status'
+string main '/install --tool ./git.md'
+string main '/tool:git status'
 ```
 
 ## 4. Run Actions
@@ -56,8 +56,8 @@ string file:main '/tool:git status'
 Open a document with action definitions, then execute them:
 
 ```bash
-string file:main '/open ./weather.md'
-string file:main '/act.forecast --city "Seoul"'
+string main '/open ./weather.md'
+string main '/act.forecast --city "Seoul"'
 ```
 
 ## 5. Use with Claude Desktop (MCP)

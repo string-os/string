@@ -35,7 +35,7 @@ AI can see the actual source. All modifications go through `/write`,
 `/write` creates a new file or overwrites an existing one entirely.
 
 ```
-<𝒞=string:file:notes>
+<𝒞=string:notes>
 /write ~/notes/meeting.md
 ---
 title: Team Meeting
@@ -78,7 +78,7 @@ it didn't intend to remove.
 `/append` adds content to the end of an existing file.
 
 ```
-<𝒞=string:file:notes>
+<𝒞=string:notes>
 /append ~/notes/meeting.md
 
 ## Follow-up
@@ -504,16 +504,16 @@ the workspace boundary are also rejected.
 
 ```
 # 1. Research across multiple topics
-<𝒞=string:web:docs>
+<𝒞=string:docs>
 /open https://api.example.com/docs
 </𝒞>
 
-<𝒞=string:web:stats>
+<𝒞=string:stats>
 /open https://analytics.example.com/dashboard
 </𝒞>
 
 # 2. Create the report
-<𝒞=string:file:reports>
+<𝒞=string:reports>
 /write ~/reports/q1.md
 ---
 title: Q1 Report
@@ -533,8 +533,8 @@ Revenue grew 15% quarter-over-quarter...
 </𝒞>
 ```
 
-AI reads from web topics, writes to a file topic. Multiple
-sources, single output.
+AI reads from one tab, writes from another. Multiple sources,
+single output — same topic type, different sessions.
 
 ### Iterative editing
 

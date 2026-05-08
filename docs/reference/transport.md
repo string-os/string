@@ -14,7 +14,7 @@ Every String message consists of:
 | Element | What it is |
 |---------|------------|
 | **Channel** | `string` — identifies this as a String message |
-| **Topic** | Which session receives the message (file, web, app) |
+| **Topic** | Which session receives the message (tab, app, bash, hub) |
 | **Payload** | The content — a command, text, or a response |
 
 That's the entire interface. Everything else is how these three
@@ -27,15 +27,18 @@ elements are represented in a specific transport.
 The topic identifies which session the message is for:
 
 ```
-file:main                file topic (default)
-file:docs                file topic
-web:docs                 web topic
-app:gmail:work           app topic
-bash:dev                 bash topic
+main                     tab (free-form, default)
+docs                     tab
+research                 tab
+app:gmail:work           app topic (canonical)
+bash:dev                 bash topic (canonical)
+app                      hub (reserved bare name)
 ```
 
-Topics use the `type:name` format. Bare names default to `file:`.
-Empty/absent topics default to `file:main`. See [04-topics.md](./04-topics.md).
+Bare names are tabs. Canonical topics carry an explicit `app:` or
+`bash:` prefix. The bare names `app`, `bash`, `tool`, `system` are
+reserved as hub aggregators. Empty/absent topics default to the tab
+`main`. See [04-topics.md](./04-topics.md).
 
 ---
 
@@ -61,7 +64,7 @@ Commands with content (`/replace`, `/append`, `/set`) include
 the content starting from the **next line** after the command:
 
 ```
-<𝒞=string:file:notes>
+<𝒞=string:notes>
 /replace ~/notes/meeting.md:L5
 This line replaces line 5.
 This is a second line.
@@ -77,7 +80,7 @@ All payloads must start with `/`. Plain text without a command
 prefix is rejected with `COMMAND_UNSUPPORTED`.
 
 ```
-<𝒞=string:file:notes>
+<𝒞=string:notes>
 # Meeting Notes
 Content goes here.
 </𝒞>
@@ -113,7 +116,7 @@ topic semantics.
 Use explicit commands for all operations:
 
 ```
-<𝒞=string:file:notes>
+<𝒞=string:notes>
 /write ~/notes/meeting.md
 # Meeting Notes
 Content goes here.
@@ -163,7 +166,7 @@ is the channel. Everything after `:` is the typed topic.
 AI tags have only channel and topic — nothing else:
 
 ```
-<𝒞=string:file:notes>
+<𝒞=string:notes>
 /open ~/notes/meeting.md#decisions
 </𝒞>
 ```
@@ -179,7 +182,7 @@ AI tags have only channel and topic — nothing else:
 Response tags MAY include optional attributes:
 
 ```
-<𝒞=string:file:notes time="2026-03-19T14:30+09:00">
+<𝒞=string:notes time="2026-03-19T14:30+09:00">
 ## Decisions
 1. Move deadline to April 1
 2. Switch to weekly syncs
@@ -187,7 +190,7 @@ Response tags MAY include optional attributes:
 ```
 
 ```
-<𝒞=string:file:notes time="2026-03-19T14:31+09:00" mode=edit>
+<𝒞=string:notes time="2026-03-19T14:31+09:00" mode=edit>
 ✓ ~/notes/meeting.md#decisions — Added 2 lines, removed 1 line
 
  11  │ <!-- #decisions -->
@@ -215,11 +218,11 @@ AI can address multiple topics in one turn. String responds
 with separate blocks for each:
 
 ```
-<𝒞=string:web:api-docs>
+<𝒞=string:api-docs>
 /open @authentication
 </𝒞>
 
-<𝒞=string:file:code>
+<𝒞=string:code>
 /open ~/src/auth.md#oauth-flow
 </𝒞>
 ```
@@ -227,12 +230,12 @@ with separate blocks for each:
 Response:
 
 ```
-<𝒞=string:web:api-docs time="2026-03-19T14:32+09:00">
+<𝒞=string:api-docs time="2026-03-19T14:32+09:00">
 # Authentication
 OAuth2 is required for all API endpoints...
 </𝒞>
 
-<𝒞=string:file:code time="2026-03-19T14:32+09:00">
+<𝒞=string:code time="2026-03-19T14:32+09:00">
 ## OAuth Flow
 1. Redirect to provider
 2. Receive callback with code
@@ -246,7 +249,7 @@ OAuth2 is required for all API endpoints...
 In ChanFlow, String is one of many channels:
 
 ```
-<𝒞=string:file:main>
+<𝒞=string:main>
 /open ~/report.md#summary
 </𝒞>
 
@@ -274,7 +277,7 @@ When AI sends a message to a topic for the first time, String
 creates the session automatically:
 
 ```
-<𝒞=string:file:project>
+<𝒞=string:project>
 /open ~/new-project/index.md
 </𝒞>
 ```
@@ -304,7 +307,7 @@ available in turn 5.
 ### Close
 
 ```
-<𝒞=string:web:research>
+<𝒞=string:research>
 /close
 </𝒞>
 ```

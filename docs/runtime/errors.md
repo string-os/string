@@ -195,7 +195,7 @@ an error.
 **COMMAND_UNSUPPORTED** — input does not start with `/`.
 
 ```
-<𝒞=string:file:main>
+<𝒞=string:main>
 hello world
 </𝒞>
 ```
@@ -220,7 +220,7 @@ All input must be a command. Plain text is not accepted.
 
 ```
 ✗ INVALID_TARGET: invalid topic "intro.md"
-  format: type:name (e.g. file:main, web:docs, app:weather)
+  format: bare name (tab) or app:name / bash:name (e.g. main, docs, app:weather, bash:dev)
   names: [a-zA-Z0-9_-]+ only — no dots, no paths
 ```
 

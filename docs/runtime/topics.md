@@ -3,8 +3,9 @@ title: Topics
 ---
 
 A topic is a session. Every command an AI sends through String is
-directed at a specific topic — a file, a web tab, or an app instance.
-Each topic maintains its own state independently.
+directed at a specific topic — a free-form tab, an installed app, a
+shell session, or a hub aggregator. Each topic maintains its own
+state independently.
 
 ---
 
@@ -22,12 +23,12 @@ in one browser tab doesn't navigate a different tab.
 Topics give AI the same capability.
 
 ```
-<𝒞=string:file:main>
+<𝒞=string:main>
 /open ~/report.md#summary
 </𝒞>
 
-<𝒞=string:web:docs>
-/open @getting-started
+<𝒞=string:docs>
+/open https://docs.example.com/getting-started
 </𝒞>
 
 <𝒞=string:app:gmail:work>
@@ -47,8 +48,8 @@ the first command's "current document" can land on the wrong base.
 For parallel reads, use distinct topics:
 
 ```
-<𝒞=string:web:doc1>/open https://a/page1.md</𝒞>
-<𝒞=string:web:doc2>/open https://a/page2.md</𝒞>
+<𝒞=string:doc1>/open https://a/page1.md</𝒞>
+<𝒞=string:doc2>/open https://a/page2.md</𝒞>
 ```
 
 Sequential commands within the same topic are always safe.
@@ -57,119 +58,76 @@ Sequential commands within the same topic are always safe.
 
 ## Topic syntax
 
-All topics follow a typed format:
+There are four shapes:
 
-```
-type:name
-```
+| Shape | Form | Example |
+|---|---|---|
+| Tab (free-form) | bare name | `main`, `notes`, `research` |
+| App (canonical) | `app:name` | `app:gmail`, `app:weather:korea` |
+| Bash (canonical) | `bash:name` | `bash:dev`, `bash:deploy` |
+| Hub (reserved bare names) | `app`, `bash`, `tool`, `system` | `app`, `bash` |
 
-- **type**: `file`, `web`, `app`, or `bash`
-- **name**: `[a-zA-Z0-9_-]+` — letters, numbers, hyphens, underscores only
+Names match `[a-zA-Z0-9_-]+` — letters, numbers, hyphens, underscores
+only. No dots, no paths, no spaces. Session names are short
+identifiers, not file paths or URLs.
 
-No dots. No paths. No spaces. Session names are short identifiers,
-not file paths or URLs.
+An empty or absent topic defaults to the tab `main`.
 
-A bare name (no type prefix) defaults to `file:`:
-
-```
-main         → file:main
-docs         → file:docs
-```
-
-An empty or absent topic defaults to `file:main`.
-
-In ChanFlow: `string:<type:name>`. In HTTP: body `{"topic": "type:name"}`.
+In ChanFlow: `string:<topic>`. In HTTP: body `{"topic": "<topic>"}`.
 
 ---
 
 ## Topic types
 
-### File
+### Tab
 
-A file session is a named workspace for local file operations.
-
-```
-string:file:main
-string:file:docs
-string:file:notes
-```
-
-The session name identifies the workspace — not a specific file.
-Within a session, the AI navigates files freely with `/open`:
+A tab is a free-form session. Bare name, no prefix. The default kind.
 
 ```
-<𝒞=string:file:main>
+string:main
+string:docs
+string:notes
+string:research
+```
+
+A tab can hold any document — local file, remote URL, or nothing yet.
+The session name is a workspace label, not a file path.
+
+```
+<𝒞=string:main>
 /open ~/report.md
 </𝒞>
 
-<𝒞=string:file:main>
+<𝒞=string:main>
 /open ~/docs/guide.md#setup
 </𝒞>
 ```
 
-Both commands topic the same session. History, current location,
-and variables persist across navigations within that session.
+Both commands target the same tab. History, current location, and
+variables persist across navigations within that tab.
 
-Multiple file sessions let the AI organize work by context:
+Multiple tabs let the AI organize work by context — a tab for
+documentation, a tab for editing, a tab for browsing the web:
 
 ```
-<𝒞=string:file:docs>
-/open ~/docs/api-reference.md
+<𝒞=string:reading>
+/open https://docs.example.com/api
 </𝒞>
 
-<𝒞=string:file:notes>
-/open ~/notes/meeting.md
+<𝒞=string:editing>
+/open ~/src/handler.md
 </𝒞>
 ```
 
-Each session maintains its own navigation history independently.
+Each tab maintains its own navigation history independently.
 
 Relative paths in `/open` resolve from the current document's
 directory. `[Next](./chapter2.md)` inside `~/docs/chapter1.md`
 points to `~/docs/chapter2.md` — exactly as in any Markdown viewer.
 
-### Web
-
-A browser tab is a topic. Pages change within the tab, but the topic
-stays the same.
-
-```
-string:web:tab_1
-string:web:docs
-string:web:competitor_research
-```
-
-When AI opens a URL inside a web topic, it navigates within that tab.
-The URL changes, but the session — history, cookies, authentication —
-persists. `/back` returns to the previous page in that tab, not a
-different tab.
-
-Named tabs (`web:docs`, `web:research`) let the AI organize its
-browsing by purpose, just like a human labels browser tab groups.
-
-Opening a URL without a topic automatically creates a new tab:
-
-```
-<𝒞=string>
-/open https://docs.example.com/api
-</𝒞>
-```
-
-String assigns `web:tab_1`, `web:tab_2`, ... incrementally. To
-name the tab explicitly, use `--tab`:
-
-```
-<𝒞=string>
-/open --tab docs https://docs.example.com/api
-</𝒞>
-```
-
-This creates `web:docs` instead of `web:tab_N`.
-
 ### App
 
-An app instance is a topic. Same as web — pages change within the
-app, but the session persists.
+An app instance is a topic. Always carries the `app:` prefix.
 
 ```
 string:app:gmail
@@ -183,15 +141,13 @@ This is how the same app serves different contexts — a work email
 account and a personal one, each with its own state, each as a
 separate topic.
 
-Web and app topics follow the same grammar. The distinction is
-semantic: web topics are general browsing sessions, app topics
-are specific application instances with defined capabilities.
+App topics are *canonical*: opening an app target from any other
+session redirects to the app's own topic, so app sessions stay clean
+of unrelated content.
 
 ### Bash
 
-A shell session is a topic. It works like a real terminal —
-working directory, environment variables, and process state
-persist across commands.
+A shell session is a topic. Always carries the `bash:` prefix.
 
 ```
 string:bash:dev
@@ -217,7 +173,7 @@ The next command to `bash:dev` starts in `~/projects/myapp` with
 Bash topics don't have navigation history (`/back` doesn't apply).
 They have command history and shell state instead.
 
-### Bash topics and commands
+#### Bash topics and commands
 
 Unlike other topic types, bash topics accept plain text as shell
 input. The command-only requirement does not apply:
@@ -242,6 +198,30 @@ The `//` prefix strips one slash, sending `/info` as a String command
 instead of executing `//info` in the shell. This lets you run `/info`,
 `/close`, and other String commands on bash topics while preserving
 normal shell input for everything else.
+
+### Hub
+
+Four bare names are reserved as **hub aggregators** — they route to
+managed views over their kind rather than free-form tabs:
+
+| Hub | What it manages |
+|---|---|
+| `app` | Installed apps + currently open app sessions |
+| `bash` | Active bash sessions (list, spawn, kill) |
+| `tool` | Installed tools |
+| `system` | Daemon status, env store, runtime controls |
+
+```
+string:app          # the app hub
+string:bash         # the bash hub
+```
+
+Because they're reserved, you cannot name a free-form tab `app`,
+`bash`, `tool`, or `system`. `string app` always opens the app hub,
+not a tab called `app`.
+
+In v0.1.x each hub renders a placeholder page; concrete listings and
+management actions land in a follow-up.
 
 ---
 
@@ -301,22 +281,22 @@ AI can hold multiple topics open at once. Each topic is independent:
 |---------|-------|
 | History (`/back`) | Per topic |
 | Current location | Per topic |
-| Authentication | Per topic (web/app) |
-| Working directory | Per topic (file) |
+| Authentication / cookies | Per topic |
+| Working directory | Per topic |
 
 This enables workflows that require parallel context:
 
 ```
-<𝒞=string:web:api_docs>
-/open @authentication
+<𝒞=string:api_docs>
+/open https://docs.example.com/api/auth
 </𝒞>
 
-<𝒞=string:file:code>
+<𝒞=string:code>
 /open ~/src/auth.md#oauth_flow
 </𝒞>
 ```
 
-The AI reads API documentation in one topic and edits code in another.
+The AI reads API documentation in one tab and edits code in another.
 Both stay open. Both maintain their own position. The AI switches
 between them as needed — no reloading, no lost state.
 
@@ -325,7 +305,7 @@ between them as needed — no reloading, no lost state.
 `/info` shows the current topic's state:
 
 ```
-<𝒞=string:web:docs>
+<𝒞=string:docs>
 /info
 </𝒞>
 ```
@@ -343,7 +323,7 @@ vars:      {lang}="en", {version}="v2"
 This tells the AI where it is (full URI), what state exists,
 and what's available — without reading the whole document again.
 
-For file topics, `/info` shows workspace-relative paths:
+For tabs holding a local file, `/info` shows workspace-relative paths:
 
 ```
 Session info
@@ -359,7 +339,7 @@ history:   2 entries
 `/topics` shows all active topics. It works from any topic:
 
 ```
-<𝒞=string:file:main>
+<𝒞=string:main>
 /topics
 </𝒞>
 ```
@@ -367,8 +347,8 @@ history:   2 entries
 ```
 Active topics:
 
-  file:main            file    current: #summary
-  web:docs             web     current: /api/auth
+  main                 tab     current: ~/report.md#summary
+  docs                 tab     current: https://docs.example.com/api/auth
   app:gmail:work       app     current: inbox
   bash:dev             bash    cwd: ~/projects/myapp
 
@@ -378,23 +358,22 @@ Active topics:
 Filter by type:
 
 ```
-/topics web
+/topics tab
 ```
 
 ```
-  web:docs             current: /api/auth
-  web:research         current: /pricing
+  main                 current: ~/report.md#summary
+  docs                 current: https://docs.example.com/api/auth
 
-2 web topics open.
+2 tab topics open.
 ```
 
-Available type filters: `file`, `web`, `app`, `bash`. Filtering by
+Available type filters: `tab`, `app`, `bash`, `hub`. Filtering by
 an unknown type is rejected with a clear message rather than
 silently returning an empty list.
 
 `/sessions` is a plural-form alias of `/topics` (same output, same
-type filter). `/session list` is a legacy alias kept for older
-agents — new code should prefer `/topics`.
+type filter).
 
 ### Closing topics
 
@@ -403,7 +382,7 @@ topic — the topic itself remains open as a doc-less shell that
 `/open` can re-occupy without recreating session state:
 
 ```
-<𝒞=string:web:docs>
+<𝒞=string:docs>
 /close
 </𝒞>
 ```
@@ -412,9 +391,9 @@ To remove a topic entirely (drop its history, vars, bash session,
 and unlist it from `/topics`), use `/session close <name>`:
 
 ```
-<𝒞=string:file:main>
+<𝒞=string:main>
 /session close bash:dev
-/session close web:research
+/session close research
 </𝒞>
 ```
 
@@ -439,18 +418,18 @@ stateless — each invocation starts clean with only base
 environment variables.
 
 ```
-<𝒞=string:file:main>
+<𝒞=string:main>
 /exec npm test
 </𝒞>
 ```
 
-The command runs from the topic's base path. For file topics,
-that's the current document's directory (or home if none is open).
-For app/web topics, it's the app's workspace. Without a topic,
-it runs from the AI's home directory:
+The command runs from the topic's base path. For tabs holding a local
+file, that's the current document's directory (or home if none is
+open). For app sessions, it's the app's workspace. Without a current
+document, it runs from the AI's home directory:
 
 ```
-<𝒞=string>
+<𝒞=string:main>
 /exec ls ~/projects
 </𝒞>
 ```
@@ -490,74 +469,21 @@ variables, shell history all maintained.
 
 ---
 
-## Opening a new tab
-
-Sometimes the AI needs to open a link in a new tab — keeping the
-current session where it is, but starting a new one that inherits
-the current state. Internally this forks the session — deep-copying
-state into a new independent topic.
-
-```
-<𝒞=string:web:docs>
-/open --tab research @api-reference
-</𝒞>
-```
-
-This creates a new topic `web:research` by deep-copying the
-current session's state:
-
-| What gets copied | What doesn't |
-|------------------|--------------|
-| Variables | History |
-| Authentication / cookies | Current location |
-| Runtime configuration | |
-
-The shortcut resolves in the current session's context, and the
-new session starts at that destination with a clean history.
-From this point, the two sessions are fully independent — changing
-a variable in `web:research` does not affect `web:docs`.
-
-This is the browser's "open in new tab" model. The new tab
-inherits cookies and login state but lives on its own.
-
-### When to fork
-
-- Exploring a side link without losing your place
-- Comparing two pages from the same authenticated site
-- Branching a workflow into parallel tracks
-
-### Works on any topic type
-
-Though most common for web topics, it works on app topics too:
-
-```
-<𝒞=string:app:gmail:work>
-/open --tab gmail-search @search
-</𝒞>
-```
-
-Creates `app:gmail-search` with the same auth and variables as
-`app:gmail:work`. File topics don't need fork — opening a
-different file path already creates an independent topic.
-
----
-
 ## Summary
 
 | Concept | Rule |
 |---------|------|
-| **Topic** | A named session — `type:name` format |
-| **Syntax** | `[a-zA-Z0-9_-]+` names only — no dots, no paths |
-| **Default** | Empty/bare → `file:main` |
-| **File topic** | `file:name` — named workspace, navigate files within |
-| **Web topic** | `web:name` — pages change, session persists |
-| **App topic** | `app:name[:config]` — same as web, with multi-session support |
+| **Topic** | A named session — bare name (tab), `app:name`, `bash:name`, or reserved hub bare name |
+| **Syntax** | `[a-zA-Z0-9_-]+` segments only — no dots, no paths |
+| **Default** | Empty/missing → `main` (tab) |
+| **Tab** | Bare name — free-form session, holds any document |
+| **App topic** | `app:name[:config]` — canonical app instance |
 | **Bash topic** | `bash:name` — stateful shell session, like a real terminal |
+| **Hub** | `app`, `bash`, `tool`, `system` — reserved aggregator views |
 | **Home** | `~` or bare path → agent's home directory (for commands, not topics) |
 | **Document paths** | Relative to the document's own location |
 | **State** | History, location, auth — all per topic |
 | **`/exec`** | Stateless one-shot shell command from topic's base path |
-| **`/topics [type]`** | List active topics, optionally filter by type. `/sessions` and `/session list` are aliases. |
+| **`/topics [type]`** | List active topics, optionally filter by type. `/sessions` is an alias. |
 | **`/close`** | Close the document in the current topic (topic itself remains) |
 | **`/session close <name>`** | Remove a topic entirely from the topic list |
-| **New tab** | `/open --tab name url` — deep-copy state into new topic |

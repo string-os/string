@@ -40,7 +40,7 @@ it is talking to.
 |---|---|---|
 | **Navigation** | how an agent moves between documents, pages, and blocks | `/open`, `/back`, `/nav`, `[!nav:]`, `[@shortcut]` |
 | **Action invocation** | how an agent calls a capability | `/act.<name>`, action blocks, typed args, `/act.<name> --help` |
-| **State scoping** | what is remembered, where, and for how long | topics (`file:`, `web:`, `app:`, `bash:`), session vars, env scopes |
+| **State scoping** | what is remembered, where, and for how long | topics (tab, `app:`, `bash:`, hub), session vars, env scopes |
 | **Output framing** | how the agent recognizes its own results | `<𝒞=string:topic>…</𝒞>` markers around every payload |
 | **Editing semantics** | how an agent writes back to the world | `/write`, `/append`, `/edit`, `/undo`, `/verify`, block-level edits |
 | **Trust and permissions** | what an agent is allowed to run | action allowlist, `--allow-shell`, `[!requirements]`, signed packages (v0.2) |
@@ -65,7 +65,7 @@ agent work* — see [string-os.org](https://string-os.org).
 | 1 | [Why String](./01-why.md) | The problem, the vision, and why AI needs its own OS |
 | 2 | [The Model](./02-the-model.md) | Context hierarchy, SFMD principles, command surface |
 | 3 | [The AI Loop](./03-the-ai-loop.md) | How an AI agent discovers, navigates, and acts |
-| 4 | [Topics](./04-topics.md) | Sessions, typed topics (file, web, app, bash) |
+| 4 | [Topics](./04-topics.md) | Sessions, typed topics (tab, app, bash, hub) |
 | 5 | [Actions](./05-actions.md) | Action definition, invocation, response templates |
 | 6 | [State](./06-state.md) | Variables, secrets, session state, configuration |
 | 7 | [Navigation](./07-navigation.md) | /open, /nav, menus, shortcuts, history |

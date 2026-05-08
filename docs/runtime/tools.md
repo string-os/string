@@ -219,7 +219,7 @@ state. These are read-only variables available in `act` definitions:
 | `$CURRENT_FILE` | Current open file path |
 | `$CWD` | Current working directory |
 | `$CURRENT_URI` | Current document URI |
-| `$CURRENT_TARGET` | Current topic (e.g. `file:main`) |
+| `$CURRENT_TARGET` | Current topic (e.g. `main`) |
 | `$CURRENT_BLOCK` | Currently viewed block ID, if any |
 | `$ARGS` | Everything after the tool name (for pass-through) |
 

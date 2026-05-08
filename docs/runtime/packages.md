@@ -228,7 +228,7 @@ sub-directory 포함 모든 파일이 staging 디렉토리에 받아진 뒤
 
 | 세션 이름 | 스코프 | 저장 위치 |
 |-----------|--------|-----------|
-| `file:main` | 전역만 | `config.json` → `env` |
+| `main` | 전역만 | `config.json` → `env` |
 | `app:weather` | 전역 + 앱 | `apps/weather/env.json` |
 | `app:gmail:work` | 전역 + 앱 + config | `apps/gmail/work/env.json` |
 
