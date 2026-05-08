@@ -38,7 +38,7 @@ if (!alive) throw new Error('stringd not running on port ' + port);
 await ensureUser(port, { id: userId, home });
 
 // 3. Execute a command in a topic
-const result = await exec(port, userId, 'file:main', '/open ./README.md');
+const result = await exec(port, userId, 'main', '/open ./README.md');
 
 console.log(result.ok);       // true
 console.log(result.code);     // null on success, error code on failure

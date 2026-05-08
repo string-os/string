@@ -18,6 +18,8 @@ import {
 import { executeAction } from './action.js';
 import { deriveEnvScope } from '../env-store.js';
 import { cmdLs } from './info.js';
+import { isHubName } from '../types.js';
+import { renderHubPlaceholder } from './hub.js';
 
 // ─── /open ────────────────────────────────────────────────────────────────────
 
@@ -27,7 +29,13 @@ export async function cmdOpen(
   loader: Loader,
 ): Promise<CommandResult> {
   if (!topic) {
-    // No argument in an app: topic → re-open the app's index.md (= app home)
+    // No argument:
+    //  - hub topic → show the hub's placeholder/listing
+    //  - app:<name> → re-open the app's index.md (= app home)
+    //  - otherwise re-open whatever was last opened, or show usage
+    if (isHubName(session.name)) {
+      return ok(renderHubPlaceholder(session.name));
+    }
     if (session.name.startsWith('app:')) {
       topic = session.name; // e.g. "app:moltbook-browse" → resolved by registry below
     } else if (session.currentUri) {
@@ -43,6 +51,13 @@ export async function cmdOpen(
         'INVALID_TARGET'
       );
     }
+  }
+
+  // Bare hub name (`/open app`, `/open bash`, ...) → render the hub
+  // placeholder. The CLI already routes this command to the hub topic so the
+  // session is on the right canonical name; we just need to produce content.
+  if (isHubName(topic)) {
+    return ok(renderHubPlaceholder(topic));
   }
 
   // Parse fragment

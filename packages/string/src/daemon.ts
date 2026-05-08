@@ -4,7 +4,7 @@
  * Manages Browser sessions and exposes them over HTTP + SSE.
  *
  * Architecture: one Browser per user, sessions identified by topic string.
- *   e.g. user "neo" → Browser { sessions: "file:main", "file:work", "bash:dev" }
+ *   e.g. user "neo" → Browser { sessions: "main", "work", "bash:dev" }
  *
  * Endpoints:
  *   POST   /users             — register user  { user_id, home }

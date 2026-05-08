@@ -17,19 +17,30 @@ This installs three things:
 
 ## CLI
 
-The basic shape is `string <topic> '<command>'`. A topic is `type:name` — `file:main` for ad-hoc work, `app:weather` for an installed app, `web:docs` for HTTP, `bash:dev` for a persistent shell.
+The basic shape is `string <topic> '<command>'`. A topic is one of:
+
+- a bare name (`main`, `notes`, `setup`) — a free-form session for ad-hoc work
+- `app:<pkg>[:<config>]` — an installed app session (e.g. `app:weather`)
+- `bash:<name>` — a persistent shell session (each name = its own pty)
+- `app`, `bash`, `tool`, `system` — hub topics that aggregate / manage their kind
 
 ```bash
 # Install an app from a local file or URL
-string file:setup '/install --app ./apps/weather/string.md'
+string setup '/install --app ./apps/weather/string.md'
 
 # Open the app and call its actions
 string app:weather '/open app:weather'
 string app:weather '/act.now Seoul'
 string app:weather '/act.forecast Tokyo'
 
-# Open a web page (rendered as Markdown)
-string web:docs '/open https://developer.mozilla.org'
+# Open a web page in a free-form tab (rendered as Markdown)
+string docs '/open https://developer.mozilla.org'
+
+# Bash session
+string bash:dev 'cd ~/work && ls'
+
+# Hub view — aggregates installed apps, current sessions, etc.
+string app
 
 # REPL mode — drop the command argument
 string app:weather

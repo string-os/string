@@ -252,9 +252,11 @@ export class EnvStore {
 
 /**
  * Derive env scope from a session/topic name.
- * "file:main" → {} (global only)
- * "app:weather" → { app: "weather" }
- * "app:weather:korea" → { app: "weather", config: "korea" }
+ * "main", "notes" (tab) → {} (global only)
+ * "app:weather"          → { app: "weather" }
+ * "app:weather:korea"    → { app: "weather", config: "korea" }
+ * "bash:dev"             → {} (bash sessions don't carry app-scoped env)
+ * "app", "bash" (hubs)   → {} (hub topics aren't app-scoped)
  */
 export function deriveEnvScope(sessionName: string): EnvScope {
   const colonIdx = sessionName.indexOf(':');
