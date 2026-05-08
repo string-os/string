@@ -1,5 +1,67 @@
 # Changelog
 
+## v0.2.0 (2026-05-08)
+
+Two reshapes to the action runtime and the topic system. **Breaking
+changes** to the topic API; action authoring stays compatible.
+
+```
+@string-os/string  0.2.0
+```
+
+(Other packages unchanged.)
+
+### `@string-os/string` — action I/O
+
+- **Value shortcuts.** Response templates can declare named outputs with
+  `{@var} = expr`. Inside a `for:` loop the slug auto-enumerates per
+  iteration (`@feed-1`, `@feed-2`, ...); outside it's a single `@var`.
+  Downstream actions consume them as flag values:
+  `/act.read @feed-3` resolves to the post id without the AI typing a
+  long UUID.
+- **Tuple values.** RHS form `({a}, {b}, ...)` produces a `string[]` value
+  shortcut. Action templates index with `{name[N]}` across URI / body /
+  response substitution. Lets one shortcut carry several fields
+  (`@card-9 = (issue_number, repo)`) so a single token replaces what used
+  to need two.
+- **Multi-occurrence `{var}` in URIs.** Payload key deletion is now
+  deferred until after the URI replace pass, so `{var}` (or `{var[0]}`
+  followed by `{var[1]}`) can repeat in one template without later
+  occurrences falling through to literal.
+- **Input snapshot for body / response templates.** Templates see the
+  caller's original payload, even after the URI step consumed a field.
+- **Sibling-file install.** The installer now copies non-`.md` files
+  next to `string.md` (helpers, scripts, binaries) with executable mode
+  preserved. Apps can ship local CLI wrappers without external packaging.
+- **`/act --help`** renders the schema for every action on the current
+  doc in one shot. The `[actions]` line on each render shows action names
+  only — full signatures live behind `--help`.
+
+### `@string-os/string` — topic system **(breaking)**
+
+- New topic types: `tab` (free-form bare names), `app`, `bash`, `hub`.
+- `file:` and `web:` prefixes are removed. `string file:main '...'` now
+  fails to parse — use bare names: `string main '...'`, `string notes
+  '...'`. The two prefixes carried no enforced semantics; this collapses
+  the distinction.
+- Reserved bare names `app`, `bash`, `tool`, `system` route to **hub
+  topics** instead of free-form sessions. Each hub aggregates / manages
+  instances of its kind. v0.2 ships a placeholder page; concrete
+  listings and management actions land in a follow-up.
+- Canonical and hub targets always carry their own topic. `/open app:X`,
+  `/open bash:X`, `/open <hub>` from any session redirect to the
+  canonical topic so app/hub sessions stay clean of unrelated content.
+- `TopicType` and related public API in `@string-os/string` change
+  shape (`'tab' | 'app' | 'bash' | 'hub'`); embedders should re-check
+  any `topic.type === 'file' | 'web'` checks.
+
+### Migration from 0.1.x
+
+- `string file:main '...'`         → `string main '...'`
+- `string file:<anything> '...'`   → `string <anything> '...'`
+- `string web:docs '...'`          → `string docs '...'`
+- Bare names `app`, `bash`, `tool`, `system` are now reserved (hub topics).
+
 ## v0.1.2 (2026-05-07)
 
 Documentation-friendliness pass: docs that *describe* SFMD syntax no longer
