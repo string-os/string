@@ -1,4 +1,6 @@
-# String Install Manifest (v1)
+---
+title: Install Manifest
+---
 
 A registry-agnostic JSON format that an HTTP source can return so the daemon's `/install` command knows how to fetch and stage the package without flag input from the agent.
 
