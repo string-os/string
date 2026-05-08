@@ -22,9 +22,12 @@ export function cmdInfo(args: string, session: Session, loader: Loader): Command
   const trimmedArgs = args.trim();
   if (trimmedArgs.startsWith('@')) {
     const id = trimmedArgs.slice(1);
-    const href = session.resolveShortcut(id);
-    if (!href) return err(`Shortcut not found: ${trimmedArgs}`, 'NOT_FOUND');
-    return ok(`@${id} → ${href}`);
+    const resolved = session.resolveShortcut(id);
+    if (resolved === null) return err(`Shortcut not found: ${trimmedArgs}`, 'NOT_FOUND');
+    const display = Array.isArray(resolved)
+      ? `(${resolved.join(', ')})`
+      : resolved;
+    return ok(`@${id} → ${display}`);
   }
 
   const lines: string[] = [];

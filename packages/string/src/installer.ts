@@ -254,11 +254,19 @@ export async function installPackage(
         for (const entry of entries) {
           if (entry === sourceBasename) continue;
           if (entry === 'string.md') continue;
-          if (!entry.endsWith('.md')) continue;
+          // Skip dotfiles (.git, .DS_Store, .env, ...) and directories.
+          // Everything else — .md docs, .sh helpers, .py/.js scripts, .json
+          // configs — gets copied so apps can ship sibling tools and call them
+          // from CLI actions (e.g. `CLI ./helper.sh {arg}`).
+          if (entry.startsWith('.')) continue;
           const srcPath = path.join(sourceDir, entry);
           const stat = await fs.stat(srcPath);
           if (!stat.isFile()) continue;
           await fs.copyFile(srcPath, path.join(stagingDir, entry));
+          // Preserve source file mode (so executable scripts stay executable
+          // after install). copyFile copies content but mode behavior is
+          // platform-dependent; chmod explicitly to be safe.
+          await fs.chmod(path.join(stagingDir, entry), stat.mode);
         }
       } catch { /* non-local or unreadable — skip */ }
     } else if (loaded.rawSource) {
