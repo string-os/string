@@ -36,17 +36,17 @@ Read the payload between the markers. The opener tells you which topic the call 
 string <topic> '<command>'
 ```
 
-A **topic** is `type:name` and scopes session state (current document, history, env vars). You make it up.
+A **topic** is the session label and scopes session state (current document, history, env vars).
 
 | Form | Use |
 |---|---|
-| `file:<name>` | Ad-hoc work, opening local docs |
+| `<name>` | Free-form session — bare label you pick (e.g. `main`, `notes`, `setup`). Default when no topic is given is `main`. |
 | `app:<name>` | Running an installed app |
 | `app:<name>:<config>` | Same app with a config-scoped env (e.g. `app:weather:seoul` for region-specific API key) |
-| `web:<name>` | HTTP browsing (page rendered as Markdown) |
 | `bash:<name>` | Persistent shell session |
+| `app`, `bash`, `tool`, `system` | Hub topics — aggregate / manage installed apps, active bash sessions, tools, runtime state |
 
-Same topic = same state.
+Same topic = same state. Reserved hub names cannot be used as free-form labels.
 
 ## 4. Open an app and discover its actions
 
@@ -93,13 +93,13 @@ From the cookbook (canonical example collection):
 ```bash
 git clone https://github.com/string-os/cookbook.git
 cd cookbook
-string file:setup '/install --app ./apps/weather/string.md'
+string setup '/install --app ./apps/weather/string.md'
 ```
 
 From any URL:
 
 ```bash
-string file:setup '/install --app https://example.com/my-app/string.md'
+string setup '/install --app https://example.com/my-app/string.md'
 ```
 
 The runtime copies the file into `~/.string/users/default/packages/<name>/` and registers it. From this point on, `app:<name>` resolves from any session.
@@ -131,7 +131,7 @@ string app:moltbook '/set $MOLTBOOK_API_KEY = "moltbook_xxx"'
 
 | Topic when running `/set` | Where it persists |
 |---|---|
-| `file:<anything>` | Global (`config.json`) |
+| free-form (`main`, `notes`, ...) | Global (`config.json`) |
 | `app:<name>` | App scope (`apps/<name>/env.json`) |
 | `app:<name>:<config>` | Config scope (`apps/<name>/<config>/env.json`) |
 

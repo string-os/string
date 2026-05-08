@@ -216,17 +216,17 @@ await section('Session management', async () => {
 
 await section('/topics — alias of /sessions, formatted listing (Round 2 #2)', async () => {
   const b = mkBrowser();
-  await b.exec('/info', 'main');     // file:main
-  await b.exec('/info', 'web:docs'); // web:docs
+  await b.exec('/info', 'main');   // tab:main
+  await b.exec('/info', 'docs');   // tab:docs
 
   const r = await b.exec('/topics');
   assert(r.ok, '/topics ok');
   assert(r.content.includes('Active topics:'), 'header present');
   assert(r.content.includes('main'), 'main listed');
-  assert(r.content.includes('web:docs'), 'web:docs listed');
-  // Type column derived from session name
-  assert(/main\s+file/.test(r.content), 'main typed as file');
-  assert(/web:docs\s+web/.test(r.content), 'web:docs typed as web');
+  assert(r.content.includes('docs'), 'docs listed');
+  // Type column derived from session name (free-form bare → tab)
+  assert(/main\s+tab/.test(r.content), 'main typed as tab');
+  assert(/docs\s+tab/.test(r.content), 'docs typed as tab');
   assert(/2 topics open\./.test(r.content), 'count line correct');
 
   // /sessions plural alias
@@ -237,16 +237,15 @@ await section('/topics — alias of /sessions, formatted listing (Round 2 #2)', 
 
 await section('/topics <type> — filter by topic type (Round 2 #2)', async () => {
   const b = mkBrowser();
-  await b.exec('/info', 'main');         // file:main
-  await b.exec('/info', 'web:docs');     // web:docs
-  await b.exec('/info', 'web:research'); // web:research
+  await b.exec('/info', 'main');     // tab:main
+  await b.exec('/info', 'docs');     // tab:docs
+  await b.exec('/info', 'research'); // tab:research
 
-  const r = await b.exec('/topics web');
-  assert(r.ok, '/topics web ok');
-  assert(r.content.includes('web:docs'), 'web:docs listed');
-  assert(r.content.includes('web:research'), 'web:research listed');
-  assert(!r.content.includes('main'), 'main not listed');
-  assert(/2 web topics open\./.test(r.content), 'filtered count present');
+  const r = await b.exec('/topics tab');
+  assert(r.ok, '/topics tab ok');
+  assert(r.content.includes('docs'), 'docs listed');
+  assert(r.content.includes('research'), 'research listed');
+  assert(/3 tab topics open\./.test(r.content), 'filtered count present');
 
   const rApp = await b.exec('/topics app');
   assert(rApp.ok, '/topics app ok (no app topics)');
@@ -255,7 +254,7 @@ await section('/topics <type> — filter by topic type (Round 2 #2)', async () =
   const rBad = await b.exec('/topics bogus');
   assert(!rBad.ok, '/topics with invalid type fails fast');
   assert(rBad.content.includes('Unknown topic type'), 'error names the unknown type');
-  assert(rBad.content.includes('file, web, app, bash'), 'error lists valid types');
+  assert(rBad.content.includes('tab, app, bash, hub'), 'error lists valid types');
 });
 
 await section('Error handling', async () => {
@@ -378,16 +377,16 @@ await section('UserRegistry basics', async () => {
   assert(registry.get('neo')?.home === '/workspace/neo-updated', 'duplicate registration updates existing user');
 });
 
-await section('/ls — rejects non-file topics with helpful message', async () => {
+await section('/ls — rejects non-tab topics with helpful message', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-ls-web-');
   const b = new Browser({ home: tmpDir });
 
-  // Switch to a web topic. /ls should refuse with a clear redirect, not
-  // try to walk the filesystem and surface a confusing boundary or
-  // not-found error.
-  const r = await b.exec('/ls /runtime', 'docs', 'web');
-  assert(!r.ok, '/ls fails on web topic');
-  assert(r.content.includes('not available for web'), 'mentions topic kind');
+  // /ls is filesystem-only — non-tab topics (app/bash/hub, or remote URL
+  // contexts) get a clear redirect rather than confusing path errors.
+  // Pass topicType='app' to simulate /ls being run inside an app session.
+  const r = await b.exec('/ls /runtime', 'docs', 'app');
+  assert(!r.ok, '/ls fails on app topic');
+  assert(r.content.includes('not available for app'), 'mentions topic kind');
   assert(r.content.includes('/open') && r.content.includes('/nav'), 'suggests right commands');
 
   fs.rmSync(tmpDir, { recursive: true });

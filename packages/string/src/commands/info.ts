@@ -59,7 +59,7 @@ export function cmdInfo(args: string, session: Session, loader: Loader): Command
     lines.push(`app:       ${topic.namespace}`);
     if (typeof fm.name === 'string' && fm.name) lines.push(`name:      ${fm.name}`);
     if (typeof fm.version === 'string' && fm.version) lines.push(`version:   ${fm.version}`);
-  } else if (topic?.type === 'web' || uri.startsWith('https://') || uri.startsWith('http://')) {
+  } else if (uri.startsWith('https://') || uri.startsWith('http://')) {
     lines.push(`url:       ${uri}`);
   } else if (uri.startsWith('file://')) {
     const absPath = new URL(uri).pathname;
@@ -197,7 +197,7 @@ export function cmdHelp(session: Session, mode?: 'bash'): CommandResult {
   lines.push('');
   lines.push('### Topics (sessions)');
   lines.push('/topics                      List active topics');
-  lines.push('/topics <type>               Filter by type: file, web, app, bash');
+  lines.push('/topics <type>               Filter by type: tab, app, bash, hub');
   lines.push('/sessions                    Alias of /topics');
   lines.push('/session close [name]        Close a session by name');
   lines.push('');
@@ -247,21 +247,21 @@ export async function cmdLs(
   const home = loader.home;
   const topic = args.trim() || '.';
 
-  // /ls is filesystem-only. Web/app/bash topics have no filesystem listing
-  // semantics — surface a clear redirect rather than letting the user hit
-  // an opaque boundary error or "not found". Decision precedence:
+  // /ls is filesystem-only. App / bash / hub topics, or remote-URL contexts,
+  // have no filesystem listing semantics — surface a clear redirect rather
+  // than letting the user hit an opaque boundary error or "not found".
   //   1. Explicit topicType (passed from daemon for new topics)
   //   2. Active document URI (set after /open lands somewhere)
-  //   3. session.name parse (handles bare "main" → file:main)
-  let kind: TopicType | null = null;
+  //   3. session.name parse (handles bare "main" → tab:main)
+  let kind: TopicType | 'web';
   if (topicType) {
     kind = topicType;
   } else if (session.currentUri?.startsWith('http://') || session.currentUri?.startsWith('https://')) {
     kind = 'web';
   } else {
-    kind = parseTopic(session.name)?.type ?? 'file';
+    kind = parseTopic(session.name)?.type ?? 'tab';
   }
-  if (kind !== 'file') {
+  if (kind !== 'tab') {
     return err(
       `/ls is not available for ${kind} topics — there is no filesystem to list.\n` +
       `Use /open <link>, /open @shortcut, or /nav to traverse the current document.`,

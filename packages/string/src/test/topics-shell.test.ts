@@ -6,25 +6,25 @@ import { Browser, parseTopic, topicToString } from '../index.js';
 import { assert, section, mkBrowser, WIKI } from './runner.js';
 
 await section('parseTopic — valid formats', async () => {
-  // Empty / undefined → file:main
+  // Empty / undefined → tab:main
   const empty = parseTopic();
   assert(empty !== null, 'empty returns non-null');
-  assert(empty!.type === 'file' && empty!.namespace === 'main', 'empty → file:main');
+  assert(empty!.type === 'tab' && empty!.namespace === 'main', 'empty → tab:main');
 
   const emptyStr = parseTopic('');
-  assert(emptyStr !== null && emptyStr.type === 'file' && emptyStr.namespace === 'main', '"" → file:main');
+  assert(emptyStr !== null && emptyStr.type === 'tab' && emptyStr.namespace === 'main', '"" → tab:main');
 
-  // Bare session name → file:<name>
+  // Free-form bare name → tab
   const bare = parseTopic('docs');
-  assert(bare !== null && bare.type === 'file' && bare.namespace === 'docs', '"docs" → file:docs');
+  assert(bare !== null && bare.type === 'tab' && bare.namespace === 'docs', '"docs" → tab:docs');
 
-  // Typed topics
-  const fileTgt = parseTopic('file:notes');
-  assert(fileTgt !== null && fileTgt.type === 'file' && fileTgt.namespace === 'notes', 'file:notes');
+  // Reserved bare names → hub
+  for (const hub of ['app', 'bash', 'tool', 'system']) {
+    const parsed = parseTopic(hub);
+    assert(parsed !== null && parsed.type === 'hub' && parsed.namespace === hub, `${hub} → hub:${hub}`);
+  }
 
-  const webTgt = parseTopic('web:search');
-  assert(webTgt !== null && webTgt.type === 'web' && webTgt.namespace === 'search', 'web:search');
-
+  // Canonical typed topics
   const appTgt = parseTopic('app:weather');
   assert(appTgt !== null && appTgt.type === 'app' && appTgt.namespace === 'weather', 'app:weather');
 
@@ -35,39 +35,50 @@ await section('parseTopic — valid formats', async () => {
   const appCfg = parseTopic('app:weather:korea');
   assert(appCfg !== null && appCfg.type === 'app' && appCfg.namespace === 'weather:korea', 'app:weather:korea');
 
-  // Hyphen and underscore in session name
+  // Hyphen and underscore in tab name
   const hyphen = parseTopic('my-session');
-  assert(hyphen !== null && hyphen.type === 'file' && hyphen.namespace === 'my-session', 'hyphens ok');
+  assert(hyphen !== null && hyphen.type === 'tab' && hyphen.namespace === 'my-session', 'hyphens ok');
 
   const under = parseTopic('my_session');
-  assert(under !== null && under.type === 'file' && under.namespace === 'my_session', 'underscores ok');
+  assert(under !== null && under.type === 'tab' && under.namespace === 'my_session', 'underscores ok');
 });
 
 await section('parseTopic — invalid formats', async () => {
   // Dots rejected
   assert(parseTopic('intro.md') === null, 'dots in session name rejected');
-  assert(parseTopic('file:intro.md') === null, 'dots in typed namespace rejected');
+  assert(parseTopic('app:intro.md') === null, 'dots in typed namespace rejected');
 
-  // Unknown type
+  // Unknown / removed prefixes
   assert(parseTopic('ftp:server') === null, 'unknown type rejected');
+  assert(parseTopic('file:notes') === null, 'file: prefix removed (use bare name)');
+  assert(parseTopic('web:search') === null, 'web: prefix removed (use bare name)');
 
   // Empty namespace after type
-  assert(parseTopic('file:') === null, 'empty namespace rejected');
+  assert(parseTopic('app:') === null, 'empty namespace rejected');
 
   // Spaces
   assert(parseTopic('my session') === null, 'spaces rejected');
 
   // Special chars
   assert(parseTopic('bad!name') === null, 'special chars rejected');
-  assert(parseTopic('file:bad/name') === null, 'slash in namespace rejected');
+  assert(parseTopic('app:bad/name') === null, 'slash in namespace rejected');
 });
 
 await section('topicToString roundtrip', async () => {
-  const topics = ['file:main', 'web:search', 'app:weather:korea', 'bash:dev'];
-  for (const t of topics) {
-    const parsed = parseTopic(t);
-    assert(parsed !== null, `${t} parses`);
-    assert(topicToString(parsed!) === t, `${t} roundtrips`);
+  // tab and hub serialize as bare names; canonical types keep their prefix.
+  const cases: Array<[string, string]> = [
+    ['main', 'main'],
+    ['notes', 'notes'],
+    ['app', 'app'],
+    ['bash', 'bash'],
+    ['system', 'system'],
+    ['app:weather:korea', 'app:weather:korea'],
+    ['bash:dev', 'bash:dev'],
+  ];
+  for (const [input, expected] of cases) {
+    const parsed = parseTopic(input);
+    assert(parsed !== null, `${input} parses`);
+    assert(topicToString(parsed!) === expected, `${input} → ${expected}`);
   }
 });
 

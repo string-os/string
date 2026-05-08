@@ -209,18 +209,26 @@ String v0.1
 Usage:
   string <topic> '<body>'              Execute command on topic
   string <topic>                       Interactive REPL
-  string '<body>'                      Command without topic (uses file:main, or
+  string '<body>'                      Command without topic (uses 'main', or
                                        derives topic from /open app:X targets)
-  string --daemon [start|stop|status]   Daemon management
-  string --help                         This help
+  string --daemon [start|stop|status]  Daemon management
+  string --help                        This help
+
+Topics:
+  <name>                  Free-form session (e.g. 'main', 'notes', 'research')
+  app:<pkg>[:<config>]    Installed app session (e.g. 'app:moltbook')
+  bash:<name>             Persistent bash shell (e.g. 'bash:dev')
+  app | bash | tool       Hub topics — manage installed/active instances
+  system                  Daemon controls (env, status, restart)
 
 Examples:
-  string app:weather '/act.now --city Seoul'
-  string file:main '/open ./doc.md'
-  string web:docs '/open https://developer.mozilla.org'
-  string app:weather                    # enters REPL
-  string '/open app:weather'            # topic auto-derived → app:weather
-  string '/install --app ./foo.md'      # default topic → file:main
+  string main '/open ./doc.md'
+  string notes '/open https://developer.mozilla.org'
+  string app:moltbook '/act.feed'
+  string bash:dev 'pwd && ls'
+  string '/open app:moltbook'           # topic derived → app:moltbook
+  string '/install --app ./foo.md'      # default topic → main
+  string app                            # app hub: list installed apps
 
 Flags:
   --json      JSON envelope output (suppresses ChanFlow)
@@ -263,16 +271,25 @@ if (daemon) {
   printUsage();
 } else {
   // If the first positional starts with '/', treat the whole thing as a
-  // command body. Default topic is `file:main`. For `/open app:X` or
-  // `/open tool:X`, derive topic from the target so app-scoped env (like
-  // $API_KEY) resolves correctly without forcing the user to type the
-  // topic twice.
+  // command body. Default topic is `main` (free-form tab).
+  //
+  // Canonical and hub targets override the topic regardless of how the
+  // call was routed:
+  //   - `/open app:X`  → app:X       (canonical app session)
+  //   - `/open bash:X` → bash:X      (canonical bash session)
+  //   - `/open <hub>`  → <hub>       (hub: app, bash, tool, system)
+  //
+  // Free-form `/open ./file.md` or `/open https://...` keeps the caller's
+  // topic. This keeps app/bash/hub sessions clean of unrelated content
+  // while letting `main`, `notes`, etc. accumulate any kind of doc.
+  const CANONICAL_OPEN_RE = /^\/open\s+(app:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)*|bash:[a-zA-Z0-9_-]+|app|bash|tool|system)\b/;
+
   let topic: string;
   let body: string;
   if (positional[0].startsWith('/')) {
     body = positional.join(' ');
-    let derived = 'file:main';
-    const openMatch = body.match(/^\/open\s+(app:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)?|tool:[a-zA-Z0-9_-]+)\b/);
+    let derived = 'main';
+    const openMatch = body.match(CANONICAL_OPEN_RE);
     if (openMatch) derived = openMatch[1];
     topic = derived;
   } else {
@@ -284,6 +301,11 @@ if (daemon) {
     }
     topic = topicToString(parsed);
     body = positional.slice(1).join(' ');
+
+    // Body overrides topic when it opens a canonical or hub target — those
+    // URIs are bound to their own topic regardless of how the call was routed.
+    const openMatch = body.match(CANONICAL_OPEN_RE);
+    if (openMatch) topic = openMatch[1];
   }
 
   const run = body

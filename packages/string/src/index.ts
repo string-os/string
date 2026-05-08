@@ -173,13 +173,13 @@ export class Browser {
 
   /**
    * Format the active-topics view shown by /topics, /sessions, /session list.
-   * `filter` (when set) selects by topic type (file/web/app/bash). Unknown
+   * `filter` (when set) selects by topic type (tab/app/bash/hub). Unknown
    * type strings are rejected with a clear message rather than silently
    * returning an empty list — that misleads agents into thinking there are
    * zero topics open.
    */
   private listTopics(current: string, filter?: string): CommandResult {
-    const validTypes: TopicType[] = ['file', 'web', 'app', 'bash'];
+    const validTypes: TopicType[] = ['tab', 'app', 'bash', 'hub'];
     if (filter && !validTypes.includes(filter as TopicType)) {
       return {
         ok: false,
@@ -191,7 +191,7 @@ export class Browser {
 
     const rows: { name: string; type: TopicType; detail: string; isCurrent: boolean }[] = [];
     for (const name of this.listSessions()) {
-      const parsed = parseTopic(name) ?? { type: 'file' as TopicType, namespace: name };
+      const parsed = parseTopic(name) ?? { type: 'tab' as TopicType, namespace: name };
       if (filter && parsed.type !== filter) continue;
       const session = this.session(name);
       rows.push({
@@ -237,7 +237,7 @@ export class Browser {
     }
     const uri = session.currentUri;
     if (!uri) return '(no doc)';
-    if (type === 'web' || uri.startsWith('http://') || uri.startsWith('https://')) {
+    if (uri.startsWith('http://') || uri.startsWith('https://')) {
       return `current: ${uri}`;
     }
     if (uri.startsWith('file://')) {

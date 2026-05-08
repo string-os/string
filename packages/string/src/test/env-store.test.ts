@@ -78,8 +78,8 @@ await section('EnvStore — config.json preserves other fields', async () => {
 });
 
 await section('deriveEnvScope — scope from session name', async () => {
-  const s1 = deriveEnvScope('file:main');
-  assert(s1.app === undefined && s1.config === undefined, 'file topic → empty scope');
+  const s1 = deriveEnvScope('main');
+  assert(s1.app === undefined && s1.config === undefined, 'tab topic → empty scope');
 
   const s2 = deriveEnvScope('app:weather');
   assert(s2.app === 'weather' && s2.config === undefined, 'app topic → app scope');
@@ -89,6 +89,9 @@ await section('deriveEnvScope — scope from session name', async () => {
 
   const s4 = deriveEnvScope('bash:dev');
   assert(s4.app === undefined, 'bash topic → empty scope');
+
+  const s5 = deriveEnvScope('app');
+  assert(s5.app === undefined, 'app hub → empty scope');
 });
 
 await section('/set $VAR — persistent env via command', async () => {
