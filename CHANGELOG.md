@@ -1,12 +1,12 @@
 # Changelog
 
-## v0.2.0 (2026-05-08)
+## v0.1.3 (2026-05-08)
 
 Two reshapes to the action runtime and the topic system. **Breaking
 changes** to the topic API; action authoring stays compatible.
 
 ```
-@string-os/string  0.2.0
+@string-os/string  0.1.3
 ```
 
 (Other packages unchanged.)
@@ -173,4 +173,8 @@ First public npm release.
 
 ### Pre-1.0 stability
 
-`0.x.y` follows: minor bumps (`0.1 → 0.2`) may include breaking changes; patches (`0.1.0 → 0.1.1`) are backwards compatible. Pin with `~0.1.0` for safety.
+We stay in `0.1.x` until the API stabilizes. Any release in this range
+may include breaking changes — read the release notes before upgrading
+and pin to an exact version (`@string-os/string@0.1.3`) if you need
+stability across upgrades. The `0.2` line is reserved for the first
+post-stabilization release.
