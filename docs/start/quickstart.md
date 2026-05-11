@@ -14,10 +14,11 @@ string --help
 ## 1. Open a Document
 
 ```bash
-string main '/open ./README.md'
+echo "# Hello, String" > /tmp/hello.md
+string main '/open /tmp/hello.md'
 ```
 
-This starts a String daemon (if not running), creates a `main` session, and opens the README. The AI sees the document rendered as clean Markdown with navigation hints.
+This starts a String daemon (if not running), creates a `main` session, and renders `/tmp/hello.md` as clean Markdown with navigation hints.
 
 ## 2. Browse the Web
 
@@ -53,12 +54,15 @@ string main '/tool:git status'
 
 ## 4. Run Actions
 
-Open a document with action definitions, then execute them:
+Install an app from the cookbook, then call one of its actions:
 
 ```bash
-string main '/open ./weather.md'
-string main '/act.forecast --city "Seoul"'
+git clone https://github.com/string-os/cookbook.git
+string setup '/install --app ./cookbook/apps/weather/string.md'
+string app:weather '/act.now --city "Seoul"'
 ```
+
+`/open app:weather` first if you want to see the action menu (`[actions] now, forecast, search`).
 
 ## 5. Use with Claude Desktop (MCP)
 

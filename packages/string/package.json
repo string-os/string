@@ -46,7 +46,7 @@
   },
   "author": "String OS",
   "engines": {
-    "node": ">=18"
+    "node": ">=20"
   },
   "keywords": [
     "string",
