@@ -16,6 +16,7 @@ import {
   validateWorkspaceBoundary,
 } from './helpers.js';
 import { executeAction } from './action.js';
+import { buildContextVars } from './context-vars.js';
 import { deriveEnvScope } from '../env-store.js';
 import { cmdLs } from './info.js';
 import { isHubName } from '../types.js';
@@ -110,7 +111,7 @@ export async function cmdOpen(
       }
       flagStr = parts.join(' ');
     }
-    return executeAction(action, flagStr, session, loader);
+    return executeAction(action, flagStr, session, loader, buildContextVars(session, loader, flagStr));
   }
 
   // Split uri#fragment
@@ -240,7 +241,7 @@ export async function cmdOpen(
     if (defaultAction && !blockId) {
       const action = doc.actions.find(a => a.id === defaultAction);
       if (action) {
-        const actionResult = await executeAction(action, '', session, loader);
+        const actionResult = await executeAction(action, '', session, loader, buildContextVars(session, loader));
         if (actionResult.ok) {
           return ok(`Opened ${openLabel}\n---\n${rendered}\n\n---\n\n${actionResult.content}${suffix}`);
         }
@@ -283,7 +284,7 @@ export async function cmdBack(session: Session, loader: Loader): Promise<Command
     if (defaultAction && !prev.blockId) {
       const action = doc.actions.find(a => a.id === defaultAction);
       if (action) {
-        const actionResult = await executeAction(action, '', session, loader);
+        const actionResult = await executeAction(action, '', session, loader, buildContextVars(session, loader));
         if (actionResult.ok) {
           return ok(`Back to ${displayPath}\n---\n${rendered}\n\n---\n\n${actionResult.content}`);
         }
@@ -334,7 +335,7 @@ export async function cmdRefresh(session: Session, loader: Loader): Promise<Comm
     if (defaultAction && !blockId) {
       const action = doc.actions.find(a => a.id === defaultAction);
       if (action) {
-        const actionResult = await executeAction(action, '', session, loader);
+        const actionResult = await executeAction(action, '', session, loader, buildContextVars(session, loader));
         if (actionResult.ok) {
           return ok(`Refreshed ${displayPath}\n---\n${rendered}\n\n---\n\n${actionResult.content}`);
         }

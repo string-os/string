@@ -18,6 +18,7 @@ import {
   resolveEnvVars,
   executeResponseTemplate,
 } from './helpers.js';
+import { buildContextVars } from './context-vars.js';
 
 /**
  * Execute an action directive with parsed flags.
@@ -128,6 +129,43 @@ export async function executeAction(
     if (field.defaultValue !== undefined && !(field.name in payload)) {
       payload[field.name] = field.defaultValue;
     }
+  }
+
+  // Resolve $VAR refs that appear in default values. This pass runs *before*
+  // URI/body substitution so `$VAR` doesn't get URL-encoded (`$` → `%24`),
+  // which would defeat the later resolveEnvVars pass on the URI. Lets authors
+  // write `city: string = "$CITY"` and have the env var land naturally.
+  // Only acts on string-typed payload entries (tuples, numbers untouched).
+  const earlyEnvScope = deriveEnvScope(session.name);
+  const earlyUnresolved = new Set<string>();
+  for (const k of Object.keys(payload)) {
+    const v = payload[k];
+    if (typeof v === 'string' && v.includes('$')) {
+      const resolved = resolveEnvVars(v, loader, earlyEnvScope, extraEnv);
+      payload[k] = resolved;
+      // Scan for any $VAR that survived resolution — these are vars referenced
+      // in defaults but never set anywhere. Without this check, the value would
+      // be URL-encoded ($→%24) and the existing unresolved-var check on the URI
+      // would miss it.
+      for (const m of resolved.matchAll(/\$([A-Z_][A-Z0-9_]*)/g)) {
+        earlyUnresolved.add(m[1]);
+      }
+    }
+  }
+  if (earlyUnresolved.size > 0) {
+    const names = [...earlyUnresolved].map(n => `$${n}`).join(', ');
+    const setLines = earlyEnvScope.app
+      ? [...earlyUnresolved].map(n => `  /set $${n} = "..."`).join('\n')
+      : `  string app:<name> '/set $${[...earlyUnresolved][0]} = "..."'`;
+    const setHintPrefix = earlyEnvScope.app
+      ? `Set ${earlyUnresolved.size > 1 ? 'them' : 'it'} from this app session:`
+      : `Persistent env vars are app-scoped. Open an app session first:`;
+    return err(
+      `Unresolved environment variable${earlyUnresolved.size > 1 ? 's' : ''} in field default:\n  ${names}\n\n` +
+      `${setHintPrefix}\n${setLines}\n` +
+      `Or pass the field explicitly: /act.${action.id} --<field> <value>`,
+      'INVALID_PAYLOAD',
+    );
   }
 
   // Snapshot the parsed input fields BEFORE URI/body substitution mutates
@@ -271,13 +309,17 @@ export async function executeAction(
   if (unresolvedVars.size > 0) {
     const names = [...unresolvedVars];
     const list = names.map(n => `  $${n}`).join('\n');
+    const appScope = deriveEnvScope(session.name);
+    const setHintPrefix = appScope.app
+      ? `Set ${names.length > 1 ? 'them' : 'it'} from this app session:`
+      : `Persistent env vars are app-scoped. Open an app session first:`;
+    const setLines = appScope.app
+      ? names.map(n => `  /set $${n} = "..."`).join('\n')
+      : `  string app:<name> '/set $${names[0]} = "..."'`;
     return err(
       withSetupHint(
         `Unresolved environment variable${names.length > 1 ? 's' : ''}:\n${list}\n\n` +
-        `Set ${names.length > 1 ? 'them' : 'it'} with:\n` +
-        names.map(n => `  /set $${n} = "..."`).join('\n') + '\n' +
-        `Or export in the shell that runs stringd:\n` +
-        names.map(n => `  export ${n}=...`).join('\n'),
+        `${setHintPrefix}\n${setLines}`,
       ),
       'INVALID_PAYLOAD',
     );
@@ -494,5 +536,9 @@ export async function cmdAction(
     }
   }
 
-  return executeAction(action, flagStr, session, loader);
+  // App actions get the same context vars as tools — $CWD, $HOME (String
+  // per-user home), $CURRENT_FILE/URI/TARGET/BLOCK, $ARGS. These are
+  // daemon-defined, computed per call, and isolated from process.env. Apps
+  // never see OS-level env vars.
+  return executeAction(action, flagStr, session, loader, buildContextVars(session, loader, flagStr));
 }

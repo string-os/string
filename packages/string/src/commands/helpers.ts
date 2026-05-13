@@ -425,6 +425,16 @@ export function executeResponseTemplate(
               const val = walkJsonPath(item, fieldPath);
               return stringifyValue(val);
             },
+          ).replace(
+            // Bare {itemVar} — primitive-array iteration where each item is a
+            // string/number rather than an object. Only matches when the name
+            // equals the loop's item-var; other {var} refs are left for later
+            // substitution passes (session vars / payload fields).
+            /\{([a-zA-Z_]\w*)\}/g,
+            (_m: string, varRef: string): string => {
+              if (varRef !== itemVar) return _m;
+              return stringifyValue(item);
+            },
           );
 
           // Per-iteration value-shortcut assignment: {@name} = expr
@@ -530,8 +540,20 @@ export function executeResponseTemplate(
 // ─── Env Var Resolution ──────────────────────────────────────────────────────
 
 /**
- * Resolve $var in a string using extraEnv (context vars) → EnvStore (file-backed) → leave as-is.
- * No process.env fallback — String manages its own vars.
+ * Resolve `$VAR` in a string against runtime-controlled sources only.
+ *
+ * Resolution priority:
+ *   1. extraEnv — context vars supplied by the caller (HOME, CWD,
+ *      CURRENT_FILE, etc.). System-defined, per-call, isolated.
+ *   2. EnvStore — per-app `/set` values, scoped to the current
+ *      `app:NAME` or `app:NAME:CONFIG` session.
+ *   3. Literal `$NAME` — unresolved. Leave as-is so the action's
+ *      pre-flight check surfaces a clear "set this" error.
+ *
+ * `process.env` is **never** consulted: apps see daemon-defined system
+ * vars (via `extraEnv`) and their own scoped env, nothing more. This
+ * is the boundary that prevents a shell-exported secret on the daemon
+ * host from leaking into untrusted app actions.
  */
 export function resolveEnvVars(
   input: string,
@@ -540,17 +562,9 @@ export function resolveEnvVars(
   extraEnv?: Record<string, string>,
 ): string {
   return input.replace(/\$([a-zA-Z_]\w*)/g, (_m, name) => {
-    // Resolution priority:
-    //   1. Per-call extraEnv (tool context vars passed in by caller)
-    //   2. SFMD env-store (per-user, /set values, encrypted on disk)
-    //   3. Daemon process.env (fallback for things like API keys exported in
-    //      the shell that started stringd — `export GEMINI_API_KEY=...`)
-    //   4. Literal $name (unresolved, leave as-is so failures are visible)
     if (extraEnv && name in extraEnv) return extraEnv[name];
     const stored = loader.envStore.get(name, scope);
     if (stored !== undefined) return stored;
-    const fromProcess = process.env[name];
-    if (fromProcess !== undefined) return fromProcess;
     return `$${name}`;
   });
 }

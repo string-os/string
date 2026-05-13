@@ -1,16 +1,25 @@
 /**
  * String — Environment Variable Store
- * Per-user persistent $var storage with scope cascade.
+ * Per-app persistent $var storage.
  *
  * `home` is the String user's home directory — it's already String-only, so
  * everything sits at the root (no nested `.string/` subdir).
  *
  * Storage layout:
- *   Global:  {home}/config.json              → { "env": { "KEY": "val" }, ... }
- *   App:     {home}/apps/{app}/env.json      → { "KEY": "val" }
+ *   App:     {home}/apps/{app}/env.json       → { "KEY": "val" }
  *   Config:  {home}/apps/{app}/{cfg}/env.json → { "KEY": "val" }
  *
- * Resolution order (most specific wins): config → app → global
+ * Resolution: config → app (most specific wins). No global scope: an app's
+ * env never leaks to other apps, and shell-level vars never leak into any
+ * app. Daemon-defined system vars ($HOME, $CWD, $CURRENT_*) are supplied
+ * separately via `extraEnv` at action call time — see context-vars.ts.
+ *
+ * Trade-off: a key needed by N apps must be /set in each. Considered worth
+ * the cost — the alternative (shared global env) is the leak path we're
+ * closing.
+ *
+ * Note: `{home}/config.json` still exists as the package registry
+ * (apps/tools name → URI), but no longer carries an `env` section.
  */
 
 import { readFileSync, writeFileSync, mkdirSync, statSync } from 'fs';
@@ -33,62 +42,49 @@ export class EnvStore {
   // ── Public API ──────────────────────────────────────────────────────────────
 
   /**
-   * Get a $var value, cascading through scopes.
-   * Resolution: config → app → global (most specific wins).
+   * Get a $var value, cascading config → app.
+   * Returns undefined for non-app scopes — no global fallback.
    */
   get(name: string, scope?: EnvScope): string | undefined {
-    // Check config scope (most specific)
-    if (scope?.app && scope?.config) {
+    if (!scope?.app) return undefined;
+    if (scope.config) {
       const vars = this.loadAppEnv(scope.app, scope.config);
       if (name in vars) return vars[name];
     }
-    // Check app scope
-    if (scope?.app) {
-      const vars = this.loadAppEnv(scope.app);
-      if (name in vars) return vars[name];
-    }
-    // Check global scope
-    const globalVars = this.loadGlobalEnv();
-    return globalVars[name];
+    const vars = this.loadAppEnv(scope.app);
+    return vars[name];
   }
 
   /**
-   * Set a $var value in the specified scope.
-   * If no scope specified, stores in global config.
+   * Set a $var in the given app (or app+config) scope.
+   * Throws if scope has no app — global env is no longer supported.
    */
   set(name: string, value: string, scope?: EnvScope): void {
-    if (scope?.app && scope?.config) {
-      this.setAppEnv(scope.app, name, value, scope.config);
-    } else if (scope?.app) {
-      this.setAppEnv(scope.app, name, value);
-    } else {
-      this.setGlobalEnv(name, value);
+    if (!scope?.app) {
+      throw new Error(
+        `EnvStore.set requires an app scope. ` +
+        `Tried to set $${name} with no app — global env is not supported.`,
+      );
     }
+    this.setAppEnv(scope.app, name, value, scope.config);
   }
 
   /**
-   * Delete a $var from the specified scope.
+   * Delete a $var from the given scope. No-op if no app scope.
    */
   delete(name: string, scope?: EnvScope): boolean {
-    if (scope?.app && scope?.config) {
-      return this.deleteAppEnv(scope.app, name, scope.config);
-    }
-    if (scope?.app) {
-      return this.deleteAppEnv(scope.app, name);
-    }
-    return this.deleteGlobalEnv(name);
+    if (!scope?.app) return false;
+    return this.deleteAppEnv(scope.app, name, scope.config);
   }
 
   /**
-   * Get all vars for a scope (merged with cascade).
-   * Global vars are the base, app overrides, config overrides app.
+   * Get all vars visible to a scope (config overrides app). Empty for
+   * non-app scopes.
    */
   getAll(scope?: EnvScope): Record<string, string> {
-    const result: Record<string, string> = { ...this.loadGlobalEnv() };
-    if (scope?.app) {
-      Object.assign(result, this.loadAppEnv(scope.app));
-    }
-    if (scope?.app && scope?.config) {
+    if (!scope?.app) return {};
+    const result: Record<string, string> = { ...this.loadAppEnv(scope.app) };
+    if (scope.config) {
       Object.assign(result, this.loadAppEnv(scope.app, scope.config));
     }
     return result;
@@ -185,39 +181,14 @@ export class EnvStore {
     }
   }
 
-  // ── Global config ───────────────────────────────────────────────────────────
+  // ── Package registry config ────────────────────────────────────────────────
+
+  // {home}/config.json holds the apps/tools package registry (name → URI).
+  // It no longer carries an `env` section — global env was removed for
+  // isolation.
 
   private get configPath(): string {
     return join(this.baseDir, 'config.json');
-  }
-
-  private loadGlobalEnv(): Record<string, string> {
-    const config = this.readJson(this.configPath);
-    const env = config.env;
-    if (typeof env === 'object' && env !== null && !Array.isArray(env)) {
-      return env as Record<string, string>;
-    }
-    return {};
-  }
-
-  private setGlobalEnv(name: string, value: string): void {
-    const config = this.readJson(this.configPath);
-    const env = (typeof config.env === 'object' && config.env !== null && !Array.isArray(config.env))
-      ? { ...(config.env as Record<string, string>) }
-      : {};
-    env[name] = value;
-    this.writeJson(this.configPath, { ...config, env });
-  }
-
-  private deleteGlobalEnv(name: string): boolean {
-    const config = this.readJson(this.configPath);
-    const env = (typeof config.env === 'object' && config.env !== null && !Array.isArray(config.env))
-      ? { ...(config.env as Record<string, string>) }
-      : {};
-    if (!(name in env)) return false;
-    delete env[name];
-    this.writeJson(this.configPath, { ...config, env });
-    return true;
   }
 
   // ── App env ─────────────────────────────────────────────────────────────────
@@ -252,11 +223,14 @@ export class EnvStore {
 
 /**
  * Derive env scope from a session/topic name.
- * "main", "notes" (tab) → {} (global only)
+ * "main", "notes" (tab) → {} (no env access)
  * "app:weather"          → { app: "weather" }
  * "app:weather:korea"    → { app: "weather", config: "korea" }
  * "bash:dev"             → {} (bash sessions don't carry app-scoped env)
  * "app", "bash" (hubs)   → {} (hub topics aren't app-scoped)
+ *
+ * An empty scope means the session can neither set nor read persistent
+ * env. Apps see only their own scope; system vars come through extraEnv.
  */
 export function deriveEnvScope(sessionName: string): EnvScope {
   const colonIdx = sessionName.indexOf(':');

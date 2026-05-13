@@ -13,7 +13,7 @@ import { deriveEnvScope } from '../env-store.js';
 import type { EnvScope } from '../env-store.js';
 import { ok, err } from './helpers.js';
 import { executeAction } from './action.js';
-import { deriveCwd } from './exec.js';
+import { buildContextVars } from './context-vars.js';
 
 /**
  * Resolve a tool name to a loaded SFMD document.
@@ -61,21 +61,9 @@ export async function resolveTool(name: string, loader: Loader): Promise<LoadedD
   return null;
 }
 
-/**
- * Build context variables for tool execution.
- * These override $var resolution (higher priority than process.env).
- */
-export function buildContextVars(session: Session, loader: Loader, rawArgs: string): Record<string, string> {
-  const uri = session.currentUri;
-  return {
-    CURRENT_FILE: uri?.startsWith('file://') ? new URL(uri).pathname : '',
-    CWD: deriveCwd(session, loader),
-    CURRENT_URI: uri ?? '',
-    CURRENT_TARGET: session.name ?? '',
-    CURRENT_BLOCK: session.currentBlockId ?? '',
-    ARGS: rawArgs,
-  };
-}
+// buildContextVars moved to ./context-vars.ts (shared by tools and app actions).
+// Re-exported here for backward compatibility with any external importer.
+export { buildContextVars };
 
 /**
  * Validate that required env vars are set (from frontmatter.env).
