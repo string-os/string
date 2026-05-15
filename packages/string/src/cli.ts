@@ -179,7 +179,20 @@ async function cmdMcp(userId: string): Promise<void> {
   const { createStringServer } = await import('./mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
 
-  const server = createStringServer(async (topic, cmd) => {
+  const server = createStringServer(async (rawTopic, cmd) => {
+    // Pre-validate topic so failures surface with the precise code (e.g.
+    // INVALID_TARGET) instead of being flattened to HTTP_ERROR by the
+    // daemon's sync 400 path. Mirrors the canonical form before sending.
+    const parsed = parseTopic(rawTopic);
+    if (!parsed) {
+      return {
+        ok: false,
+        code: 'INVALID_TARGET',
+        content: `Invalid topic: ${rawTopic}`,
+        topic: rawTopic,
+      };
+    }
+    const topic = topicToString(parsed);
     const result = await client.exec(port, userId, topic, cmd);
     return {
       ok: result.ok,
