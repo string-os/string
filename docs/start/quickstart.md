@@ -72,14 +72,14 @@ Add to your Claude Desktop MCP config:
 {
   "mcpServers": {
     "string": {
-      "command": "npx",
-      "args": ["@string-os/string-mcp"]
+      "command": "string",
+      "args": ["--mcp", "--user", "claude-desktop"]
     }
   }
 }
 ```
 
-Now Claude can use `string_open`, `string_act`, and other tools to interact with documents and skills.
+The shim auto-starts `stringd` and forwards Claude's MCP calls to it. Use a distinct `--user` per MCP client so sessions and `/set` env vars stay isolated. Claude calls the single `string({topic, cmd})` tool to drive every command — the same surface as the CLI.
 
 ## 6. Use as a Library
 

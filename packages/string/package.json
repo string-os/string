@@ -23,11 +23,13 @@
     "test": "tsx src/test/index.ts"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.29.0",
     "@string-os/client": "workspace:*",
     "@string-os/compiler": "workspace:*",
     "@string-os/core": "workspace:*",
     "diff": "^8.0.3",
-    "turndown": "^7.2.0"
+    "turndown": "^7.2.0",
+    "zod": "^3.23.8"
   },
   "optionalDependencies": {
     "@lydell/node-pty": "1.2.0-beta.3"

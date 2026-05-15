@@ -81,7 +81,7 @@ The cookbook has a dozen runnable examples — kanban over GitHub Projects, an A
 
 ### Other ways to embed the runtime
 
-- **MCP server** (Claude Desktop, Cursor, …) — add `@string-os/string-mcp` to your MCP config
+- **MCP server** (Claude Desktop, Cursor, …) — `string --mcp` (stdio) or point the client at `http://localhost:3100/mcp` (HTTP). `stringd` serves MCP natively.
 - **In-process library** — `import { Browser } from '@string-os/string'`. No daemon, no HTTP
 - **HTTP daemon + any-language client** — `string --daemon start`. Wire spec in [`stringd protocol v0.1`](https://docs.string-os.org/reference/protocol/); reference TS client in `@string-os/client`
 
@@ -91,7 +91,7 @@ Add a feature once, it works in all four paths.
 
 ## How it compares
 
-- **vs MCP.** MCP is a protocol with a custom server per tool. SFMD is a file — works over `file://`, HTTP, email, or a USB drive. An SFMD file can be *served by* an MCP server (that's what `string-mcp` does), but it isn't tied to one.
+- **vs MCP.** MCP is a protocol with a custom server per tool. SFMD is a file — works over `file://`, HTTP, email, or a USB drive. `stringd` *speaks* MCP natively (one tool, `string({topic, cmd})`, wraps the whole command surface), but SFMD itself isn't tied to one protocol.
 - **vs llms.txt.** `llms.txt` is a static index, read-only. SFMD is read *and* execute. Actions are first-class.
 - **vs SKILL.md / agent skills.** A SKILL.md is written for one agent runtime. An SFMD file is an app surface any runtime can read and execute.
 
@@ -126,9 +126,8 @@ Trust model in [`SECURITY.md`](./SECURITY.md). The full spec for parser implemen
 |---|---|
 | [`@string-os/core`](./packages/core) | SFMD parser, extractor, utilities |
 | [`@string-os/compiler`](./packages/compiler) | Compiler and validator |
-| [`@string-os/string`](./packages/string) | Runtime — Browser, Session, Loader, daemon, CLI |
+| [`@string-os/string`](./packages/string) | Runtime — Browser, Session, Loader, daemon (HTTP/SSE + MCP), CLI, stdio MCP shim |
 | [`@string-os/client`](./packages/client) | HTTP/SSE client for `stringd` — zero deps |
-| [`@string-os/string-mcp`](./packages/string-mcp) | MCP server wrapper |
 
 ---
 

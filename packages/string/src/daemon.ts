@@ -34,12 +34,16 @@
  */
 
 import http from 'http';
+import { mkdirSync } from 'fs';
+import { homedir } from 'os';
 import { join } from 'path';
 import { Browser } from './index.js';
 import { createHtmlToMarkdown } from './html-to-md.js';
 import { createLogger, type Logger } from './logger.js';
 import { parseTopic, topicToString } from './types.js';
-import { UserRegistry } from './user.js';
+import { UserRegistry, type User } from './user.js';
+import { createStringServer, type McpExecFn } from './mcp.js';
+import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -235,6 +239,36 @@ function handleDeleteUser(res: http.ServerResponse, userId: string): void {
   runtimes.delete(userId);
   log.info('user.delete', { userId, existed });
   sendJson(res, 200, { user_id: userId, deleted: existed });
+}
+
+/**
+ * Get or auto-register a user. Used by entry points (like /mcp) where the
+ * client has no separate user-provisioning step. The home is derived as
+ * `~/.string/users/{userId}` — the same scheme the CLI uses — and created
+ * on disk if it does not exist. Idempotent.
+ *
+ * Returns the User record; never null.
+ */
+function ensureUserAuto(userId: string): User {
+  const existing = users.get(userId);
+  if (existing) return existing;
+
+  const home = join(homedir(), '.string', 'users', userId);
+  try {
+    mkdirSync(home, { recursive: true, mode: 0o700 });
+  } catch (e) {
+    // mkdir failures land here only on permissions/IO. Surface them as logs;
+    // the subsequent registry write will fail too and the caller will 500.
+    log.error('user.auto_register.mkdir_failed', { userId, home, error: String(e) });
+  }
+  users.register({
+    id: userId,
+    home,
+    allowedPaths: [],
+    createdAt: new Date().toISOString(),
+  });
+  log.info('user.auto_register', { userId, home });
+  return users.get(userId)!;
 }
 
 // ─── Session handlers ────────────────────────────────────────────────────────
@@ -510,6 +544,86 @@ function drainQueue(state: TopicState): void {
   next.resolve(); // unblock the waiting handleExec
 }
 
+// ─── MCP route ───────────────────────────────────────────────────────────────
+//
+// /mcp speaks the MCP protocol over StreamableHTTP transport. One tool —
+// `string({ topic, cmd })` — wraps the same execution surface as /exec.
+// Stateless mode: a fresh server+transport per request, no session IDs.
+// X-User-Id picks the user; unknown users are auto-registered on first
+// touch so MCP clients don't need a separate provisioning call.
+
+async function handleMcp(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const userId = (req.headers['x-user-id'] as string | undefined)?.trim() || 'default';
+  const user = ensureUserAuto(userId);
+  const runtime = getOrCreateRuntime(userId, user.home);
+
+  const execFn: McpExecFn = async (rawTopic, cmd) => {
+    const parsed = parseTopic(rawTopic);
+    if (!parsed) {
+      return { ok: false, code: 'INVALID_TARGET', content: `Invalid topic: ${rawTopic}` };
+    }
+    const topic = topicToString(parsed);
+    const state = getOrCreateTopic(runtime, topic);
+
+    // MVP serial guard. MCP clients are low-concurrency; reject overlapping
+    // calls on the same topic with a clear code. Queue support can be added
+    // later by mirroring /exec's queue mechanism.
+    if (state.executing) {
+      return {
+        ok: false,
+        code: 'BUSY',
+        content: `Topic ${topic} is executing another command. Retry shortly.`,
+        topic,
+      };
+    }
+
+    state.executing = true;
+    const t0 = Date.now();
+    try {
+      const result = await runtime.browser.exec(cmd, topic, parsed.type);
+      const durationMs = Date.now() - t0;
+      log.info('mcp.exec', {
+        userId, topic, cmd: truncateCmd(cmd),
+        ok: result.ok, code: result.code ?? '', durationMs,
+      });
+      return {
+        ok: result.ok,
+        code: result.code ?? undefined,
+        content: result.content,
+        topic,
+      };
+    } catch (e) {
+      log.error('mcp.exec.internal', { userId, topic, error: String(e) });
+      return {
+        ok: false,
+        code: 'INTERNAL_ERROR',
+        content: String(e),
+        topic,
+      };
+    } finally {
+      state.executing = false;
+    }
+  };
+
+  const server = createStringServer(execFn);
+  const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: undefined });
+
+  res.on('close', () => {
+    transport.close().catch(() => {});
+    server.close().catch(() => {});
+  });
+
+  try {
+    await server.connect(transport);
+    const body = req.method === 'POST' ? await readBody(req) : undefined;
+    const parsedBody = body ? JSON.parse(body) : undefined;
+    await transport.handleRequest(req, res, parsedBody);
+  } catch (e) {
+    log.error('mcp.transport', { userId, error: String(e) });
+    if (!res.headersSent) sendJson(res, 500, { error: String(e) });
+  }
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 function createServer(): http.Server {
@@ -561,6 +675,12 @@ function createServer(): http.Server {
       } else if (method === 'POST' && pathname === '/exec') {
         await handleExec(req, res);
 
+      // ── MCP ──
+      // POST = JSON-RPC request, GET = SSE notification stream, DELETE = session teardown.
+      // All three handled by the same StreamableHTTPServerTransport.
+      } else if (pathname === '/mcp' && (method === 'POST' || method === 'GET' || method === 'DELETE')) {
+        await handleMcp(req, res);
+
       // ── Lifecycle ──
       } else if (method === 'POST' && pathname === '/shutdown') {
         sendJson(res, 200, { ok: true, message: 'stringd shutting down' });
@@ -595,9 +715,13 @@ export function startDaemon(port = 3100, opts?: { log?: boolean }): void {
   }
 
   const server = createServer();
-  server.listen(port, () => {
-    console.log(`stringd listening on http://localhost:${port}`);
-    console.log('Endpoints: POST/GET/DELETE /users  GET/POST/DELETE /sessions  POST /exec');
+  // Explicit loopback bind — never expose the daemon on external interfaces.
+  // The protocol assumes local-only trust (no auth, no TLS); binding 0.0.0.0
+  // would silently violate that. Remote/multi-host deployments require an
+  // explicit `--bind` + auth layer, planned for a later milestone.
+  server.listen(port, '127.0.0.1', () => {
+    console.log(`stringd listening on http://127.0.0.1:${port}`);
+    console.log('Endpoints: POST/GET/DELETE /users  GET/POST/DELETE /sessions  POST /exec  /mcp');
     log.info('server.start', { port, dataDir: STRINGD_DATA_DIR, logEnabled });
   });
 

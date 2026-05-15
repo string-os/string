@@ -24,6 +24,7 @@ Example apps and tutorials live in a separate repo: [`string-os/cookbook`](https
 - [Actions](./runtime/actions.md), [State](./runtime/state.md), [Navigation](./runtime/navigation.md), [Topics](./runtime/topics.md)
 - [Tools](./runtime/tools.md), [Packages](./runtime/packages.md), [Editing](./runtime/editing.md)
 - [Shell](./runtime/shell.md), [Errors](./runtime/errors.md)
+- [MCP](./runtime/mcp.md) — connect Claude, Cursor, Codex via the built-in MCP server
 
 ## Reference
 

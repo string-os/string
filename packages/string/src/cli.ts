@@ -151,6 +151,49 @@ async function enterRepl(topic: string, json: boolean): Promise<void> {
   process.exit(0);
 }
 
+// ─── MCP stdio shim ──────────────────────────────────────────────────────────
+//
+// Exposes the daemon's MCP surface over stdio. Used by MCP clients (Claude
+// Desktop, Codex, Cursor) that spawn a child process and speak JSON-RPC
+// over stdin/stdout. The shim auto-starts the daemon if needed, ensures the
+// user is registered, then forwards `string` tool calls to `/exec`.
+//
+// Config example:
+//   { "mcpServers": { "string": { "command": "string",
+//                                  "args": ["--mcp", "--user", "claude-desktop"] } } }
+//
+// Each MCP client should use a distinct `--user` so sessions and `/set` env
+// vars don't bleed across clients.
+
+async function cmdMcp(userId: string): Promise<void> {
+  const port = Number(process.env.STRINGD_PORT) || 3100;
+  const home = process.env.STRINGD_HOME || deriveHome(userId);
+
+  if (!await client.ping(port)) {
+    await autoStartDaemon(port);
+  }
+  await client.ensureUser(port, { id: userId, home });
+
+  // Dynamic imports keep the heavy MCP SDK out of the cold-start path for
+  // every CLI invocation. Only --mcp users pay the cost.
+  const { createStringServer } = await import('./mcp.js');
+  const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
+
+  const server = createStringServer(async (topic, cmd) => {
+    const result = await client.exec(port, userId, topic, cmd);
+    return {
+      ok: result.ok,
+      code: result.code ?? undefined,
+      content: result.content,
+      topic,
+    };
+  });
+
+  const transport = new StdioServerTransport();
+  await server.connect(transport);
+  // Server runs until stdio closes (client process exits).
+}
+
 // ─── Daemon management ───────────────────────────────────────────────────────
 
 async function cmdDaemon(args: string[]): Promise<void> {
@@ -211,6 +254,7 @@ Usage:
   string <topic>                       Interactive REPL
   string '<body>'                      Command without topic (uses 'main', or
                                        derives topic from /open app:X targets)
+  string --mcp [--user <id>]           MCP stdio server (for Claude/Codex/Cursor)
   string --daemon [start|stop|status]  Daemon management
   string --help                        This help
 
@@ -247,14 +291,24 @@ const argv = process.argv.slice(2);
 // Extract flags
 let json = false;
 let daemon = false;
+let mcp = false;
 let help = false;
+let userFlag: string | null = null;
 const positional: string[] = [];
 
-for (const arg of argv) {
+for (let i = 0; i < argv.length; i++) {
+  const arg = argv[i];
   if (arg === '--json') json = true;
   else if (arg === '--daemon') daemon = true;
+  else if (arg === '--mcp') mcp = true;
   else if (arg === '--help' || arg === '-h') help = true;
-  else positional.push(arg);
+  else if (arg === '--user') {
+    userFlag = argv[++i] ?? null;
+  } else if (arg.startsWith('--user=')) {
+    userFlag = arg.slice('--user='.length);
+  } else {
+    positional.push(arg);
+  }
 }
 
 if (help) {
@@ -262,7 +316,13 @@ if (help) {
   process.exit(0);
 }
 
-if (daemon) {
+if (mcp) {
+  const userId = userFlag || process.env.STRINGD_USER || 'default';
+  cmdMcp(userId).catch(e => {
+    process.stderr.write(`string: ${e.message}\n`);
+    process.exit(1);
+  });
+} else if (daemon) {
   cmdDaemon(positional).catch(e => {
     process.stderr.write(`string: ${e.message}\n`);
     process.exit(1);
