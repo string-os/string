@@ -1,12 +1,38 @@
 # String
 
-> Markdown that runs. One file, any agent.
+> The web gave humans a universal surface for information.
+> SFMD gives AI agents one for work.
 
-A `.sfmd` file is a markdown document an agent can both **read** (like Markdown) and **execute** (calls APIs, runs CLI tools, navigates pages). The same file works in any runtime that speaks the format — no per-tool server, no per-agent code.
+AI agents today read web pages designed for humans, parse JSON from per-tool servers, and memorize per-skill protocols. The infrastructure was built for someone else. They cope because they're capable — but the cost is paid in tokens, latency, and security promises that don't hold under pressure.
+
+**SFMD** (String Flavored Markdown) is one Markdown format an agent can both *read* (like documentation) and *execute* (calls APIs, runs CLI tools, navigates pages). **String** is the reference runtime: one tool, one call shape — the entire surface.
+
+> **AI agents reading this:** the [skill](./skill.md) is written for you. Execute it and you'll be using String in a couple of minutes.
+> **Humans:** read on.
 
 ---
 
-## See it
+## What an agent sees
+
+Three commands. Zero prior documentation read. The agent ends up reading a post in a social network app it has never seen.
+
+```bash
+$ string app:moltbook /open
+> Opened. [actions] home, feed, read, comment, post, search, ...
+> next: /act.read @post-N · /act.feed · /act.search "..."
+
+$ string app:moltbook /act.feed
+> Feed (hot): 20 posts. @post-1 through @post-20 registered.
+
+$ string app:moltbook /act.read @post-3
+> the curator is the lawmaker — by Starfish in /general
+> (post body)
+> next: /act.upvote @post · /act.comment @post "..."
+```
+
+No SDK installed. No API key in the agent's context. No endpoint memorized. Each response tells the agent what it can do next — the same way a human app does.
+
+## What an author writes
 
 A complete app, in one file:
 
@@ -36,33 +62,54 @@ string app:weather '/act.now Seoul'
 # → Seoul: ☀️ +20°C ↘6km/h
 ```
 
-A markdown file declared the API. The runtime called it. The agent got the result. No protocol handshake, no per-tool server, no HTML parsing.
+A Markdown file declared the API. The runtime called it. The agent got the result. The file is the deliverable.
 
 ---
 
-## What it is
+## What you get
 
-**Format.** SFMD (String Flavored Markdown) is 100% CommonMark with a few inline conventions: `[!nav:main]` for navigation menus, `[@slug]` for shortcut references, and fenced ` ```act.<id> ` blocks that declare typed callable actions (HTTP, CLI, or anything else the runtime supports).
+**Scales without growing context.** Most tool integrations add to the agent's context with each new tool — docs, schemas, examples. With String, the same small surface (`/open`, `/act`, `/info`) covers every installable app. Adding apps doesn't grow what the agent has to know.
 
-**Runtime.** This repo ships `@string-os/string` — Browser, Session, Loader, Resolver. It loads SFMD files from `file://`, `http(s)://`, or installed packages; exposes their actions as `/act.<name>` calls; tracks per-session state; and renders results as Markdown.
+**Credentials kept out of the agent's context.** API keys live in app-scoped environment variables — the agent doesn't see them, so direct exfiltration through prompt injection on the agent isn't a path. (The app running an action still has the key; v0.1 doesn't sandbox an installed app's HTTP/CLI calls — see "Not yet" below.)
 
-**What's standardized.** A small surface that doesn't change with the resource:
+**Self-discoverable.** Every response carries a `next:` hint. Errors carry `Recovery:` lines. `/info` shows where you are; `/act --help` lists what you can do. Agents onboard onto unknown apps without prior documentation.
 
-- `/open` — see something (document, page, app, URL, shortcut)
-- `/act` — do something (call an API, run a CLI tool, submit data)
+**Portable.** The same `.sfmd` file works in any runtime that speaks the format — CLI, MCP server, in-process library, HTTP daemon. Tomorrow, anything that parses CommonMark.
 
-Plus consistent rules for how state is scoped, how outputs are framed, and how errors carry recovery hints. Not a kernel — a stable, syscall-shaped surface every resource exposes the same way. [Full surface →](https://docs.string-os.org/runtime/overview/)
+---
 
-Different resource types get the same shape:
+## How it works
+
+Three layers, cleanly separated:
+
+```
+String OS         ← execution, navigation, state, trust
+  ↑
+SFMD              ← structure, references, declarations (no execution)
+  ↑
+CommonMark        ← base syntax
+```
+
+The same shape SFMD wears in HTML's role for the browser. Format and runtime are decoupled — any runtime can read SFMD, just as any browser can render HTML.
+
+**Two verbs.** A small surface that doesn't change with the resource:
+
+- `/open` — see something (document, page, app, URL, shortcut). Pure read.
+- `/act` — do something (call an API, run a CLI tool, submit data). Side effects.
+
+The separation is load-bearing. `/open` never executes; `/act` always does. An agent reading a feed never accidentally posts. [Full surface →](https://docs.string-os.org/runtime/overview/)
+
+**Same shape, any resource.**
 
 | Resource | Read | Act |
 |---|---|---|
 | Document | `/open file.md` | `/act.<name>` if defined |
 | Installed app | `/open app:weather` | `/act.now --city Seoul` |
 | Web URL | `/open https://docs.example.com` | (link traversal) |
-| Shell session | `string bash:dev 'ls'` | (plain stdin) |
 
 The agent learns the verbs once and uses them everywhere. New capabilities come from new documents, not new code.
+
+**Shortcuts let authors keep URLs in the runtime.** A markdown link in SFMD can reach the agent as `[Documentation][@docs]` instead of `[Documentation](https://example.com)` — useful when output flows back into the agent's context (e.g. spoofed-domain tricks like `g1thub.com` displayed as `github.com`). It's an authoring pattern, not a runtime invariant: direct `/open <url>` still puts the URL in the agent's view.
 
 ---
 
@@ -77,25 +124,37 @@ string setup '/install --app ./apps/weather/string.md'
 string app:weather '/act.now Seoul'
 ```
 
-The cookbook has a dozen runnable examples — kanban over GitHub Projects, an AI social network, search, code review, k8s helpers — each a single `.sfmd` file you can read end-to-end.
+The cookbook has a dozen runnable examples — Kanban over GitHub Projects, an AI social network, semantic search, code review, k8s helpers — each a single `.sfmd` file you can read end-to-end. These aren't toy demos; they're how real apps look in SFMD.
 
-### Other ways to embed the runtime
+---
 
-- **MCP server** (Claude Desktop, Cursor, …) — `string --mcp` (stdio) or point the client at `http://localhost:3100/mcp` (HTTP). `stringd` serves MCP natively.
-- **In-process library** — `import { Browser } from '@string-os/string'`. No daemon, no HTTP
-- **HTTP daemon + any-language client** — `string --daemon start`. Wire spec in [`stringd protocol v0.1`](https://docs.string-os.org/reference/protocol/); reference TS client in `@string-os/client`
+## Four ways to embed
 
-Add a feature once, it works in all four paths.
+- **CLI** — `string '/open something'`. The default; what you just ran.
+- **MCP server** (Claude Desktop, Cursor, …) — `string --mcp` (stdio) or point a client at `http://localhost:3100/mcp` (HTTP). One MCP tool, `string({topic, cmd})`, wraps the entire command surface.
+- **In-process library** — `import { Browser } from '@string-os/string'`. No daemon, no HTTP.
+- **HTTP daemon + any-language client** — `string --daemon start`. Wire spec at [`stringd` protocol v0.1](https://docs.string-os.org/reference/protocol/); reference TS client in `@string-os/client`.
+
+Add a feature once — it works in all four paths.
 
 ---
 
 ## How it compares
 
-- **vs MCP.** MCP is a protocol with a custom server per tool. SFMD is a file — works over `file://`, HTTP, email, or a USB drive. `stringd` *speaks* MCP natively (one tool, `string({topic, cmd})`, wraps the whole command surface), but SFMD itself isn't tied to one protocol.
-- **vs llms.txt.** `llms.txt` is a static index, read-only. SFMD is read *and* execute. Actions are first-class.
-- **vs SKILL.md / agent skills.** A SKILL.md is written for one agent runtime. An SFMD file is an app surface any runtime can read and execute.
+| | What it is | What enters the agent's context |
+|---|---|---|
+| **SFMD via String** | Markdown app + small runtime | One surface, regardless of app count |
+| **MCP** | Protocol with per-tool server | Tool list + per-tool schemas (credentials depend on the server's design) |
+| **llms.txt** | Static read-only index | URL list. No execution. |
+| **SKILL.md / agent skills** | Per-runtime instruction file | One instruction set per tool, per runtime |
 
-The novelty is the combination: human-readable + AI-readable without HTML parsing + AI-executable + cross-agent portable, in one Markdown primitive with a small runtime.
+The structural differences matter more than the protocol differences:
+
+- **vs MCP.** Many MCP setups end up surfacing credentials or auth'd schemas in the agent's tool context. SFMD apps in String default to app-scoped env vars — credentials don't pass through the agent. The app itself still uses the key, so app trust still matters in v0.1.
+- **vs llms.txt.** Read-only. SFMD declares executable actions as first-class.
+- **vs SKILL.md.** A skill is per-agent-runtime instruction. An SFMD file is a portable app surface — any runtime that speaks SFMD can use it. One surface covers every installable app, not one set of instructions per app per runtime.
+
+The novelty is the combination: human-readable + AI-readable without HTML parsing + AI-executable + cross-agent portable, in a single Markdown primitive with a small runtime.
 
 ---
 
@@ -114,9 +173,9 @@ Not yet:
 - Signed packages — **run SFMD files from trusted sources only**
 - Fine-grained capability permissions — `/exec` and `bash:` topics are opt-in, but an installed app's own HTTP fetches and `CLI` actions run unsandboxed. Inspect before installing.
 
-**Platform.** Tested on Linux. macOS should work — `/bin/bash` is available and CLI actions use POSIX shell features only — but isn't routinely tested yet. **Windows is not supported in 0.1.x**: the runtime spawns `/bin/bash` for every CLI action. Use WSL on Windows, or wait for portable execution in v0.2.
+**Platform.** Tested on Linux. macOS should work (`/bin/bash` available, POSIX shell only) but isn't routinely tested. **Windows is not supported in 0.1.x**: the runtime spawns `/bin/bash` for every CLI action. Use WSL on Windows, or wait for portable execution in v0.2.
 
-Trust model in [`SECURITY.md`](./SECURITY.md). The full spec for parser implementors lives in the [SFMD spec repo](https://github.com/string-os/sfmd).
+Trust model in [`SECURITY.md`](./SECURITY.md). Full spec for parser implementors in the [SFMD spec repo](https://github.com/string-os/sfmd).
 
 ---
 
@@ -131,11 +190,19 @@ Trust model in [`SECURITY.md`](./SECURITY.md). The full spec for parser implemen
 
 ---
 
+## The bet
+
+The web of pages, JS-hydrated SPAs, and per-tool MCP servers — none of it was designed for agents. They use it anyway because models got good enough to brute-force through bad UX. That works until apps multiply, tasks chain, and adversaries probe; then the hidden tax compounds.
+
+SFMD is the bet that agents deserve the same thing humans got: a universal, discoverable surface where the format is the API, the document is the app, and the cost of trying a new thing is one `/open`.
+
+---
+
 ## More
 
 - [docs.string-os.org](https://docs.string-os.org) — full guide
 - [Cookbook](https://github.com/string-os/cookbook) — runnable example apps
 - [SFMD spec](https://github.com/string-os/sfmd) — format specification
-- [Skill for AI agents](https://string-os.org/skill/) — written for agent self-onboarding
+- [Skill for AI agents](./skill.md) — written for agent self-onboarding
 
 Contributing: [CONTRIBUTING.md](./CONTRIBUTING.md). Security: [SECURITY.md](./SECURITY.md). License: [MIT](./LICENSE).
