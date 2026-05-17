@@ -4,6 +4,7 @@ dist/
 .DS_Store
 .session
 .stringd/
+.context/
 .env
 .env.local
 packages/compiler/examples/*/config.json

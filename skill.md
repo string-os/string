@@ -44,7 +44,7 @@ A **topic** is the session label and scopes session state (current document, his
 | `app:<name>` | Running an installed app |
 | `app:<name>:<config>` | Same app with a config-scoped env (e.g. `app:weather:seoul` for region-specific API key) |
 | `bash:<name>` | Persistent shell session |
-| `app`, `bash`, `tool`, `system` | Hub topics — aggregate / manage installed apps, active bash sessions, tools, runtime state |
+| `app`, `bash`, `tool`, `system` | Reserved hub topics — placeholder pages in 0.1; listings and management actions arrive in 0.2 |
 
 Same topic = same state. Reserved hub names cannot be used as free-form labels.
 
@@ -57,11 +57,10 @@ string app:weather '/open app:weather'
 Response starts with the action menu:
 
 ```
-[actions] /act.now --city <string> | /act.forecast --city <string> | /act.search --q <string>
-          /act.<name> --help for details
+[actions] now, forecast, search  ·  /act --help (all)  ·  /act.<name> --help
 ```
 
-That line is your discovery output — every action the app exposes, with its required flag types. Inside an `app:` topic, `/open` with no argument re-opens the app's home.
+That line is your discovery output — every action the app exposes. For a single action's field schema, run `/act.<name> --help`; for every action on the doc at once, `/act --help`. Inside an `app:` topic, `/open` with no argument re-opens the app's home.
 
 ## 5. Run an action
 
@@ -165,6 +164,8 @@ When you see that, run `string app:<name> '/open requirements.md'` to see what t
 | `/help` | All commands + current page actions |
 | `/act.<name> [flags]` | Run action — positional or `--flag value` |
 | `/act.<name> --help` | Field schema for that action |
+| `/tool:<name> [args]` | Run an installed tool (default action) — POSIX CLI shape |
+| `/tool:<name>.<act> [args]` | Run a named action on a tool |
 | `/install --app \| --tool <source>` | Install from local path or URL |
 | `/uninstall <name>` | Remove installed package |
 | `/set $VAR = "value"` | Persistent env var, scoped to current topic |

@@ -74,10 +74,17 @@ export function cmdSet(args: string, body: string | undefined, session: Session,
       const name = envMatch[1];
       const value = (envMatch[2] ?? envMatch[3] ?? envMatch[4]).trim();
       const envScope = deriveEnvScope(session.name);
+      if (!envScope.app) {
+        return err(
+          `$${name}: persistent env vars are app-scoped. Run /set from an app session:\n` +
+          `  string app:<name> '/set $${name} = "${value}"'`,
+          'INVALID_TARGET',
+        );
+      }
       loader.envStore.set(name, value, envScope);
       const scopeLabel = envScope.config
         ? ` (${envScope.app}:${envScope.config})`
-        : envScope.app ? ` (${envScope.app})` : ' (global)';
+        : ` (${envScope.app})`;
       results.push(`$${name} = "${value}"${scopeLabel}`);
       continue;
     }
@@ -99,6 +106,12 @@ export function cmdSet(args: string, body: string | undefined, session: Session,
   for (const { name, value, persistent } of codeBlockAssignments) {
     if (persistent) {
       const envScope = deriveEnvScope(session.name);
+      if (!envScope.app) {
+        return err(
+          `$${name}: persistent env vars are app-scoped. Run /set from an app session.`,
+          'INVALID_TARGET',
+        );
+      }
       loader.envStore.set(name, value, envScope);
       const display = value.includes('\n') ? `(${value.split('\n').length} lines)` : `"${value}"`;
       results.push(`$${name} = ${display}`);

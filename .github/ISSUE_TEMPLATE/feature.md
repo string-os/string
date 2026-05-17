@@ -21,7 +21,7 @@ labels: enhancement
 - [ ] Runtime (`@string-os/string`)
 - [ ] Parser (`@string-os/core`)
 - [ ] Compiler (`@string-os/compiler`)
-- [ ] MCP adapter (`@string-os/string-mcp`)
+- [ ] MCP surface (in `@string-os/string`)
 - [ ] Documentation
 - [ ] SFMD spec (please file in https://github.com/string-os/sfmd instead)
 

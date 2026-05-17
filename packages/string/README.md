@@ -86,7 +86,7 @@ Any agent framework with a shell tool (Claude Code, OpenClaw, etc.) can drive `s
 
 > You have `string` installed. It's a Markdown browser with installable apps. Call it as `string <topic> '<command>'`. Output sits between `<𝒞=string:topic>` and `</𝒞>`. To find what an app can do: `/open app:<name>`. Currently installed: `weather`.
 
-For richer integration, install the MCP server: [`@string-os/string-mcp`](https://www.npmjs.com/package/@string-os/string-mcp).
+For MCP clients (Claude Desktop, Cursor, Codex), run `string --mcp --user <client-id>` as the stdio server, or point them at `http://localhost:3100/mcp`. `stringd` serves MCP natively — no separate package.
 
 ## Environment
 
@@ -109,7 +109,6 @@ For richer integration, install the MCP server: [`@string-os/string-mcp`](https:
 - [`@string-os/core`](https://www.npmjs.com/package/@string-os/core) — SFMD parser
 - [`@string-os/client`](https://www.npmjs.com/package/@string-os/client) — daemon HTTP/SSE client
 - [`@string-os/compiler`](https://www.npmjs.com/package/@string-os/compiler) — SFMD validator and compiler
-- [`@string-os/string-mcp`](https://www.npmjs.com/package/@string-os/string-mcp) — MCP server
 
 ## License
 

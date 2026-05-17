@@ -75,6 +75,9 @@ importers:
 
   packages/string:
     dependencies:
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.29.0
+        version: 1.29.0(zod@3.25.76)
       '@string-os/client':
         specifier: workspace:*
         version: link:../client
@@ -90,6 +93,9 @@ importers:
       turndown:
         specifier: ^7.2.0
         version: 7.2.4
+      zod:
+        specifier: ^3.23.8
+        version: 3.25.76
     devDependencies:
       '@types/node':
         specifier: ^22.0.0

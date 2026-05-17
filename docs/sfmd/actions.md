@@ -412,9 +412,25 @@ holds the decoded bytes.
 
 ```
 for: post in Response.body.posts
-- [{post.title}](act:read?id={post.id}) — by {post.author.name}
+{@post} = {post.id}
+- {@post}: {post.title} — by {post.author.name}
 end:
+
+next: /act.read @post-N · /act.upvote @post-N
 ```
+
+Each iteration registers an inline shortcut (`@post-1`, `@post-2`, …)
+that maps to the post id. The `next:` line tells the agent which
+actions to chain. The agent invokes `/act.<name>` explicitly — no
+hidden dispatch via `/open`.
+
+The output is intentionally plain text rather than a markdown link:
+posts here are `/act`-only entities (no public URL to fetch). An AI
+reading raw SFMD still sees the action declaration and the `next:`
+hint and can reason about what would happen under String. For items
+that are `/open`-able (pages, external resources), use standard
+markdown link form so a plain markdown viewer can follow them too —
+see [Shortcuts → Drill-in pattern](./shortcuts.md#drill-in-pattern-shortcut--value-in-action-responses).
 
 `for: <var> in <path>` opens a loop. `<path>` is resolved against the
 response (same path syntax as assignment lines and `save:`). `<var>`

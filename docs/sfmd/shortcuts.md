@@ -280,100 +280,83 @@ Stay on [Home](./index.md).
 
 ---
 
-## Action shortcuts (`act:` scheme)
+## Drill-in pattern (`{@shortcut} = {value}` in action responses)
 
-Shortcuts can point to action invocations instead of documents.
-The `act:` URI scheme tells the runtime to dispatch the action
-on the current document instead of loading a new page.
+> **Principle — dual-mode legibility.** SFMD documents stay useful
+> without the String runtime: an AI reading the raw file can parse
+> the actions, follow the `next:` hints, and reason about what the
+> app does. With String, the same document becomes interactive
+> (shortcuts resolve, actions dispatch, navigation works). To
+> preserve this dual mode:
+>
+> - **`/open` targets** (pages, external resources) MUST appear as
+>   valid markdown links in source — `[Label](url)` or `[Label][@id]`.
+>   A plain markdown viewer renders them as clickable links; an AI
+>   without String still parses them as navigation.
+> - **`/act` targets** (action-only entities — no public URL, runtime
+>   binding required) can render as plain-text tokens (`@post-1: Title`).
+>   A markdown viewer can't execute actions anyway, and an AI reading
+>   the source sees the action declarations plus the `next:` line and
+>   knows what would happen under String.
+>
+> Don't dress action dispatch in link form — it's a broken link to
+> any viewer that isn't String, and it confuses the intent.
 
-### Syntax
+### `/act` drill-in — plain-text tokens
+
+Action response templates register inline shortcuts that bind
+opaque ids (post ids, record keys, tuples) to short, human-grade
+names the agent then passes to subsequent action calls. Pattern:
 
 ```
-act:<action-id>
-act:<action-id>?<key>=<value>&<key>=<value>...
-```
-
-The action id matches an `act.<id>` block on the document holding
-the shortcut. Query parameters become the action's `--key value`
-flags.
-
-### Author writes
-
-The `for:`/`end:` directive below is response-template syntax (see
-[Actions](./actions.md#response-template)). It only has meaning
-inside an `act.<id>.response` fenced block — not in document body.
-
-```markdown
-[Read post]({act-url})
-
-for: post in Response.body.posts
-- [{post.title}](act:read?id={post.id}) — by {post.author.name}
+for: p in Response.body.posts
+{@post} = {p.id}
+- {@post}: {p.title} — by {p.author.name} in /{p.submolt_name}
 end:
+
+next: /act.read @post-N · /act.upvote @post-N · /act.comment @post-N "..."
 ```
 
-After auto-shortcut assignment, the AI sees:
+Each loop iteration registers `@post-1`, `@post-2`, … pointing at
+the post id. The agent sees `@post-1: <title>` in the output and
+runs `/act.read @post-3` to drill in — the runtime resolves
+`@post-3` back to the id when binding the action's required field.
+
+The `next:` line tells the agent which actions chain naturally
+from this result.
+
+Why plain text is correct here: a plain markdown viewer can't run
+`/act.read` anyway, so a `[label](something)` would just be a broken
+or misleading link. The token form (`@post-1: Title`) is honest about
+what the runtime is providing.
+
+### `/open` navigation — standard markdown links
+
+Pages and external resources that an agent can `/open` MUST be
+written as standard markdown links so they remain followable in any
+viewer. Inline form:
 
 ```markdown
-- [I have started treating...][@link-1] — by SparkLabScout
-- [they built a kill switch...][@link-2] — by pyclaw001
+[Home](string.md) · [Communities](communities.md) · [Profile](profile.md)
 ```
 
-### Dispatch
+Or reference form when the URL is dynamic:
 
-When the AI runs `/open @link-1`, the runtime:
+```
+for: s in Response.body.submolts
+- [{s.display_name}][@sub] — {s.subscriber_count} subscribers
+[@sub]: https://www.moltbook.com/sub/{s.name}
+end:
 
-1. Resolves the shortcut → `act:read?id=861040aa-...`
-2. Sees the `act:` scheme — does NOT fetch a document
-3. Looks up `act.read` on the current document
-4. Parses query string → `--id "861040aa-..."`
-5. Executes the action and renders its response template
+next: /open @sub-N to browse a community
+```
 
-The session's `currentDoc` is unchanged. The agent stays on the
-same page (e.g. the feed) and can follow other shortcuts in the
-same list without re-fetching.
+The agent runs `/open @sub-3` (or `/open communities.md`), and a
+plain markdown viewer renders the same line as a clickable link.
 
-### Why this matters
-
-A SPA URL like `https://app.example.com/post/X` is rendered for
-humans (JavaScript hydrates the content). An agent fetching it
-gets the loading shell.
-
-The right primitive for "read this thing" is the **action** that
-calls the API and returns structured content — `act.read` in the
-example above.
-
-`act:` URI scheme lets templates output one-click drill-in links
-without forcing the AI to type the full action call. The list
-shortcut and the action invocation become a single primitive:
-follow the link, get the result.
-
-### Comparison
-
-| Pattern | Shortcut value | What `/open @link-1` does |
-|---------|---------------|---------------------------|
-| `[t](https://example.com/x)` | URL | HTTP fetch, currentDoc replaced |
-| `[t](file:///path.md)` | local path | File load, currentDoc replaced |
-| `[t](act:read?id=X)` | action call | **Dispatch action, currentDoc unchanged** |
-
-### Rules
-
-- The action MUST be defined on the document where `/open` runs.
-  If the agent navigates to a sub-page that doesn't define the
-  action, dispatch fails with `Action not found`.
-- Query keys map to action field names (`--<key> "<value>"`).
-- Values are URL-decoded before substitution.
-- No fragment (`#block`) — `act:` URLs don't refer to documents.
-- The `currentDoc` does not change. Auto-shortcuts from the prior
-  rendering remain valid (drill-in patterns stay navigable).
-
-### Errors
-
-| Condition | Error |
-|-----------|-------|
-| No document open | `Cannot dispatch action: no document open.` |
-| Missing action id | `act: URI missing action id` |
-| Unknown action | `Action not found: "<id>"` |
-| Required field missing | Standard action validation error |
+See `cookbook/apps/moltbook` for a complete reference: nav between
+pages uses markdown links (`string.md` → `communities.md`); drill-in
+into posts uses plain-text `@post-N` tokens.
 
 ---
 
@@ -417,4 +400,3 @@ directly to that menu. No priority lookup is needed.
 12. Non-sluggable fallback: `@link-N` (reserved prefix, global counter).
 13. Resolution order: inline > auto > menu.
 14. In CommonMark viewers, both forms render as standard links.
-15. `act:<action-id>?<key>=<value>` URLs dispatch actions on `/open` without changing `currentDoc`.

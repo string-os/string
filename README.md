@@ -2,7 +2,7 @@
 
 > Markdown that runs. One file, any agent.
 
-The web gave humans a universal surface for information. String aims to give AI agents the same — for *work*. A `.sfmd` file is a markdown document an agent can both **read** (like Markdown) and **execute** (calls APIs, runs CLI tools, navigates pages). Same file works in any runtime that speaks the format. No SDK. No registry. No per-agent code.
+A `.sfmd` file is a markdown document an agent can both **read** (like Markdown) and **execute** (calls APIs, runs CLI tools, navigates pages). The same file works in any runtime that speaks the format — no per-tool server, no per-agent code.
 
 ---
 
@@ -46,10 +46,12 @@ A markdown file declared the API. The runtime called it. The agent got the resul
 
 **Runtime.** This repo ships `@string-os/string` — Browser, Session, Loader, Resolver. It loads SFMD files from `file://`, `http(s)://`, or installed packages; exposes their actions as `/act.<name>` calls; tracks per-session state; and renders results as Markdown.
 
-**What's standardized.** Two verbs cover navigation and execution:
+**What's standardized.** A small surface that doesn't change with the resource:
 
 - `/open` — see something (document, page, app, URL, shortcut)
 - `/act` — do something (call an API, run a CLI tool, submit data)
+
+Plus consistent rules for how state is scoped, how outputs are framed, and how errors carry recovery hints. Not a kernel — a stable, syscall-shaped surface every resource exposes the same way. [Full surface →](https://docs.string-os.org/runtime/overview/)
 
 Different resource types get the same shape:
 
@@ -79,7 +81,7 @@ The cookbook has a dozen runnable examples — kanban over GitHub Projects, an A
 
 ### Other ways to embed the runtime
 
-- **MCP server** (Claude Desktop, Cursor, …) — add `@string-os/string-mcp` to your MCP config
+- **MCP server** (Claude Desktop, Cursor, …) — `string --mcp` (stdio) or point the client at `http://localhost:3100/mcp` (HTTP). `stringd` serves MCP natively.
 - **In-process library** — `import { Browser } from '@string-os/string'`. No daemon, no HTTP
 - **HTTP daemon + any-language client** — `string --daemon start`. Wire spec in [`stringd protocol v0.1`](https://docs.string-os.org/reference/protocol/); reference TS client in `@string-os/client`
 
@@ -89,7 +91,7 @@ Add a feature once, it works in all four paths.
 
 ## How it compares
 
-- **vs MCP.** MCP is a protocol with a custom server per tool. SFMD is a file — works over `file://`, HTTP, email, or a USB drive. An SFMD file can be *served by* an MCP server (that's what `string-mcp` does), but it isn't tied to one.
+- **vs MCP.** MCP is a protocol with a custom server per tool. SFMD is a file — works over `file://`, HTTP, email, or a USB drive. `stringd` *speaks* MCP natively (one tool, `string({topic, cmd})`, wraps the whole command surface), but SFMD itself isn't tied to one protocol.
 - **vs llms.txt.** `llms.txt` is a static index, read-only. SFMD is read *and* execute. Actions are first-class.
 - **vs SKILL.md / agent skills.** A SKILL.md is written for one agent runtime. An SFMD file is an app surface any runtime can read and execute.
 
@@ -110,7 +112,7 @@ Working:
 Not yet:
 
 - Signed packages — **run SFMD files from trusted sources only**
-- Fine-grained capability permissions (default allowlist is restrictive)
+- Fine-grained capability permissions — `/exec` and `bash:` topics are opt-in, but an installed app's own HTTP fetches and `CLI` actions run unsandboxed. Inspect before installing.
 
 **Platform.** Tested on Linux. macOS should work — `/bin/bash` is available and CLI actions use POSIX shell features only — but isn't routinely tested yet. **Windows is not supported in 0.1.x**: the runtime spawns `/bin/bash` for every CLI action. Use WSL on Windows, or wait for portable execution in v0.2.
 
@@ -124,9 +126,8 @@ Trust model in [`SECURITY.md`](./SECURITY.md). The full spec for parser implemen
 |---|---|
 | [`@string-os/core`](./packages/core) | SFMD parser, extractor, utilities |
 | [`@string-os/compiler`](./packages/compiler) | Compiler and validator |
-| [`@string-os/string`](./packages/string) | Runtime — Browser, Session, Loader, daemon, CLI |
+| [`@string-os/string`](./packages/string) | Runtime — Browser, Session, Loader, daemon (HTTP/SSE + MCP), CLI, stdio MCP shim |
 | [`@string-os/client`](./packages/client) | HTTP/SSE client for `stringd` — zero deps |
-| [`@string-os/string-mcp`](./packages/string-mcp) | MCP server wrapper |
 
 ---
 

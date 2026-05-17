@@ -288,6 +288,38 @@ If the client disconnects while waiting in the queue, the request is aborted sil
 
 ---
 
+### MCP
+
+#### `POST /mcp` · `GET /mcp` · `DELETE /mcp` — Model Context Protocol endpoint
+
+Serves the [Model Context Protocol](https://modelcontextprotocol.io) over the Streamable HTTP transport. One tool — `string({ topic, cmd })` — wraps the entire command surface (same as `/exec`).
+
+**Headers:**
+- `X-User-Id: <user_id>` (optional, defaults to `"default"`)
+- `Content-Type: application/json` for POST
+- `Accept: application/json, text/event-stream` (recommended)
+
+**Body:** JSON-RPC 2.0 messages (`initialize`, `tools/list`, `tools/call`, etc.). See the [MCP spec](https://modelcontextprotocol.io/specification) for the wire format.
+
+**Tool output (`tools/call` for `string`):**
+
+```json
+{
+  "content": [{ "type": "text", "text": "<𝒞=string:TOPIC>\n<body>\n</𝒞>" }],
+  "isError": false
+}
+```
+
+The body is wrapped in a **ChanFlow envelope** identical to the CLI's stdout — the topic lives in the opening tag, so no separate `structuredContent` field is needed. On error, `isError` is `true` and the body carries the code as `ERROR(CODE): <message>` (e.g. `ERROR(NOT_FOUND): …`).
+
+Unknown users are **auto-registered** on first touch — no `POST /users` needed. Home is derived as `~/.string/users/{user_id}`. This is unique to `/mcp` (the `/exec` endpoint still requires explicit registration via `POST /users`).
+
+Stateless mode: a fresh server+transport per request, no session IDs. Concurrent calls on the same topic from a single user are serialized with a `BUSY` rejection (no queue at v0.1).
+
+See [Runtime → MCP](../runtime/mcp.md) for client setup examples.
+
+---
+
 ### Lifecycle
 
 #### `GET /health` — daemon health and stats

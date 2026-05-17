@@ -31,8 +31,7 @@ string/
   packages/
     core/          — SFMD parser and utilities (no runtime deps)
     compiler/      — SFMD compiler and validator
-    string/        — runtime: Browser, Session, Loader, CLI
-    string-mcp/    — MCP server adapter
+    string/        — runtime: Browser, Session, Loader, CLI, daemon (HTTP+MCP), stdio MCP shim
   docs/
     quickstart.md
     agent-integration.md
@@ -80,7 +79,7 @@ We follow a simple prefix convention:
 - `refactor: ...` — internal cleanup, no behavior change
 - `chore: ...` — tooling, lockfile, repo hygiene
 
-Scope is usually the package name (`string`, `core`, `compiler`, `string-mcp`).
+Scope is usually the package name (`string`, `core`, `compiler`, `client`).
 
 ## Releasing (maintainers only)
 

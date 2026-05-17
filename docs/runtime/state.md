@@ -145,53 +145,62 @@ Human sets once:               AI uses in actions:
 
 ---
 
-## $var storage and cascade
+## $var storage and isolation
 
-Persistent variables are stored in files, organized by scope:
+Persistent variables are app-scoped. Each app gets its own env file;
+nothing is shared across apps, and the OS shell's environment never
+leaks in.
 
 ```
-~/.string/
-  config.json          ← global (env section)
+~/.string/users/{user}/
   apps/
     weather/
       env.json         ← app:weather scope
-      korea/
-        env.json       ← app:weather:korea scope
+      seoul/
+        env.json       ← app:weather:seoul scope (config)
+    moltbook/
+      env.json         ← app:moltbook scope
 ```
 
-**Global** — the user's `~/.string/config.json` file holds a unified
-config with an `env` section:
+**App scope** — `apps/{app}/env.json` holds variables for an app:
 
 ```json
 {
-  "env": {
-    "API_KEY": "sk-abc123",
-    "DEFAULT_REGION": "KR"
-  }
+  "MOLTBOOK_API_KEY": "moltbook_sk_..."
 }
 ```
 
-**App scope** — `~/.string/apps/{app}/env.json` holds variables
-specific to an app:
+**Config scope** — `apps/{app}/{config}/env.json` holds variables
+for a specific configuration (`app:weather:seoul`). Overrides app
+scope for keys that appear in both.
 
-```json
-{
-  "WEATHER_PROVIDER": "openweather"
-}
-```
-
-**Config scope** — `~/.string/apps/{app}/{config}/env.json` holds
-variables for a specific configuration of an app.
-
-**Resolution cascade** — most specific wins:
+**Resolution** — config → app, most specific wins:
 
 ```
-config env → app env → global env
-(highest)              (lowest)
+config env → app env
+(highest)    (lowest)
 ```
 
-When an action references `$API_KEY`, String looks in the config
-scope first, then the app scope, then global. The first match wins.
+When an action references `$API_KEY`, String checks the config scope,
+then the app scope. **No global fallback. No `process.env` fallback.**
+A reference that doesn't resolve in the current app's scope returns
+`INVALID_PAYLOAD` with a "set it from this app session" hint.
+
+**Why no global.** A shared env would let any installed app read keys
+set by another. The leak is closed by design: an app's `$X` is
+unreachable from any other app, and the daemon's shell environment is
+opaque to action substitution. The cost — a key needed by N apps must
+be set N times — is the price of isolation.
+
+**System vars** — daemon-defined context vars are still available in
+every action: `$HOME` (the String per-user home, not the OS HOME),
+`$CWD`, `$CURRENT_FILE`, `$CURRENT_URI`, `$CURRENT_TARGET`,
+`$CURRENT_BLOCK`, `$ARGS`. These are supplied fresh per call and live
+above the app's own env in the resolution chain.
+
+**Setting a var** — `/set $X = "..."` only works from an app session
+(`app:NAME` or `app:NAME:CONFIG`). In `main`, `bash:*`, or hub topics
+it returns `INVALID_TARGET` — there's no app to scope to.
 
 ---
 
