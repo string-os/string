@@ -330,6 +330,64 @@ Why plain text is correct here: a plain markdown viewer can't run
 or misleading link. The token form (`@post-1: Title`) is honest about
 what the runtime is providing.
 
+### Tuple value shortcuts
+
+When one logical handle needs to carry more than one identifier
+— a comment addressed by `(post_id, comment_id)`, a board cell
+addressed by `(column, row)`, anything composite — register the
+shortcut as a **tuple**: comma-separated expressions inside
+parentheses on the right-hand side.
+
+```
+for: c in Response.body.comments
+{@reply} = ({post}, {c.id})
+- {@reply}: {c.author.name}: {c.content}
+end:
+
+next: /act.reply @reply-N "..."
+```
+
+`{post}` here is the parent post id taken from the calling
+action's input fields. `{c.id}` is each comment's id from the
+response. Iteration N registers `@reply-N` with value
+`[post_id, comment_id_N]`.
+
+The agent then runs `/act.reply @reply-3 "thanks"`. The action's
+field receives the whole tuple; its URI/body template addresses
+individual slots with `{name[N]}` indexing:
+
+````markdown
+```act.reply
+POST https://api.example.com/posts/{reply[0]}/comments/{reply[1]}/replies
+  reply, -r: tuple (required) "(post_id, comment_id) from /act.comments"
+  text, -t: string (required) "Reply body"
+```
+````
+
+`{reply[0]}` substitutes the post id, `{reply[1]}` the comment id.
+The agent never sees either id directly — only the opaque
+`@reply-3` handle. (Same indexing works inside `body:` templates;
+see [Actions → Body template](./actions.md#body-template).)
+
+#### Rules
+
+- **One-element tuple normalizes to scalar.** `(x)` and `x` are
+  equivalent — useful when the same template sometimes produces
+  a single id and sometimes a pair.
+- **Empty tuple `()` is allowed** (zero-element shortcut).
+- **Nested braces are respected** when splitting on commas.
+  `({a}, {b}, {c})` is three elements; `({a, b})` is one element
+  whose value happens to contain a literal comma.
+- **`{name}` without an index emits the tuple joined by `,`** —
+  a debug fallback. In real templates, always address slots with
+  `{name[N]}`.
+- **`{name[N]}` returns empty string when `N` is out of range** —
+  fail-quiet rather than fail-loud. Validate at the API boundary.
+- **`/open @<tuple>` is rejected** with `INVALID_TARGET`:
+  *"Shortcut X is a value tuple, not a navigable target."* Tuples
+  carry no URL, so navigation has nowhere to go. The error
+  message suggests passing it to an action instead.
+
 ### `/open` navigation — standard markdown links
 
 Pages and external resources that an agent can `/open` MUST be

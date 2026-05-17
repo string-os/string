@@ -127,6 +127,7 @@ Each parameter is defined on its own line, indented with spaces:
 | `number` | Numeric value (integer or float) |
 | `boolean` | True or false |
 | `path` | File path |
+| `tuple` | Multi-slot value (typically a tuple shortcut like `@reply-3`). The URI/body template addresses individual slots with `{name[N]}`. See [Shortcuts → Tuple value shortcuts](./shortcuts.md#tuple-value-shortcuts). |
 
 ### Constraints
 
@@ -298,6 +299,12 @@ POST https://api.example.com/v1/generate -H "Authorization: Bearer $API_KEY"
   `"`), the value is JSON-string-escaped (quotes, backslashes,
   control chars, unicode). Outside a JSON string, the value is
   inserted raw.
+- **`{field[N]}`** addresses a single slot of a `tuple`-typed field
+  (zero-indexed). Use this whenever the field receives a tuple
+  shortcut like `@reply-3` (see
+  [Shortcuts → Tuple value shortcuts](./shortcuts.md#tuple-value-shortcuts)).
+  `{field}` without an index emits the tuple joined by `,` as a
+  debug fallback; out-of-range indices substitute empty string.
 - **Modifiers** may be appended after a pipe: `{field|modifier}`.
 
 ### Field modifiers
@@ -431,6 +438,25 @@ hint and can reason about what would happen under String. For items
 that are `/open`-able (pages, external resources), use standard
 markdown link form so a plain markdown viewer can follow them too —
 see [Shortcuts → Drill-in pattern](./shortcuts.md#drill-in-pattern-shortcut--value-in-action-responses).
+
+When the next action needs more than one identifier — e.g. a
+reply requires both `post_id` and `comment_id` — register the
+shortcut as a **tuple** by wrapping the RHS in parentheses:
+
+```
+for: c in Response.body.comments
+{@reply} = ({post}, {c.id})
+- {@reply}: {c.author.name}: {c.content}
+end:
+
+next: /act.reply @reply-N "..."
+```
+
+`@reply-3` then carries `[post_id, comment_3_id]`. The receiving
+action declares a `tuple`-typed field and addresses individual
+slots with `{name[N]}` in its URI/body template — see
+[Shortcuts → Tuple value shortcuts](./shortcuts.md#tuple-value-shortcuts)
+for the full pattern.
 
 `for: <var> in <path>` opens a loop. `<path>` is resolved against the
 response (same path syntax as assignment lines and `save:`). `<var>`
@@ -614,3 +640,4 @@ headers, and response templates.
 13. `$variable` in definitions: resolved from extraEnv → env-store → process.env (in that order).
 14. Invocation hints in inline code: conventional, not parsed.
 15. In CommonMark viewers, action blocks render as code blocks.
+16. `tuple` field type addresses individual slots with `{field[N]}` (zero-indexed) in URI and body templates. Bare `{field}` joins slots with `,` as a debug fallback.
