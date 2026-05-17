@@ -94,14 +94,12 @@ A single tool surfaces the entire command set. Description:
 
 ### Output
 
-The tool returns three things:
+The tool returns two things:
 
-- **`content[0].text`** — the command's rendered output, same body that `string --json <topic> '<cmd>'` returns in its `content` field. Already stripped of the `re:` request prefix.
+- **`content[0].text`** — the command's rendered output, wrapped in a **ChanFlow envelope** (`<𝒞=string:TOPIC>\n<body>\n</𝒞>`). Identical to what the CLI prints for the same call. The topic is encoded in the opening tag; error codes are encoded in the body as `ERROR(CODE): …`.
 - **`isError`** — `true` if the command failed (sets MCP's standard error flag).
-- **`structuredContent`** — machine-readable summary:
-  - `ok` — boolean
-  - `topic` — canonical topic (after any auto-routing)
-  - `code` — error code string, present only on failure (`NOT_FOUND`, `INVALID_PAYLOAD`, …)
+
+No `structuredContent`. The envelope already carries topic + status — keeping the response shape minimal makes the tool behave like every other standard MCP server (filesystem, git, github, fetch, …) and lets agents apply the same reading habits.
 
 ### Example
 
@@ -109,19 +107,23 @@ A call to `string({ topic: "main", cmd: "/info" })` returns:
 
 ```json
 {
-  "content": [{ "type": "text", "text": "Session info\n---\ncwd:       ~/\nfile:      (none open)" }],
-  "isError": false,
-  "structuredContent": { "ok": true, "topic": "main" }
+  "content": [{
+    "type": "text",
+    "text": "<𝒞=string:main>\nSession info\n---\ncwd:       ~/\nfile:      (none open)\n</𝒞>"
+  }],
+  "isError": false
 }
 ```
 
-On error (`string({ topic: "invalid.target", cmd: "/info" })`):
+On error (`string({ topic: "main", cmd: "/open ./missing.md" })`):
 
 ```json
 {
-  "content": [{ "type": "text", "text": "Invalid topic: invalid.target" }],
-  "isError": true,
-  "structuredContent": { "ok": false, "topic": "invalid.target", "code": "INVALID_TARGET" }
+  "content": [{
+    "type": "text",
+    "text": "<𝒞=string:main>\nERROR(NOT_FOUND): File not found: ./missing.md\nRecovery: Use /ls to list available files.\n</𝒞>"
+  }],
+  "isError": true
 }
 ```
 

@@ -14,6 +14,7 @@
  */
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
+import { wrapEnvelope } from './envelope.js';
 
 /** Result returned by an exec backend. Matches the daemon's exec envelope. */
 export interface McpExecResult {
@@ -62,15 +63,16 @@ export function createStringServer(execFn: McpExecFn): McpServer {
     },
     async ({ topic, cmd }) => {
       const result = await execFn(topic, cmd);
-      const structuredContent: Record<string, unknown> = {
-        ok: result.ok,
-        topic: result.topic ?? topic,
-      };
-      if (result.code) structuredContent.code = result.code;
+      // Same envelope as the CLI: `<𝒞=string:TOPIC>\n<body>\n</𝒞>`. The
+      // topic is encoded in the opening tag, so we don't need a separate
+      // structuredContent field for it. Error code is already in the body
+      // (`ERROR(CODE): …`). One canonical text format across all surfaces.
+      const canonicalTopic = result.topic ?? topic;
       return {
-        content: [{ type: 'text' as const, text: result.content }],
+        content: [
+          { type: 'text' as const, text: wrapEnvelope(canonicalTopic, result.content) },
+        ],
         isError: !result.ok,
-        structuredContent,
       };
     },
   );

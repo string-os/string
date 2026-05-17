@@ -27,8 +27,7 @@ function deriveHome(userId: string): string {
 
 // ─── ChanFlow output ─────────────────────────────────────────────────────────
 
-const CHANFLOW_OPEN = (topic: string) => `<𝒞=string:${topic}>`;
-const CHANFLOW_CLOSE = `</𝒞>`;
+import { wrapEnvelope } from './envelope.js';
 
 function formatOutput(
   topic: string,
@@ -43,7 +42,7 @@ function formatOutput(
       content: result.content,
     });
   }
-  return `${CHANFLOW_OPEN(topic)}\n${result.content}\n${CHANFLOW_CLOSE}`;
+  return wrapEnvelope(topic, result.content);
 }
 
 // ─── Daemon auto-start ───────────────────────────────────────────────────────

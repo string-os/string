@@ -305,13 +305,12 @@ Serves the [Model Context Protocol](https://modelcontextprotocol.io) over the St
 
 ```json
 {
-  "content": [{ "type": "text", "text": "<command output>" }],
-  "isError": false,
-  "structuredContent": { "ok": true, "topic": "<canonical topic>" }
+  "content": [{ "type": "text", "text": "<𝒞=string:TOPIC>\n<body>\n</𝒞>" }],
+  "isError": false
 }
 ```
 
-On error, `isError` is `true` and `structuredContent.code` carries a String error code (e.g. `NOT_FOUND`, `INVALID_PAYLOAD`).
+The body is wrapped in a **ChanFlow envelope** identical to the CLI's stdout — the topic lives in the opening tag, so no separate `structuredContent` field is needed. On error, `isError` is `true` and the body carries the code as `ERROR(CODE): <message>` (e.g. `ERROR(NOT_FOUND): …`).
 
 Unknown users are **auto-registered** on first touch — no `POST /users` needed. Home is derived as `~/.string/users/{user_id}`. This is unique to `/mcp` (the `/exec` endpoint still requires explicit registration via `POST /users`).
 
