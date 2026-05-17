@@ -34,7 +34,7 @@
  */
 
 import http from 'http';
-import { mkdirSync } from 'fs';
+import { mkdirSync, readdirSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { Browser } from './index.js';
@@ -94,7 +94,10 @@ interface SessionMeta {
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-const STRINGD_DATA_DIR = process.env.STRINGD_DATA_DIR || join(process.cwd(), '.stringd');
+// Daemon data dir is per-OS-user and cwd-independent: a daemon started from
+// any directory must see the same user registry. Override with STRINGD_DATA_DIR
+// only for tests / isolated installs.
+const STRINGD_DATA_DIR = process.env.STRINGD_DATA_DIR || join(homedir(), '.string', 'daemon');
 const users = new UserRegistry([], join(STRINGD_DATA_DIR, 'users.json'));
 const runtimes = new Map<string, RuntimeEntry>();
 let log: Logger;
@@ -708,6 +711,30 @@ export function startDaemon(port = 3100, opts?: { log?: boolean }): void {
     enabled: logEnabled,
     dir: join(STRINGD_DATA_DIR, 'logs'),
   });
+
+  // Disk-first recovery: ~/.string/users/<id> is the source of truth for user
+  // homes. If the registry JSON gets lost/corrupted or the daemon migrates
+  // STRINGD_DATA_DIR, re-register any home dirs we discover. Idempotent.
+  const usersRoot = join(homedir(), '.string', 'users');
+  try {
+    for (const entry of readdirSync(usersRoot)) {
+      const home = join(usersRoot, entry);
+      try {
+        if (!statSync(home).isDirectory()) continue;
+      } catch {
+        continue;
+      }
+      if (users.has(entry)) continue;
+      users.register({
+        id: entry,
+        home,
+        allowedPaths: [],
+        createdAt: new Date().toISOString(),
+      });
+    }
+  } catch {
+    // usersRoot doesn't exist yet — fresh install, fine.
+  }
 
   const loadedUsers = users.list().length;
   if (loadedUsers > 0) {

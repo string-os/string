@@ -35,6 +35,29 @@ export function cmdInfo(args: string, session: Session, loader: Loader): Command
   const topic = parseTopic(session.name);
 
   if (!doc) {
+    // app:NAME topic with no document loaded — report installation state
+    // explicitly so callers (especially MCP agents) get an actionable body
+    // instead of a generic "(none open)". Mirrors /open's resolution error.
+    if (topic?.type === 'app') {
+      const appName = topic.namespace;
+      const registered = loader.envStore.getPackage('apps', appName);
+      lines.push(`app:       ${appName}`);
+      if (registered) {
+        lines.push(`status:    installed, not yet opened`);
+        lines.push(`hint:      run /open to load the app`);
+      } else {
+        const installed = Object.keys(loader.envStore.listPackages('apps'));
+        lines.push(`status:    not installed`);
+        if (installed.length > 0) {
+          lines.push(`installed: ${installed.join(', ')}`);
+        } else {
+          lines.push(`installed: (none)`);
+        }
+        lines.push(`hint:      run /install <source> to install this app`);
+      }
+      return ok(`Session info\n---\n${lines.join('\n')}`);
+    }
+
     // Show cwdOverride if set (from /open directory), else ~/
     if (session.cwdOverride) {
       const absDir = session.cwdOverride;

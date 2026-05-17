@@ -80,40 +80,6 @@ export async function cmdOpen(
     uri = resolved;
   }
 
-  // act: scheme — dispatch to action handler instead of loading a document.
-  // Lets templates output [text](act:<action-id>?<key>=<value>) so /open @shortcut
-  // invokes the action without changing currentDoc. Mirrors how a browser handles
-  // mailto:/javascript: links: same /open verb, scheme decides behavior.
-  if (uri.startsWith('act:')) {
-    const doc = session.currentDoc;
-    if (!doc) {
-      return err('Cannot dispatch action: no document open.', 'INVALID_TARGET');
-    }
-    const rest = uri.slice('act:'.length);
-    const qIdx = rest.indexOf('?');
-    const actionId = qIdx === -1 ? rest : rest.slice(0, qIdx);
-    const queryStr = qIdx === -1 ? '' : rest.slice(qIdx + 1);
-    if (!actionId) {
-      return err('act: URI missing action id (use act:<action-id>?<key>=<value>)', 'INVALID_TARGET');
-    }
-    const action = doc.actions.find(a => a.id === actionId);
-    if (!action) {
-      const available = doc.actions.map(a => a.id).join(', ') || 'none';
-      return err(`Action not found: "${actionId}"\nAvailable: ${available}`, 'NOT_FOUND');
-    }
-    let flagStr = '';
-    if (queryStr) {
-      const params = new URLSearchParams(queryStr);
-      const parts: string[] = [];
-      for (const [key, value] of params) {
-        const escaped = value.replace(/"/g, '\\"');
-        parts.push(`--${key} "${escaped}"`);
-      }
-      flagStr = parts.join(' ');
-    }
-    return executeAction(action, flagStr, session, loader, buildContextVars(session, loader, flagStr));
-  }
-
   // Split uri#fragment
   const hashIdx = uri.indexOf('#');
   if (hashIdx !== -1) {

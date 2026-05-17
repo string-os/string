@@ -570,11 +570,10 @@ function buildSlugMap(source: string): SlugMapResult {
 
     const label = match[1];
     const href = match[2];
-    // Only auto-slug full URLs (https?://), act: action shortcuts, or very long paths
+    // Only auto-slug full URLs (https?://) or very long paths
     const shouldSlug =
       href.startsWith('http://') ||
       href.startsWith('https://') ||
-      href.startsWith('act:') ||
       href.length > 40;
     if (!shouldSlug) continue;
 
