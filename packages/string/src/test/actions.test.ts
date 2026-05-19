@@ -807,6 +807,36 @@ await section('@shortcut resolution in /act flag values', async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+await section('@shortcut unresolved → NOT_FOUND error', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-shortcut-missing-');
+  const testFile = path.join(tmpDir, 'shortcut-missing.md');
+  fs.writeFileSync(testFile, [
+    '# Missing Shortcut Test',
+    '',
+    '```act.fetch',
+    'GET https://example.com/{name}',
+    '  name: string (required) "Name"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${testFile}`);
+
+  // @nonexistent doesn't resolve — must error, not silently pass through
+  // an empty/literal value and run the action against an unrelated target.
+  const r = await b.exec('/act.fetch --name @nonexistent');
+  assert(!r.ok, 'unresolved @shortcut returns error');
+  assert(r.code === 'NOT_FOUND', `error code is NOT_FOUND (got ${r.code})`);
+  assert(r.content.includes('Unknown shortcut: @nonexistent'), 'error message identifies the unknown shortcut');
+
+  // Values starting with @ but not matching the @<slug> shape are normal
+  // strings (e.g. a comment body "@user said this"). They must pass through.
+  const r2 = await b.exec('/act.fetch --name "@user said this"');
+  assert(!r2.content.includes('Unknown shortcut'), 'multi-word "@..." values are not treated as shortcut refs');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
 await section('/info @shortcut — resolve and display', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-info-shortcut-');
   const testFile = path.join(tmpDir, 'info-shortcut.md');

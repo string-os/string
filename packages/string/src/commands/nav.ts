@@ -2,15 +2,28 @@
  * /nav command handler.
  */
 
+import type { Loader } from '../loader.js';
 import type { Session } from '../session.js';
 import type { CommandResult } from '../types.js';
+import { parseTopic } from '../types.js';
 import { renderNav, renderNavList } from '../renderer.js';
 import { ok, err } from './helpers.js';
+import { cmdOpen } from './open.js';
 
-export function cmdNav(args: string, session: Session): CommandResult {
-  const doc = session.currentDoc;
+export async function cmdNav(args: string, session: Session, loader: Loader): Promise<CommandResult> {
+  let doc = session.currentDoc;
   if (!doc) {
-    return err('No document is open in this session. Open a document first, then run /nav again.', 'INVALID_TARGET');
+    // Auto-open: see cmdAction for rationale. tab/bash/hub still error.
+    const parsed = parseTopic(session.name);
+    if (parsed?.type === 'app') {
+      const appName = parsed.namespace.split(':')[0];
+      const openResult = await cmdOpen(`app:${appName}`, session, loader);
+      if (!openResult.ok) return openResult;
+      doc = session.currentDoc;
+    }
+    if (!doc) {
+      return err('No document is open in this session. Open a document first, then run /nav again.', 'INVALID_TARGET');
+    }
   }
 
   const menuName = args.trim();

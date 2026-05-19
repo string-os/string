@@ -7,7 +7,7 @@ import type { ActionDirective } from '@string-os/core';
 import type { Loader, ActionResult } from '../loader.js';
 import type { Session } from '../session.js';
 import type { CommandResult, StringErrorCode, LoadedDocument } from '../types.js';
-import { StringError } from '../types.js';
+import { StringError, parseTopic } from '../types.js';
 import { resolve } from '../resolver.js';
 import { render, renderActions } from '../renderer.js';
 import { deriveEnvScope } from '../env-store.js';
@@ -19,6 +19,7 @@ import {
   executeResponseTemplate,
 } from './helpers.js';
 import { buildContextVars } from './context-vars.js';
+import { cmdOpen } from './open.js';
 
 /**
  * Execute an action directive with parsed flags.
@@ -117,10 +118,31 @@ export async function executeAction(
   // Resolve @shortcut in flag values. Value shortcuts (from {@var}=expr in
   // response templates) may resolve to a tuple (string[]); URI/body
   // substitution then accesses elements via {name[N]} syntax.
+  //
+  // Only resolve when the whole value matches the @<slug> shape (single token,
+  // slug chars only) — that signals intent. A value like "@user said hi" is a
+  // normal string, not a shortcut reference, and falls through unchanged.
+  // An unresolved single-token @<slug> errors out so the action doesn't run
+  // against an empty value and silently succeed against an unrelated target.
+  const SHORTCUT_REF = /^@[a-zA-Z_][\w-]*$/;
   for (const [key, val] of Object.entries(payload)) {
-    if (typeof val === 'string' && val.startsWith('@')) {
-      const resolved = session.resolveShortcut(val.slice(1));
-      if (resolved !== null) payload[key] = resolved;
+    if (typeof val === 'string' && SHORTCUT_REF.test(val)) {
+      const id = val.slice(1);
+      const resolved = session.resolveShortcut(id);
+      if (resolved === null) {
+        const doc = session.currentDoc;
+        const ids = new Set<string>([
+          ...(doc ? doc.shortcuts.keys() : []),
+          ...session.valueShortcuts.keys(),
+          ...session.autoShortcuts.keys(),
+        ]);
+        const available = [...ids];
+        const list = available.length > 0
+          ? `\nAvailable: ${available.slice(0, 12).map(k => `@${k}`).join(', ')}${available.length > 12 ? ', ...' : ''}`
+          : '\n(no shortcuts in this session yet — run a list action like /act.repo or /act.feed to register them)';
+        return err(`Unknown shortcut: ${val}${list}`, 'NOT_FOUND');
+      }
+      payload[key] = resolved;
     }
   }
 
@@ -499,8 +521,21 @@ export async function cmdAction(
   session: Session,
   loader: Loader,
 ): Promise<CommandResult> {
-  const doc = session.currentDoc;
-  if (!doc) return err('No document open. Use /open <uri> first.', 'INVALID_TARGET');
+  let doc = session.currentDoc;
+  if (!doc) {
+    // Auto-open: app sessions resolve to a canonical doc (the app's index),
+    // so a first /act after a daemon restart or fresh session shouldn't make
+    // the agent run /open separately. tab/bash/hub topics still error — they
+    // have no canonical doc to auto-open.
+    const parsed = parseTopic(session.name);
+    if (parsed?.type === 'app') {
+      const appName = parsed.namespace.split(':')[0];
+      const openResult = await cmdOpen(`app:${appName}`, session, loader);
+      if (!openResult.ok) return openResult;
+      doc = session.currentDoc;
+    }
+    if (!doc) return err('No document open. Use /open <uri> first.', 'INVALID_TARGET');
+  }
 
   const trimmed = args.trim();
 

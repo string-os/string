@@ -107,7 +107,7 @@ export async function dispatch(
   switch (cmd) {
     case 'help':    return cmdHelp(session);
     case 'open':    return cmdOpen(parsed.args, session, loader);
-    case 'nav':     return cmdNav(parsed.args, session);
+    case 'nav':     return cmdNav(parsed.args, session, loader);
     case 'act':     return cmdAction(parsed.args, session, loader);
     case 'back':    return cmdBack(session, loader);
     case 'close':   return cmdClose(session);
