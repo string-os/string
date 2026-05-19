@@ -11,7 +11,7 @@ import type { Loader } from '../loader.js';
 import type { Session } from '../session.js';
 import type { CommandResult, TopicType } from '../types.js';
 import { err, ok } from './helpers.js';
-import { renderHubPlaceholder } from './hub.js';
+import { renderHub } from './hub.js';
 import { cmdAction } from './action.js';
 import { cmdOpen, cmdBack, cmdRefresh, cmdClose } from './open.js';
 import { cmdNav } from './nav.js';
@@ -78,13 +78,13 @@ export async function dispatch(
     return dispatchBash(input, parseCommand(input), session, loader);
   }
 
-  // Hub topics: empty input shows the hub placeholder page. Other commands
+  // Hub topics: empty input shows the hub's aggregate view. Other commands
   // (/open, /info, /help, ...) still dispatch normally so the user can leave
-  // the hub. Hubs aggregate canonical instances of their kind — concrete
-  // listings and management actions land in a follow-up.
+  // the hub. Hubs render installed packages + active sessions of their kind,
+  // plus a short management cheat-sheet.
   if (topicType === 'hub' && !input.trim()) {
     const hubName = session.name;
-    return ok(renderHubPlaceholder(hubName));
+    return ok(renderHub(hubName, loader));
   }
 
   // // prefix → strip one /, treat as normal command (consistent with bash convention)

@@ -70,12 +70,33 @@ export interface LoaderOptions {
  */
 export type SessionCleanup = (predicate: (uri: string) => boolean) => string[];
 
+/**
+ * One row in a `SessionLister` result. Compact projection of Session state for
+ * hub listings — hubs render across sessions without needing the Session class.
+ */
+export interface SessionInfo {
+  name: string;
+  type: import('./types.js').TopicType;
+  namespace: string;
+  currentUri: string | null;
+  bashAlive: boolean;
+  bashCwd: string | null;
+}
+
+/**
+ * Browser-registered hook letting hub views enumerate active sessions without
+ * taking a Browser reference. Mirrors the {@link SessionCleanup} pattern.
+ */
+export type SessionLister = () => SessionInfo[];
+
 export class Loader {
   readonly home: string;
   readonly accessMode: AccessMode;
   readonly envStore: EnvStore;
   /** Set by Browser at construction. Optional — non-Browser embeddings skip. */
   sessionCleanup?: SessionCleanup;
+  /** Set by Browser at construction. Optional — non-Browser embeddings skip. */
+  sessionLister?: SessionLister;
   private readonly allowHttp: boolean;
   private readonly htmlToMarkdown: HtmlToMarkdown | null;
 

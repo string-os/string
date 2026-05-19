@@ -77,6 +77,26 @@ export class Browser {
       }
       return closed;
     };
+
+    // Hub views (e.g. /open app, /open bash) enumerate sessions through this
+    // callback. Kept parallel to sessionCleanup so non-Browser embeddings opt
+    // out cleanly.
+    this.loader.sessionLister = () => {
+      const rows = [];
+      for (const [name, session] of this.sessions) {
+        const parsed = parseTopic(name) ?? { type: 'tab' as TopicType, namespace: name };
+        const bash = session.bashSession;
+        rows.push({
+          name,
+          type: parsed.type,
+          namespace: parsed.namespace,
+          currentUri: session.currentUri,
+          bashAlive: bash?.alive ?? false,
+          bashCwd: bash?.alive ? bash.cwd : null,
+        });
+      }
+      return rows;
+    };
   }
 
   // ── Session Management ─────────────────────────────────────────────────────
