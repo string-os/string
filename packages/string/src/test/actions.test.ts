@@ -222,6 +222,8 @@ await section('CLI action execution', async () => {
 // ─── $var environment variable substitution ──────────────────────────────────
 
 await section('$var → EnvStore in action URI', async () => {
+  // Persistent env is app-scoped: /set, /open, and /act all run from the
+  // same app: topic so the action's resolveEnvVars finds the value.
   const tmpDir = fs.mkdtempSync('/tmp/string-envvar-test-');
   const testFile = path.join(tmpDir, 'env-test.md');
   fs.writeFileSync(testFile, [
@@ -233,11 +235,10 @@ await section('$var → EnvStore in action URI', async () => {
   ].join('\n'));
 
   const b = new Browser({ home: tmpDir });
-  // Set $MY_VAR via /set command (stored in EnvStore)
-  await b.exec('/set $MY_VAR = "hello-from-store"');
-  await b.exec(`/open ${testFile}`);
+  await b.exec('/set $MY_VAR = "hello-from-store"', 'app:envtest');
+  await b.exec(`/open ${testFile}`, 'app:envtest');
 
-  const r = await b.exec('/act.show --');
+  const r = await b.exec('/act.show --', 'app:envtest');
   assert(r.ok, 'env action ok');
   assert(r.content.includes('hello-from-store'), '$MY_VAR resolved from EnvStore');
 

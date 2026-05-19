@@ -43,29 +43,11 @@ await section('EnvStore — package registry CRUD', async () => {
   fs.rmSync(tmpDir, { recursive: true });
 });
 
-await section('EnvStore — registry preserves env section', async () => {
-  const tmpDir = fs.mkdtempSync('/tmp/string-registry-preserve-');
-  const store = new EnvStore(tmpDir);
-
-  // Set an env var first
-  store.set('API_KEY', 'secret123');
-  // Then set a package
-  store.setPackage('apps', 'myapp', 'file:///app.md');
-
-  // Verify both sections present
-  const configPath = path.join(tmpDir, 'config.json');
-  const config = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  assert(config.env.API_KEY === 'secret123', 'env section preserved after setPackage');
-  assert(config.apps.myapp === 'file:///app.md', 'apps section present');
-
-  // And the reverse: setting env preserves apps
-  store.set('NEW_VAR', 'val');
-  const config2 = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
-  assert(config2.apps.myapp === 'file:///app.md', 'apps section preserved after set env');
-  assert(config2.env.NEW_VAR === 'val', 'new env var added');
-
-  fs.rmSync(tmpDir, { recursive: true });
-});
+// (Previously: 'EnvStore — registry preserves env section'. Removed when env
+// moved out of config.json to apps/<app>/env.json — the registry and env now
+// live in different files, so the preservation invariant is automatic. The
+// analogous "config.json preserves other fields" test against setPackage lives
+// in env-store.test.ts.)
 
 // ─── /install, /uninstall Commands ───────────────────────────────────────────
 

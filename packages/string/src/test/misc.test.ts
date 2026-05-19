@@ -73,7 +73,9 @@ await section('/tool env validation — missing required', async () => {
 });
 
 await section('/tool env validation — with required var set', async () => {
-  // Use a temp dir and set REQUIRED_VAR via EnvStore
+  // Persistent env is app-scoped — /set + /tool both run from the same
+  // app: topic so validateEnv (which uses deriveEnvScope on session.name)
+  // can see the value.
   const tmpDir = fs.mkdtempSync('/tmp/string-env-set-');
   fs.mkdirSync(path.join(tmpDir, 'tools'));
   fs.copyFileSync(
@@ -81,10 +83,9 @@ await section('/tool env validation — with required var set', async () => {
     path.join(tmpDir, 'tools', 'env-test.md'),
   );
   const b = new Browser({ home: tmpDir });
-  // Set the required var via /set $VAR
-  await b.exec('/set $REQUIRED_VAR = "test-value"');
+  await b.exec('/set $REQUIRED_VAR = "test-value"', 'app:envtest');
 
-  const r = await b.exec('/tool:env-test');
+  const r = await b.exec('/tool:env-test', 'app:envtest');
   assert(r.ok, 'env-test passes with var set');
   assert(r.content.includes('test-value'), 'output contains env var value');
 
