@@ -208,7 +208,7 @@ async function handleRegisterUser(
   res: http.ServerResponse,
 ): Promise<void> {
   const body = await readBody(req);
-  let data: { user_id?: string; home?: string } = {};
+  let data: { user_id?: string; home?: string; allowed_paths?: string[] } = {};
   try { data = JSON.parse(body); } catch { /* ignore */ }
 
   const userId = data.user_id?.trim();
@@ -216,21 +216,37 @@ async function handleRegisterUser(
     sendJson(res, 400, { error: 'user_id required' });
     return;
   }
+
   const home = data.home?.trim();
+  const allowedPaths = Array.isArray(data.allowed_paths)
+    ? data.allowed_paths.map(p => String(p).trim()).filter(Boolean)
+    : undefined;
+  const existing = users.get(userId);
+
+  // No explicit home → "ensure exists" without clobbering a stored home.
+  // Existing user is kept as-is (home untouched); a brand-new user is
+  // auto-provisioned via the shared ensureUserAuto scheme. allowedPaths is
+  // only applied when explicitly provided.
   if (!home) {
-    sendJson(res, 400, { error: 'home required' });
+    const user = existing ?? ensureUserAuto(userId);
+    if (allowedPaths !== undefined) {
+      users.register({ ...user, allowedPaths });
+    }
+    sendJson(res, 200, { user_id: userId, home: user.home, created: !existing });
     return;
   }
 
-  const existed = users.has(userId);
+  // Explicit home → register/update. Preserve existing allowedPaths unless
+  // new ones are provided; preserve original createdAt on update.
+  const resolvedPaths = allowedPaths ?? existing?.allowedPaths ?? [];
   users.register({
     id: userId,
     home,
-    allowedPaths: [],
-    createdAt: existed ? users.get(userId)!.createdAt : new Date().toISOString(),
+    allowedPaths: resolvedPaths,
+    createdAt: existing ? existing.createdAt : new Date().toISOString(),
   });
-  log.info(existed ? 'user.update' : 'user.register', { userId, home });
-  sendJson(res, 200, { user_id: userId, home, created: !existed });
+  log.info(existing ? 'user.update' : 'user.register', { userId, home });
+  sendJson(res, 200, { user_id: userId, home, created: !existing });
 }
 
 function handleListUsers(_req: http.IncomingMessage, res: http.ServerResponse): void {

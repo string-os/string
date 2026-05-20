@@ -15,6 +15,13 @@ export interface ExecResult {
   meta: object | null;
 }
 
+export interface UserInfo {
+  id: string;
+  home: string;
+  allowedPaths: string[];
+  createdAt: string;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function request(
@@ -125,20 +132,48 @@ export async function ping(port: number): Promise<boolean> {
   }
 }
 
-/** POST /users — register or update a user. Idempotent. */
+/**
+ * POST /users — register or update a user. Idempotent.
+ *
+ * `home` is OPTIONAL: when omitted, the daemon ensures the user exists without
+ * overwriting an existing user's stored home (a brand-new user gets a derived
+ * home). Only an explicit `home` writes/updates the home. `allowedPaths`, when
+ * provided, is set on the user; otherwise existing allowedPaths are preserved.
+ */
 export async function ensureUser(
   port: number,
-  user: { id: string; home: string },
+  user: { id: string; home?: string; allowedPaths?: string[] },
 ): Promise<void> {
-  const res = await request(
-    port,
-    'POST',
-    '/users',
-    JSON.stringify({ user_id: user.id, home: user.home }),
-  );
+  const payload: { user_id: string; home?: string; allowed_paths?: string[] } = {
+    user_id: user.id,
+  };
+  if (user.home !== undefined) payload.home = user.home;
+  if (user.allowedPaths !== undefined) payload.allowed_paths = user.allowedPaths;
+
+  const res = await request(port, 'POST', '/users', JSON.stringify(payload));
   if (res.status !== 200) {
     throw new Error(`ensureUser failed (${res.status}): ${res.body}`);
   }
+}
+
+/** GET /users — list all registered users. */
+export async function listUsers(port: number): Promise<UserInfo[]> {
+  const res = await request(port, 'GET', '/users');
+  if (res.status !== 200) {
+    throw new Error(`listUsers failed (${res.status}): ${res.body}`);
+  }
+  const data = JSON.parse(res.body) as { users: UserInfo[] };
+  return data.users ?? [];
+}
+
+/** DELETE /users/:id — remove a user. Returns whether the user existed. */
+export async function deleteUser(port: number, id: string): Promise<boolean> {
+  const res = await request(port, 'DELETE', `/users/${encodeURIComponent(id)}`);
+  if (res.status !== 200) {
+    throw new Error(`deleteUser failed (${res.status}): ${res.body}`);
+  }
+  const data = JSON.parse(res.body) as { deleted?: boolean };
+  return data.deleted ?? false;
 }
 
 /** POST /exec — execute a command, parse SSE response into ExecResult. */
