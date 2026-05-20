@@ -113,6 +113,44 @@ The agent learns the verbs once and uses them everywhere. New capabilities come 
 
 ---
 
+## Install
+
+**Option A — npm (recommended)**
+
+```bash
+npm install -g @string-os/string
+string --help
+```
+
+Requires Node.js 20+. The `stringd` daemon launches automatically on first use.
+
+**Option B — from source**
+
+For contributors, or to run the latest unreleased code. Requires Node.js 20+ and [pnpm](https://pnpm.io).
+
+```bash
+git clone https://github.com/string-os/string.git
+cd string
+pnpm install
+pnpm -r --filter "./packages/*" build      # build the packages → dist/
+```
+
+Run the built CLI:
+
+```bash
+node packages/string/dist/cli.js --help
+```
+
+Or run straight from TypeScript, no build step (handy while developing):
+
+```bash
+npx tsx packages/string/src/cli.ts --help
+```
+
+To expose it as `string` on your PATH, link the built bin — e.g. `cd packages/string && npm link`, or a shim that runs `node /abs/path/to/string/packages/string/dist/cli.js "$@"`.
+
+---
+
 ## Try it
 
 ```bash
