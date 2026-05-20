@@ -2,104 +2,106 @@
 title: Quick Start
 ---
 
-Get up and running with String in 5 minutes.
+Get from `npm install` to running a real SFMD app in five minutes.
 
-## Install
+## 1. Install
 
 ```bash
 npm install -g @string-os/string
 string --help
 ```
 
-## 1. Open a Document
+Requires Node.js 20+. The daemon (`stringd`) auto-starts on first call — no
+manual start needed.
+
+## 2. Your first app
+
+Clone the cookbook (a collection of working SFMD apps) and install one:
 
 ```bash
-echo "# Hello, String" > /tmp/hello.md
-string main '/open /tmp/hello.md'
+git clone https://github.com/string-os/cookbook.git
+cd cookbook
+
+string setup '/install --app ./apps/weather/string.md'
+string app:weather '/act.now Seoul'
+# → Seoul: ☀️ +20°C ↘6km/h
 ```
 
-This starts a String daemon (if not running), creates a `main` session, and renders `/tmp/hello.md` as clean Markdown with navigation hints.
+That's the loop: **clone → install → call**. A String daemon started, the
+weather app got copied under `~/.string/users/default/packages/weather/` and
+registered, and your `/act.now` ran an HTTP `GET` declared in a Markdown file.
 
-## 2. Browse the Web
+## 3. Open a document
+
+```bash
+string main '/open ./apps/weather/string.md'
+```
+
+The runtime renders the app body as clean Markdown and prepends an
+`[actions] now, forecast, search · /act --help (all) · /act.<name> --help`
+line — the action menu an AI agent discovers automatically.
+
+For a URL:
 
 ```bash
 string docs '/open https://example.com'
 ```
 
-String fetches the URL, converts HTML to Markdown, and presents it with auto-generated shortcuts for links.
+String fetches the page, converts HTML to Markdown, and auto-generates
+`@`-shortcuts for the links it found so the agent can navigate without
+re-pasting URLs.
 
-## 3. Use a Skill
+## 4. Apps that need credentials
 
-Create a skill file `git.md`:
+Some apps declare required env vars in frontmatter:
 
-```markdown
+```yaml
 ---
-name: git
-default: run
+requires: [REPO]
 ---
-
-# Git
-
-\`\`\`act.run
-CLI git $ARGS
-\`\`\`
 ```
 
-Install and use it:
+When you `/open` such an app with the var unset, the response starts with a
+`[!] Missing required env: $REPO` hint. Set it from the app's session —
+**persistent env is app-scoped**, so a secret you `/set` for one app never
+leaks into another:
 
 ```bash
-string main '/install --tool ./git.md'
-string main '/tool:git status'
+string setup '/install --app ./apps/gh-issue/string.md'
+string app:gh-issue '/set $REPO = "string-os/string"'
+string app:gh-issue /act.repo
 ```
 
-## 4. Run Actions
-
-Install an app from the cookbook, then call one of its actions:
+For region- or account-specific keys, use a config sub-topic. They cascade
+`app:<name>:<config>` → `app:<name>`:
 
 ```bash
-git clone https://github.com/string-os/cookbook.git
-string setup '/install --app ./cookbook/apps/weather/string.md'
-string app:weather '/act.now --city "Seoul"'
+string 'app:weather:korea' '/set $WEATHER_API_KEY = "..."'
+string 'app:weather:usa'   '/set $WEATHER_API_KEY = "..."'
 ```
 
-`/open app:weather` first if you want to see the action menu (`[actions] now, forecast, search`).
+## 5. Discover what's running
 
-## 5. Use with Claude Desktop (MCP)
-
-Add to your Claude Desktop MCP config:
-
-```json
-{
-  "mcpServers": {
-    "string": {
-      "command": "string",
-      "args": ["--mcp", "--user", "claude-desktop"]
-    }
-  }
-}
+```bash
+string main /topics       # every active session, with the current doc
+string app /open          # installed apps + active app sessions
+string system /open       # daemon stats, sessions count, env-store hints
 ```
 
-The shim auto-starts `stringd` and forwards Claude's MCP calls to it. Use a distinct `--user` per MCP client so sessions and `/set` env vars stay isolated. Claude calls the single `string({topic, cmd})` tool to drive every command — the same surface as the CLI.
+The four hub topics — `app`, `bash`, `tool`, `system` — aggregate over their
+kind. Use them when you're not sure what's installed or which session is
+where.
 
-## 6. Use as a Library
+## Where to go next
 
-```typescript
-import { Browser } from '@string-os/string';
-
-const browser = new Browser({ home: process.cwd() });
-
-// Open a document
-const result = await browser.exec('/open ./index.md');
-console.log(result.content);
-
-// Execute an action
-const action = await browser.exec('/act.search --query "hello"');
-console.log(action.content);
-```
-
-## Next Steps
-
-- [Agent Integration](./agent-integration.md) — detailed integration guide
-- [Writing Skills](./writing-skills.md) — create your own tools and apps
-- [Cookbook](https://github.com/string-os/cookbook) — practical examples
-- [SFMD Specification](https://github.com/string-os/sfmd) — format spec
+- [**Writing your first app**](./writing-an-app.md) — author your own SFMD
+  app, end-to-end: response templates, credentials, multi-file layout,
+  output conventions.
+- [**Agent integration**](./agent-integration.md) — embed the runtime four
+  ways: CLI (what you just used), MCP server (Claude Desktop, Cursor),
+  TypeScript library, HTTP daemon with any-language clients.
+- [**Cookbook**](https://github.com/string-os/cookbook) — runnable examples:
+  weather, an AI social network (moltbook), GitHub issue triage, Kanban
+  over GitHub Projects, semantic search.
+- [**SFMD spec**](https://github.com/string-os/sfmd) — the format spec, for
+  parser implementors.
