@@ -17,12 +17,29 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import * as client from '@string-os/client';
 import { parseTopic, topicToString } from './types.js';
+import {
+  resolveUserId,
+  getCurrentUser,
+  setCurrentUser,
+  clearCurrentUser,
+} from './config.js';
 
 /** Derive user home directory: ~/.string/users/{userId}/ */
 function deriveHome(userId: string): string {
   const dir = path.join(os.homedir(), '.string', 'users', userId);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+/**
+ * Terse-path user provisioning: ensure the user exists WITHOUT clobbering a
+ * stored custom home. Only forwards `home` when STRINGD_HOME is explicitly set
+ * (that env still forces home for the invocation). Plain calls send no home,
+ * so the daemon keeps whatever home is already on record.
+ */
+async function ensureUserTerse(port: number, userId: string): Promise<void> {
+  const home = process.env.STRINGD_HOME?.trim();
+  await client.ensureUser(port, home ? { id: userId, home } : { id: userId });
 }
 
 // ─── ChanFlow output ─────────────────────────────────────────────────────────
@@ -70,16 +87,20 @@ async function autoStartDaemon(port: number): Promise<void> {
 
 // ─── One-shot execution ──────────────────────────────────────────────────────
 
-async function execOneShot(topic: string, body: string, json: boolean): Promise<void> {
+async function execOneShot(
+  topic: string,
+  body: string,
+  json: boolean,
+  userFlag: string | null,
+): Promise<void> {
   const port = Number(process.env.STRINGD_PORT) || 3100;
-  const userId = process.env.STRINGD_USER || 'default';
-  const home = process.env.STRINGD_HOME || deriveHome(userId);
+  const userId = resolveUserId(userFlag);
 
   if (!await client.ping(port)) {
     await autoStartDaemon(port);
   }
 
-  await client.ensureUser(port, { id: userId, home });
+  await ensureUserTerse(port, userId);
   const result = await client.exec(port, userId, topic, body);
 
   process.stdout.write(formatOutput(topic, result, json) + '\n');
@@ -88,16 +109,19 @@ async function execOneShot(topic: string, body: string, json: boolean): Promise<
 
 // ─── REPL ────────────────────────────────────────────────────────────────────
 
-async function enterRepl(topic: string, json: boolean): Promise<void> {
+async function enterRepl(
+  topic: string,
+  json: boolean,
+  userFlag: string | null,
+): Promise<void> {
   const port = Number(process.env.STRINGD_PORT) || 3100;
-  const userId = process.env.STRINGD_USER || 'default';
-  const home = process.env.STRINGD_HOME || deriveHome(userId);
+  const userId = resolveUserId(userFlag);
 
   if (!await client.ping(port)) {
     await autoStartDaemon(port);
   }
 
-  await client.ensureUser(port, { id: userId, home });
+  await ensureUserTerse(port, userId);
 
   const isTTY = process.stdin.isTTY ?? false;
 
@@ -166,12 +190,11 @@ async function enterRepl(topic: string, json: boolean): Promise<void> {
 
 async function cmdMcp(userId: string): Promise<void> {
   const port = Number(process.env.STRINGD_PORT) || 3100;
-  const home = process.env.STRINGD_HOME || deriveHome(userId);
 
   if (!await client.ping(port)) {
     await autoStartDaemon(port);
   }
-  await client.ensureUser(port, { id: userId, home });
+  await ensureUserTerse(port, userId);
 
   // Dynamic imports keep the heavy MCP SDK out of the cold-start path for
   // every CLI invocation. Only --mcp users pay the cost.
@@ -255,6 +278,126 @@ async function cmdDaemon(args: string[]): Promise<void> {
   }
 }
 
+// ─── User management ───────────────────────────────────────────────────────────
+//
+// `string user` manages the persistent user registry and the configured
+// "current user" (~/.string/config.json). Adding a user sets its home; the
+// current user is what terse `string <topic> '<cmd>'` calls resolve to when no
+// --user flag or STRINGD_USER is present.
+
+/** Parse `--home <path>` and `--allow <p1,p2>` from `string user` args. */
+function parseUserOpts(args: string[]): { home?: string; allow?: string[] } {
+  const opts: { home?: string; allow?: string[] } = {};
+  for (let i = 0; i < args.length; i++) {
+    const a = args[i];
+    if (a === '--home') opts.home = args[++i];
+    else if (a.startsWith('--home=')) opts.home = a.slice('--home='.length);
+    else if (a === '--allow') opts.allow = splitAllow(args[++i]);
+    else if (a.startsWith('--allow=')) opts.allow = splitAllow(a.slice('--allow='.length));
+  }
+  return opts;
+}
+
+function splitAllow(val?: string): string[] {
+  if (!val) return [];
+  return val.split(',').map(s => s.trim()).filter(Boolean);
+}
+
+async function ensureDaemonUp(port: number): Promise<void> {
+  if (!await client.ping(port)) {
+    await autoStartDaemon(port);
+  }
+}
+
+async function cmdUser(args: string[]): Promise<void> {
+  const port = Number(process.env.STRINGD_PORT) || 3100;
+  const sub = args[0];
+  const rest = args.slice(1);
+
+  switch (sub) {
+    case 'add': {
+      const id = rest[0];
+      if (!id) {
+        process.stderr.write('Usage: string user add <id> [--home <path>] [--allow <p1,p2,...>]\n');
+        process.exit(1);
+      }
+      const opts = parseUserOpts(rest.slice(1));
+      const home = opts.home ?? deriveHome(id);
+      await ensureDaemonUp(port);
+      await client.ensureUser(port, { id, home, allowedPaths: opts.allow ?? [] });
+      console.log(`Added user '${id}' (home: ${home})`);
+      if (opts.allow?.length) console.log(`  allowedPaths: ${opts.allow.join(', ')}`);
+      console.log(`Run \`string user use ${id}\` to make it the current user.`);
+      break;
+    }
+    case 'use': {
+      const id = rest[0];
+      if (!id) {
+        process.stderr.write('Usage: string user use <id>\n');
+        process.exit(1);
+      }
+      await ensureDaemonUp(port);
+      const exists = (await client.listUsers(port)).some(u => u.id === id);
+      setCurrentUser(id);
+      console.log(`Current user set to '${id}'.`);
+      if (!exists) {
+        console.log(`Note: user '${id}' is not registered yet — run \`string user add ${id}\` to set its home.`);
+      }
+      break;
+    }
+    case 'current': {
+      const current = getCurrentUser() ?? 'default';
+      await ensureDaemonUp(port);
+      const user = (await client.listUsers(port)).find(u => u.id === current);
+      const home = user ? user.home : '(not registered)';
+      console.log(`${current}\t${home}`);
+      break;
+    }
+    case 'list': {
+      await ensureDaemonUp(port);
+      const current = getCurrentUser();
+      const list = await client.listUsers(port);
+      if (list.length === 0) {
+        console.log('No users registered.');
+        break;
+      }
+      for (const u of list) {
+        const marker = u.id === current ? '* ' : '  ';
+        console.log(`${marker}${u.id}\t${u.home}`);
+      }
+      break;
+    }
+    case 'set-home': {
+      const id = rest[0];
+      const home = rest[1];
+      if (!id || !home) {
+        process.stderr.write('Usage: string user set-home <id> <path>\n');
+        process.exit(1);
+      }
+      await ensureDaemonUp(port);
+      await client.ensureUser(port, { id, home });
+      console.log(`Set home for '${id}' → ${home}`);
+      break;
+    }
+    case 'rm': {
+      const id = rest[0];
+      if (!id) {
+        process.stderr.write('Usage: string user rm <id>\n');
+        process.exit(1);
+      }
+      await ensureDaemonUp(port);
+      const deleted = await client.deleteUser(port, id);
+      if (getCurrentUser() === id) clearCurrentUser();
+      console.log(deleted ? `Removed user '${id}'.` : `User '${id}' did not exist.`);
+      break;
+    }
+    default:
+      process.stderr.write(`string: unknown user command: ${sub ?? ''}\n`);
+      process.stderr.write('Usage: string user <add|use|current|list|set-home|rm> ...\n');
+      process.exit(1);
+  }
+}
+
 // ─── Usage ───────────────────────────────────────────────────────────────────
 
 function printUsage(): void {
@@ -268,7 +411,24 @@ Usage:
                                        derives topic from /open app:X targets)
   string --mcp [--user <id>]           MCP stdio server (for Claude/Codex/Cursor)
   string --daemon [start|stop|status]  Daemon management
+  string user <subcommand>             Manage users / current user (see below)
   string --help                        This help
+
+User management:
+  string user add <id> [--home <path>] [--allow <p1,p2,...>]
+                                       Register a user with a home (and optional
+                                       allowed paths). Home defaults to
+                                       ~/.string/users/<id> when omitted.
+  string user use <id>                 Set the current user (in config.json)
+  string user current                  Show the current user + its home
+  string user list                     List all users (* marks the current one)
+  string user set-home <id> <path>     Change a user's home
+  string user rm <id>                  Remove a user (clears current if it was)
+
+User resolution (highest precedence first):
+  --user <id>  >  STRINGD_USER  >  config.currentUser  >  "default"
+  Set the home at add-time or via \`user set-home\`. Terse calls never reset a
+  stored home — only \`user add\`/\`set-home\` (or STRINGD_HOME) write home.
 
 Topics:
   <name>                  Free-form session (e.g. 'main', 'notes', 'research')
@@ -291,8 +451,10 @@ Flags:
 
 Environment:
   STRINGD_PORT    Daemon port (default: 3100)
-  STRINGD_USER    User ID (default: "default")
-  STRINGD_HOME    Home directory (default: ~/.string/users/{user})
+  STRINGD_USER    User ID — overrides config.currentUser (default: "default")
+  STRINGD_HOME    Home directory — forces home for this invocation
+                  (default: ~/.string/users/{user})
+  STRINGD_CONFIG  Client config path (default: ~/.string/config.json)
 `);
 }
 
@@ -329,13 +491,22 @@ if (help) {
 }
 
 if (mcp) {
-  const userId = userFlag || process.env.STRINGD_USER || 'default';
+  const userId = resolveUserId(userFlag);
   cmdMcp(userId).catch(e => {
     process.stderr.write(`string: ${e.message}\n`);
     process.exit(1);
   });
 } else if (daemon) {
   cmdDaemon(positional).catch(e => {
+    process.stderr.write(`string: ${e.message}\n`);
+    process.exit(1);
+  });
+} else if (positional[0] === 'user') {
+  // `string user <add|use|current|list|set-home|rm> ...` — user management.
+  // Intercepted before topic dispatch (note: 'user' is also a valid topic
+  // name; `string user` with no subcommand prints user usage rather than
+  // entering a 'user' REPL).
+  cmdUser(positional.slice(1)).catch(e => {
     process.stderr.write(`string: ${e.message}\n`);
     process.exit(1);
   });
@@ -381,8 +552,8 @@ if (mcp) {
   }
 
   const run = body
-    ? execOneShot(topic, body, json)
-    : enterRepl(topic, json);
+    ? execOneShot(topic, body, json, userFlag)
+    : enterRepl(topic, json, userFlag);
 
   run.catch(e => {
     process.stderr.write(`string: ${e.message}\n`);

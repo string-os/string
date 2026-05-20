@@ -21,12 +21,22 @@ export { formatDiff, formatLineNumbers } from './diff.js';
 export type { DiffOptions } from './diff.js';
 export { resolveConfig, DEFAULT_CONFIG } from './config.js';
 export type { StringConfig } from './config.js';
+export {
+  loadClientConfig,
+  saveClientConfig,
+  getCurrentUser,
+  setCurrentUser,
+  clearCurrentUser,
+  resolveUserId,
+  configPath,
+} from './config.js';
+export type { ClientConfig } from './config.js';
 export { EnvStore, deriveEnvScope } from './env-store.js';
 export type { EnvScope } from './env-store.js';
 export { installPackage } from './installer.js';
 export type { InstallResult } from './installer.js';
-export { ping, ensureUser, exec } from '@string-os/client';
-export type { ExecResult } from '@string-os/client';
+export { ping, ensureUser, exec, listUsers, deleteUser } from '@string-os/client';
+export type { ExecResult, UserInfo } from '@string-os/client';
 
 export interface BrowserOptions extends LoaderOptions {
   userId?: string;

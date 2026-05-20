@@ -12,6 +12,8 @@ import './env-store.test.js';
 import './packages.test.js';
 import './references.test.js';
 import './client.test.js';
+import './user-config.test.js';
+import './user-cli.test.js';
 import './misc.test.js';
 import { printSummary } from './runner.js';
 printSummary();
