@@ -23,6 +23,9 @@ importers:
       '@string-os/astro-sfmd':
         specifier: ^0.1.2
         version: 0.1.2(astro@6.2.2(@types/node@24.12.2)(@vercel/functions@3.6.0)(rollup@4.60.3)(tsx@4.21.0))
+      '@vercel/functions':
+        specifier: ^3.6.0
+        version: 3.6.0
       astro:
         specifier: ^6.1.9
         version: 6.2.2(@types/node@24.12.2)(@vercel/functions@3.6.0)(rollup@4.60.3)(tsx@4.21.0)
