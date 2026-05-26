@@ -25,6 +25,15 @@ export interface LoadResult {
    * file:// loads so installed apps don't carry stale hints.
    */
   displaySuffix?: string;
+  /**
+   * What transformation was applied to produce `source` from the upstream
+   * bytes. `'html-to-md'` means we fetched HTML and ran htmlToMarkdown over
+   * it — the body the agent sees is a derivative, not the site's own format.
+   * Surface this in /open output so the agent can attribute layout quirks to
+   * the conversion rather than to the site (and notice when a site DOES
+   * serve native markdown, in which case this stays undefined).
+   */
+  transform?: 'html-to-md';
 }
 
 /** A single entry in the install-manifest's files[] array. */
@@ -243,11 +252,13 @@ export class Loader {
 
     let source = await res.text();
     let rawSource: string | undefined;
+    let transform: 'html-to-md' | undefined;
 
     // Convert HTML responses if converter is available
     if (this.htmlToMarkdown && isHtmlResponse(res)) {
       rawSource = source;
       source = this.htmlToMarkdown(source, uri);
+      transform = 'html-to-md';
     }
 
     // Try to parse response as JSON
@@ -258,7 +269,7 @@ export class Loader {
       // Not JSON — leave as null
     }
 
-    return { uri, source, rawSource, status: res.status, jsonBody };
+    return { uri, source, rawSource, status: res.status, jsonBody, transform };
   }
 
   /**
@@ -459,11 +470,13 @@ export class Loader {
       // Not JSON — leave source as-is (plain markdown response)
     }
 
+    let transform: 'html-to-md' | undefined;
     if (this.htmlToMarkdown && isHtmlResponse(res)) {
       rawSource = source;
       source = this.htmlToMarkdown(source, uri);
+      transform = 'html-to-md';
     }
-    return { uri, source, rawSource, displaySuffix };
+    return { uri, source, rawSource, displaySuffix, transform };
   }
 }
 

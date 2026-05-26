@@ -202,6 +202,16 @@ export async function cmdOpen(
     // /open targets a marketplace manifest URL (pre-install browse).
     const suffix = loaded.displaySuffix ?? '';
 
+    // Surface HTML→markdown conversion so the agent can attribute layout
+    // quirks (orphan links, missing images, weird ordering) to the converter
+    // rather than to the site itself. Native markdown sources (file://, or
+    // HTTP with text/markdown content negotiation) stay silent — the
+    // asymmetry is intentional: "marker present = derivative" is one bit
+    // the agent learns once.
+    const transformNote = loaded.transform === 'html-to-md'
+      ? '\nSource: HTML auto-converted to markdown — the site does not serve text/markdown natively'
+      : '';
+
     // Default action: auto-execute if frontmatter declares one
     const defaultAction = doc.frontmatter.default as string | undefined;
     if (defaultAction && !blockId) {
@@ -209,12 +219,12 @@ export async function cmdOpen(
       if (action) {
         const actionResult = await executeAction(action, '', session, loader, buildContextVars(session, loader));
         if (actionResult.ok) {
-          return ok(`Opened ${openLabel}\n---\n${rendered}\n\n---\n\n${actionResult.content}${suffix}`);
+          return ok(`Opened ${openLabel}${transformNote}\n---\n${rendered}\n\n---\n\n${actionResult.content}${suffix}`);
         }
       }
     }
 
-    return ok(`Opened ${openLabel}\n---\n${rendered}${suffix}`);
+    return ok(`Opened ${openLabel}${transformNote}\n---\n${rendered}${suffix}`);
   } catch (e) {
     if (e instanceof StringError) {
       // Add recovery hints for common errors. URL fetch failures must steer
