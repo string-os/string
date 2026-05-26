@@ -115,7 +115,16 @@ The agent learns the verbs once and uses them everywhere. New capabilities come 
 
 ## Install
 
-**Option A — npm (recommended)**
+**Option A — Claude Code plugin (zero setup)**
+
+```
+/plugin marketplace add string-os/string
+/plugin install string@string-os
+```
+
+Two lines in Claude Code: registers the `mcp__string__string` tool (the plugin's `.mcp.json` spawns `string` via `npx`, so no separate npm install) and loads a skill that walks Claude through using it. After install, ask Claude something like *"install gh-kanban from string-os/apps and try it"* — it'll take it from there.
+
+**Option B — npm (recommended for CLI use)**
 
 ```bash
 npm install -g @string-os/string
@@ -124,7 +133,7 @@ string --help
 
 Requires Node.js 20+. The `stringd` daemon launches automatically on first use.
 
-**Option B — from source**
+**Option C — from source**
 
 For contributors, or to run the latest unreleased code. Requires Node.js 20+ and [pnpm](https://pnpm.io).
 
