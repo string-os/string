@@ -22,7 +22,7 @@ Clone the cookbook (a collection of working SFMD apps) and install one:
 git clone https://github.com/string-os/cookbook.git
 cd cookbook
 
-string setup '/install --app ./apps/weather/string.md'
+string '/install --app ./apps/weather/string.md'
 string app:weather '/act.now Seoul'
 # → Seoul: ☀️ +20°C ↘6km/h
 ```
@@ -67,7 +67,7 @@ When you `/open` such an app with the var unset, the response starts with a
 leaks into another:
 
 ```bash
-string setup '/install --app ./apps/gh-issue/string.md'
+string '/install --app ./apps/gh-issue/string.md'
 string app:gh-issue '/set $REPO = "string-os/string"'
 string app:gh-issue /act.repo
 ```

@@ -27,6 +27,15 @@ export function createHtmlToMarkdown(): HtmlToMarkdown {
   // Strip navigation chrome
   td.remove(['nav', 'footer', 'header', 'aside']);
 
+  // Drop empty <a> tags. Pages like Hacker News emit vote/flag links with no
+  // visible text — they convert to `[](?url)` markdown noise that wastes
+  // agent context without conveying anything followable. textContent covers
+  // the "anchor wraps only a tiny icon" case too: no text = no signal.
+  td.addRule('drop-empty-anchors', {
+    filter: (node) => node.nodeName === 'A' && !(node.textContent || '').trim(),
+    replacement: () => '',
+  });
+
   return (html: string, _url: string): string => {
     // Extract main content area if available
     const content = extractMainContent(html);

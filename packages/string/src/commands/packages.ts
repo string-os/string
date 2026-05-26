@@ -12,6 +12,39 @@ import { parseGithubUrl } from '../github-installer.js';
 import { ok, err, parsePosixFlags } from './helpers.js';
 import { deriveCwd } from './exec.js';
 
+const INSTALL_HELP = [
+  '/install <source>  — install an app or tool from a URL, a path, or the current document.',
+  '',
+  'Source forms:',
+  '  ./path/to/string.md                           Local single file',
+  '  ./path/to/app-dir/                            Local directory (must contain string.md)',
+  '  https://example.com/foo/string.md             Single markdown URL',
+  '  https://example.com/foo/manifest.json         Install manifest (multi-file, see runtime/install-manifest)',
+  '  https://github.com/owner/repo                 GitHub repo root — installs string.md at root if present',
+  '  https://github.com/owner/repo/tree/<ref>/<p>  GitHub directory — enumerates files via Contents API,',
+  '                                                requires string.md inside <p>',
+  '  https://github.com/owner/repo/blob/<ref>/<p>  GitHub single file — collapses to a raw URL',
+  '  gh:owner/repo[/<path>][@<ref>]                GitHub short form. Defaults to repo default branch.',
+  '  (no source)                                   Install whatever is currently open in this session',
+  '',
+  'Path rules for GitHub directory installs:',
+  '  • The pointed path must contain a string.md — that file is the package root.',
+  '  • All top-level files in the directory are staged (subdirectories skipped in v0.1).',
+  '  • Files starting with `#!` shebang get chmod +x at install time.',
+  '  • Anonymous GitHub API limit is 60 req/hr; set GITHUB_TOKEN to raise to 5000 req/hr.',
+  '',
+  'Flags:',
+  '  --app | --tool  Force package type when frontmatter is missing or wrong.',
+  '  --as <name>     Install under a custom local registry name (lets two apps that share',
+  '                  a frontmatter `name` but differ by `namespace` live side by side).',
+  '  --link          Force URL-shortcut mode — no files copied; /open re-fetches from the URL.',
+  '                  Requires an http(s) source.',
+  '  --help / -h     Show this help.',
+  '',
+  'When the source returns a JSON install manifest (`{files:[...], delivery:...}`), the daemon picks',
+  'mode (link/local) and stages files automatically — no flags needed.',
+].join('\n');
+
 // ─── /install ─────────────────────────────────────────────────────────────────
 
 export async function cmdInstall(
@@ -19,19 +52,17 @@ export async function cmdInstall(
   session: Session,
   loader: Loader,
 ): Promise<CommandResult> {
-  const parsed = parsePosixFlags(args?.trim() || '');
+  // Help is non-erroneous: pull it out before POSIX flag parsing, which would
+  // otherwise classify a bare `--help` as a parse failure and rewrap the same
+  // text under an error code.
+  const trimmedArgs = args?.trim() || '';
+  if (/(^|\s)(--help|-h)(\s|$)/.test(trimmedArgs)) {
+    return ok(INSTALL_HELP);
+  }
+
+  const parsed = parsePosixFlags(trimmedArgs);
   if (!parsed) {
-    return err(
-      'Usage: /install <source>\n' +
-      '  Install an app or tool. <source> is a URL, file path, or current document.\n' +
-      '  When <source> returns an install manifest, mode (link/local) and type are\n' +
-      '  picked automatically. Power-user overrides:\n' +
-      '    --as <name>     install under a custom local name (lets you keep two\n' +
-      '                    apps that share a name but differ by namespace)\n' +
-      '    --link          force URL-shortcut mode (no local copy)\n' +
-      '    --app | --tool  force package type when frontmatter is missing one',
-      'COMMAND_UNSUPPORTED'
-    );
+    return err(INSTALL_HELP, 'COMMAND_UNSUPPORTED');
   }
 
   // --app/--tool are boolean flags. parsePosixFlags greedily consumes the

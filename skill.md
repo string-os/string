@@ -92,31 +92,31 @@ enumerates the directory via the GitHub Contents API and installs every
 file:
 
 ```bash
-string setup '/install https://github.com/string-os/apps/tree/main/apps/gh-kanban'
+string '/install https://github.com/string-os/apps/tree/main/apps/gh-kanban'
 ```
 
 Short form (equivalent, less typing):
 
 ```bash
-string setup '/install gh:string-os/apps/apps/gh-kanban'
+string '/install gh:string-os/apps/apps/gh-kanban'
 ```
 
 Single-file app via raw or `blob` URL:
 
 ```bash
-string setup '/install https://github.com/string-os/cookbook/blob/main/apps/weather/string.md'
+string '/install https://github.com/string-os/cookbook/blob/main/apps/weather/string.md'
 ```
 
 From a local path:
 
 ```bash
-string setup '/install --app ./apps/weather/string.md'
+string '/install --app ./apps/weather/string.md'
 ```
 
 From any HTTPS URL (including install-manifest endpoints):
 
 ```bash
-string setup '/install --app https://example.com/my-app/string.md'
+string '/install --app https://example.com/my-app/string.md'
 ```
 
 The runtime copies files into `~/.string/users/default/packages/<name>/`

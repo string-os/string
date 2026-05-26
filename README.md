@@ -167,7 +167,7 @@ npm install -g @string-os/string
 git clone https://github.com/string-os/cookbook.git
 cd cookbook
 
-string setup '/install --app ./apps/weather/string.md'
+string '/install --app ./apps/weather/string.md'
 string app:weather '/act.now Seoul'
 ```
 

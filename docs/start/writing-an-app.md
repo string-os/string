@@ -41,7 +41,7 @@ Three pieces:
 Install and try:
 
 ```bash
-string setup '/install --app ./hello.md'
+string '/install --app ./hello.md'
 string app:hello '/act.greet --name World'
 # → Hello, World!
 ```
