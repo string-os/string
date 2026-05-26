@@ -1,6 +1,7 @@
 ---
 const installCommand = `npm install -g @string-os/string`;
-const skillUrl = `https://string-os.org/skill.md`;
+const skillUrl = `https://www.string-os.org/skill.md`;
+const agentInstruction = `Read ${skillUrl} and follow the instructions.`;
 
 const weatherApp = `---
 name: weather
@@ -82,14 +83,22 @@ const surfaces = [
         one interface to <b>read, navigate, act, and edit</b>
         across documents, apps, and the web.
       </p>
+
+      <div class="agent-cta hero-agent-cta">
+        <div class="agent-cta-label">Give this to your AI agent</div>
+        <div class="agent-cta-row">
+          <code class="agent-cta-text">{agentInstruction}</code>
+          <button class="agent-cta-copy" data-copy={agentInstruction} type="button" aria-label="Copy instruction to clipboard">
+            <span class="agent-cta-copy-default">Copy</span>
+            <span class="agent-cta-copy-done">Copied</span>
+          </button>
+        </div>
+      </div>
+
       <div class="cta-row">
-        <a class="cta primary" href="https://docs.string-os.org">Read the docs →</a>
+        <a class="cta secondary" href="https://docs.string-os.org">Read the docs →</a>
         <a class="cta secondary" href="https://github.com/string-os/string">GitHub</a>
       </div>
-      <a class="hero-skill" href={skillUrl}>
-        <span class="hero-skill-label">Drop this URL into your AI agent →</span>
-        <code class="hero-skill-url">{skillUrl.replace(/^https?:\/\//, '')}</code>
-      </a>
     </header>
 
     <!-- THE PATTERN — flowing prose, no eyebrow -->
@@ -149,16 +158,22 @@ const surfaces = [
 
     <!-- DROP-IN (skill.md is the primary action; direct install is the footnote) -->
     <section class="install">
-      <h2>Hand any AI agent this URL.</h2>
+      <h2>Hand any AI agent this instruction.</h2>
       <p class="body">
-        The agent reads it, installs String, and starts using apps. No SDK,
+        It reads the skill, installs String, and starts using apps. No SDK,
         no protocol negotiation, no per-agent integration code.
       </p>
 
-      <a class="skill-pointer" href={skillUrl}>
-        <div class="skill-label">Drop this URL into your AI agent →</div>
-        <code class="skill-url">{skillUrl}</code>
-      </a>
+      <div class="agent-cta install-agent-cta">
+        <div class="agent-cta-label">Copy and paste into your AI agent</div>
+        <div class="agent-cta-row">
+          <code class="agent-cta-text">{agentInstruction}</code>
+          <button class="agent-cta-copy" data-copy={agentInstruction} type="button" aria-label="Copy instruction to clipboard">
+            <span class="agent-cta-copy-default">Copy</span>
+            <span class="agent-cta-copy-done">Copied</span>
+          </button>
+        </div>
+      </div>
 
       <p class="install-direct">
         Or install directly (for humans driving String themselves):
@@ -321,29 +336,78 @@ const surfaces = [
       }
       .lede b { color: var(--fg); font-weight: 600; }
 
-      .hero-skill {
-        margin-top: 48px;
-        padding: 18px 22px;
-        background: linear-gradient(135deg, rgba(255, 180, 84, 0.08), rgba(255, 123, 84, 0.04));
-        border: 1px solid rgba(255, 180, 84, 0.3);
-        border-radius: 12px;
-        max-width: 540px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        transition: border-color 0.15s, transform 0.1s;
+      /* ── Agent CTA (copy-to-clipboard) ───────────────────────────────────
+         Used in two places: prominently in the hero (above the secondary
+         CTAs) and again in the install section. Same component, same JS
+         hook — see the bottom-of-body <script>. */
+      .agent-cta {
+        padding: 22px 26px;
+        background: linear-gradient(135deg, rgba(255, 180, 84, 0.10), rgba(255, 123, 84, 0.04));
+        border: 1px solid rgba(255, 180, 84, 0.35);
+        border-radius: 14px;
       }
-      .hero-skill:hover {
-        border-color: rgba(255, 180, 84, 0.55);
-        transform: translateY(-1px);
-      }
-      .hero-skill-label { font-size: 13px; color: var(--fg-muted); }
-      .hero-skill-url {
-        font-size: 18px;
+      .agent-cta-label {
+        font-size: 12px;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
         font-weight: 600;
         color: var(--accent);
-        font-family: "JetBrains Mono", ui-monospace, monospace;
-        word-break: break-all;
+        margin-bottom: 12px;
+      }
+      .agent-cta-row {
+        display: flex;
+        gap: 14px;
+        align-items: center;
+      }
+      .agent-cta-text {
+        flex: 1;
+        font-family: "JetBrains Mono", "SF Mono", ui-monospace, Menlo, monospace;
+        font-size: 16px;
+        line-height: 1.5;
+        color: var(--fg);
+        background: var(--code-bg);
+        padding: 14px 16px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        word-break: break-word;
+        user-select: all;
+      }
+      .agent-cta-copy {
+        flex-shrink: 0;
+        padding: 12px 22px;
+        background: var(--accent);
+        color: #1a1206;
+        border: 0;
+        border-radius: 8px;
+        font-family: inherit;
+        font-size: 15px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s, transform 0.1s;
+        min-width: 92px;
+        position: relative;
+      }
+      .agent-cta-copy:hover { background: #ffc070; transform: translateY(-1px); }
+      .agent-cta-copy:active { transform: translateY(0); }
+      .agent-cta-copy-done { display: none; }
+      .agent-cta-copy.copied .agent-cta-copy-default { display: none; }
+      .agent-cta-copy.copied .agent-cta-copy-done { display: inline; }
+
+      /* Hero variant — larger and the visual centerpiece, sits above the
+         secondary CTAs (Read docs / GitHub). */
+      .hero-agent-cta {
+        margin: 40px 0 32px;
+        max-width: 720px;
+        padding: 24px 28px;
+        background: linear-gradient(135deg, rgba(255, 180, 84, 0.13), rgba(255, 123, 84, 0.05));
+        border-color: rgba(255, 180, 84, 0.5);
+        box-shadow: 0 6px 24px rgba(255, 123, 84, 0.10);
+      }
+      .hero-agent-cta .agent-cta-text { font-size: 17px; padding: 16px 18px; }
+
+      @media (max-width: 620px) {
+        .agent-cta-row { flex-direction: column; align-items: stretch; }
+        .agent-cta-copy { width: 100%; }
       }
 
       /* ── Flow prose (no eyebrow, just paragraphs that lead from hero) ──── */
@@ -462,27 +526,10 @@ const surfaces = [
       pre.code.terminal { color: var(--fg-muted); }
       pre.code code { font-size: 13px; }
 
-      /* ── Skill pointer (primary CTA on the install section) ─────────────── */
-      .skill-pointer {
-        display: block;
+      /* Install-section variant uses the .agent-cta base; just give it spacing. */
+      .install-agent-cta {
         margin: 8px 0 28px;
-        padding: 26px 32px;
-        background: linear-gradient(135deg, rgba(255, 180, 84, 0.1), rgba(255, 123, 84, 0.05));
-        border: 1px solid rgba(255, 180, 84, 0.4);
-        border-radius: 14px;
-        max-width: 640px;
-        transition: border-color 0.15s, transform 0.1s;
-      }
-      .skill-pointer:hover {
-        border-color: rgba(255, 180, 84, 0.65);
-        transform: translateY(-1px);
-      }
-      .skill-label { color: var(--fg-muted); font-size: 14px; margin-bottom: 10px; }
-      .skill-url {
-        font-size: clamp(18px, 2.2vw, 26px);
-        color: var(--accent);
-        font-weight: 600;
-        word-break: break-all;
+        max-width: 720px;
       }
 
       /* Direct-install footnote on the install section */
@@ -581,5 +628,21 @@ const surfaces = [
       /* Selection */
       ::selection { background: var(--accent); color: #1a1206; }
     </style>
+
+    <script is:inline>
+      // Copy-to-clipboard for [data-copy] buttons. Event-delegated so multiple
+      // copy buttons share one listener. Shows "Copied" for 1500ms via a CSS
+      // class toggle on the button.
+      document.addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-copy]');
+        if (!btn) return;
+        const text = btn.getAttribute('data-copy');
+        if (!text || !navigator.clipboard) return;
+        navigator.clipboard.writeText(text).then(() => {
+          btn.classList.add('copied');
+          setTimeout(() => btn.classList.remove('copied'), 1500);
+        }).catch(() => { /* clipboard blocked — text is still selectable */ });
+      });
+    </script>
   </body>
 </html>
