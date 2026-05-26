@@ -108,11 +108,21 @@ export function cmdInfo(args: string, session: Session, loader: Loader): Command
   if (session.currentBlockId) lines.push(`block:     #${session.currentBlockId}`);
   if (doc.blockIds.length > 0) lines.push(`blocks:    ${doc.blockIds.join(', ')}`);
   if (doc.menus.size > 0) lines.push(`menus:     ${[...doc.menus.keys()].join(', ')}`);
-  const shortcutCount = doc.shortcuts.size + session.autoShortcuts.size;
-  if (shortcutCount > 0) {
-    const parts = [...doc.shortcuts.keys()].map(k => `@${k}`);
-    if (session.autoShortcuts.size > 0) parts.push(`+${session.autoShortcuts.size} auto`);
-    lines.push(`shortcuts: ${parts.join(', ')}`);
+  // Enumerate shortcut names so an agent reading /info can call them
+  // directly with `/open @<name>`. Auto-shortcuts get listed alongside
+  // author-defined ones — for the caller the distinction is academic, the
+  // invocation shape is the same. Long lists cap at 12 + a "+N more" tail
+  // so a 50-link page doesn't blow up the info block.
+  const allShortcuts = [
+    ...[...doc.shortcuts.keys()].map(k => `@${k}`),
+    ...[...session.autoShortcuts.keys()].map(k => `@${k}`),
+  ];
+  if (allShortcuts.length > 0) {
+    const cap = 12;
+    const shown = allShortcuts.slice(0, cap).join(', ');
+    const more = allShortcuts.length - cap;
+    const tail = more > 0 ? `, +${more} more (${allShortcuts.length} total)` : '';
+    lines.push(`shortcuts: ${shown}${tail}`);
   }
   if (doc.actions.length > 0) lines.push(`actions:   ${doc.actions.map(a => `${a.id}(${a.method.toUpperCase()})`).join(', ')}`);
   if (doc.rawSource) lines.push(`source:    converted from HTML (use /source to view original)`);

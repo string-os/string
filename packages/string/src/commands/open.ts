@@ -217,10 +217,30 @@ export async function cmdOpen(
     return ok(`Opened ${openLabel}\n---\n${rendered}${suffix}`);
   } catch (e) {
     if (e instanceof StringError) {
-      // Add recovery hints for common errors
+      // Add recovery hints for common errors. URL fetch failures must steer
+      // the caller toward URL-shaped alternatives (re-check the URL, use a
+      // shortcut from the current page) — the generic /ls workspace hint is
+      // misleading when the failing target is a remote resource.
       let hint = '';
       if (e.code === 'NOT_FOUND') {
-        hint = '\nRecovery: Use /ls to list available files, or check the path spelling.';
+        const isUrl = uri.startsWith('http://') || uri.startsWith('https://');
+        if (isUrl) {
+          const currentDoc = session.currentDoc;
+          const pageNames = currentDoc ? [...currentDoc.shortcuts.keys()] : [];
+          const autoNames = [...session.autoShortcuts.keys()];
+          const all = [...pageNames, ...autoNames];
+          if (all.length > 0) {
+            const cap = 8;
+            const shown = all.slice(0, cap).map(n => `@${n}`).join(', ');
+            const more = all.length - cap;
+            const tail = more > 0 ? `, +${more} more (run /info)` : '';
+            hint = `\nRecovery: Verify the URL, or use a shortcut from the current page: ${shown}${tail}`;
+          } else {
+            hint = '\nRecovery: Verify the URL spelling, scheme, and path. Use /info to see shortcuts on the current page.';
+          }
+        } else {
+          hint = '\nRecovery: Use /ls to list available files, or check the path spelling.';
+        }
       }
       return err(e.message + hint, e.code);
     }
