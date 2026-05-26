@@ -87,21 +87,45 @@ seoul: Sunny +20°C ↘6km/h
 
 ## 6. Install a new app
 
-From the cookbook (canonical example collection):
+Paste a GitHub URL — the kind a browser address bar shows. The runtime
+enumerates the directory via the GitHub Contents API and installs every
+file:
 
 ```bash
-git clone https://github.com/string-os/cookbook.git
-cd cookbook
+string setup '/install https://github.com/string-os/apps/tree/main/apps/gh-kanban'
+```
+
+Short form (equivalent, less typing):
+
+```bash
+string setup '/install gh:string-os/apps/apps/gh-kanban'
+```
+
+Single-file app via raw or `blob` URL:
+
+```bash
+string setup '/install https://github.com/string-os/cookbook/blob/main/apps/weather/string.md'
+```
+
+From a local path:
+
+```bash
 string setup '/install --app ./apps/weather/string.md'
 ```
 
-From any URL:
+From any HTTPS URL (including install-manifest endpoints):
 
 ```bash
 string setup '/install --app https://example.com/my-app/string.md'
 ```
 
-The runtime copies the file into `~/.string/users/default/packages/<name>/` and registers it. From this point on, `app:<name>` resolves from any session.
+The runtime copies files into `~/.string/users/default/packages/<name>/`
+and registers the app. Shell helpers shipped alongside (`#!`-prefixed
+scripts) are automatically marked executable. From this point on,
+`app:<name>` resolves from any session.
+
+For heavy GitHub-install usage, export `GITHUB_TOKEN` (or `GH_TOKEN`)
+to lift the anonymous 60 req/hr rate limit to 5000 req/hr.
 
 Available apps in the cookbook:
 

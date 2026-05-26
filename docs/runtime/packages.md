@@ -80,10 +80,34 @@ title: Packages
 /install --tool ./translate.md          # 명시적으로 도구
 /install https://example.com/a.md       # 단일 마크다운 URL
 /install https://hub.example/api/install/cookbook/weather  # install manifest URL
+/install https://github.com/owner/repo/tree/main/apps/foo   # GitHub 디렉토리 (다중 파일 자동)
+/install https://github.com/owner/repo/blob/main/apps/foo/string.md  # GitHub 단일 파일
+/install gh:owner/repo/apps/foo         # 위와 동일, 단축형 (기본 브랜치)
+/install gh:owner/repo/apps/foo@v1.0    # 태그/브랜치/SHA 지정
 /install --link https://hub.example/api/install/cookbook/weather  # URL 단축키로 등록 (로컬 복사 X)
 /install --as weather-2 ./other.md      # 로컬 이름 강제 지정
 /install                                # 현재 열린 문서를 설치
 ```
+
+### GitHub URL 설치
+
+브라우저 주소창에서 복사한 GitHub URL을 그대로 받는다. 디렉토리(`tree`)
+URL이면 GitHub Contents API로 파일 목록을 가져와 메모리상의 install
+manifest를 합성하고, 단일 파일(`blob`) URL이면 raw URL로 변환해 단일 파일
+경로를 그대로 탄다. `gh:owner/repo[/path][@ref]` 단축형도 같은 처리.
+
+자동 동작:
+- 디렉토리 안의 최상위 파일 전부 stage (서브디렉토리는 v1에서 미수집 —
+  필요하면 publisher가 명시 manifest 작성).
+- 파일이 shebang(`#!`)으로 시작하면 staging 시 자동으로 `chmod +x`. 셸
+  헬퍼 스크립트가 CLI action에서 그대로 호출 가능.
+- `path` 위치에 `string.md`가 없으면 "not a String app" 에러 — 디렉토리
+  내용 목록도 같이 보여줘 사용자가 잘못 가리킨 위치를 바로 확인.
+
+익명 GitHub API rate limit은 IP당 60 req/hr. 한 번 설치는 보통 2~3 호출.
+한도 늘리려면 `GITHUB_TOKEN` (또는 `GH_TOKEN`) 환경변수를 export — `gh
+auth token` 출력값이나 PAT 둘 다 동작 (5000 req/hr).
+
 
 **동작:**
 1. 소스를 로드 (로컬 파일, 단일 markdown URL, 또는 install manifest URL — [install-manifest.md](./install-manifest.md))

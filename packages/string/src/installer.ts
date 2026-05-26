@@ -8,6 +8,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import type { Loader } from './loader.js';
 import { resolve } from './resolver.js';
+import { parseGithubUrl, synthesizeGithubSource } from './github-installer.js';
 
 export interface InstallResult {
   name: string;
@@ -94,20 +95,35 @@ export async function installPackage(
     throw new Error('--link requires an http(s) URL source.');
   }
 
-  // Directory source → look for string.md (the App/Tool root marker)
+  // GitHub URL shortcut: recognize browser-bar URLs (tree/blob) and `gh:` short
+  // form, then enumerate via the Contents API and synthesize an in-memory
+  // install manifest. The rest of the installer reuses the manifest pipeline
+  // unchanged. Single-file (`blob`) URLs collapse to a raw URL and fall
+  // through to the normal HTTP load.
   let loadSource = source;
-  try {
-    const localPath = source.startsWith('file://')
-      ? new URL(source).pathname
-      : (path.isAbsolute(source) ? source : path.resolve(loader.home, source));
-    const stat = await fs.stat(localPath);
-    if (stat.isDirectory()) {
-      loadSource = path.join(localPath, 'string.md');
+  let loaded: import('./loader.js').LoadResult;
+  const ghParsed = parseGithubUrl(source);
+  if (ghParsed) {
+    const ghResult = await synthesizeGithubSource(ghParsed, loader);
+    if ('singleFileRawUrl' in ghResult) {
+      loadSource = ghResult.singleFileRawUrl;
+      loaded = await loader.load(loadSource);
+    } else {
+      loaded = ghResult;
     }
-  } catch { /* not a local path or doesn't exist — let loader handle it */ }
-
-  // Load and resolve the document
-  const loaded = await loader.load(loadSource);
+  } else {
+    // Directory source → look for string.md (the App/Tool root marker)
+    try {
+      const localPath = source.startsWith('file://')
+        ? new URL(source).pathname
+        : (path.isAbsolute(source) ? source : path.resolve(loader.home, source));
+      const stat = await fs.stat(localPath);
+      if (stat.isDirectory()) {
+        loadSource = path.join(localPath, 'string.md');
+      }
+    } catch { /* not a local path or doesn't exist — let loader handle it */ }
+    loaded = await loader.load(loadSource);
+  }
   const doc = await resolve(loaded.uri, loaded.source, loader);
 
   // Determine type: explicit flag > frontmatter > error
@@ -313,6 +329,13 @@ export async function installPackage(
             content = await r.text();
           }
           await fs.writeFile(dest, content, 'utf-8');
+          // Shebang detection: if the file starts with `#!`, mark it executable
+          // so CLI actions can invoke it directly (e.g. `CLI ./helper {arg}`).
+          // Local-file installs already preserve mode; this covers manifest
+          // installs where the source has no transferable file mode.
+          if (content.startsWith('#!')) {
+            await fs.chmod(dest, 0o755);
+          }
         }
       }
     }

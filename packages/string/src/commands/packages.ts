@@ -8,6 +8,7 @@ import type { Loader } from '../loader.js';
 import type { Session } from '../session.js';
 import type { CommandResult } from '../types.js';
 import { installPackage } from '../installer.js';
+import { parseGithubUrl } from '../github-installer.js';
 import { ok, err, parsePosixFlags } from './helpers.js';
 import { deriveCwd } from './exec.js';
 
@@ -90,8 +91,12 @@ export async function cmdInstall(
     source = uri;
   }
 
-  // Resolve source path relative to cwd (file:// URIs and URLs pass through)
-  const resolvedSource = source.includes('://') || path.isAbsolute(source)
+  // Resolve source path relative to cwd. URL-shaped sources pass through:
+  //   - http(s)://… and file://…  (the `://` check)
+  //   - github web URLs (caught by the `://` check above)
+  //   - gh:owner/repo[/path] short form (no `://`; check explicitly)
+  // Everything else is treated as a local path relative to cwd.
+  const resolvedSource = source.includes('://') || path.isAbsolute(source) || parseGithubUrl(source)
     ? source
     : path.resolve(deriveCwd(session, loader), source);
 
