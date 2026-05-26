@@ -44,9 +44,9 @@ A **topic** is the session label and scopes session state (current document, his
 | `app:<name>` | Running an installed app |
 | `app:<name>:<config>` | Same app with a config-scoped env (e.g. `app:weather:seoul` for region-specific API key) |
 | `bash:<name>` | Persistent shell session |
-| `app`, `bash`, `tool`, `system` | Reserved hub topics — placeholder pages in 0.1; listings and management actions arrive in 0.2 |
+| `app`, `bash`, `tool`, `system` | Hub topics — `/open` each for a one-call view: `app` lists installed apps + open app sessions, `tool` lists installed tools, `bash` lists active shells, `system` shows daemon + home stats. Each page ends with the management commands for its kind. |
 
-Same topic = same state. Reserved hub names cannot be used as free-form labels.
+Same topic = same state. The four hub names cannot be used as free-form labels.
 
 ## 4. Open an app and discover its actions
 

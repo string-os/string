@@ -125,7 +125,9 @@ mcp__string__string({ topic: "main", cmd: "/exec ls -la" })
 
 The shell runs as the OS user that launched the daemon. The cwd is the user's String home (`~/.string/users/claude-code-plugin/`), **not** the user's repo cwd — see §10.
 
-## 8. Discover what's possible in any topic
+## 8. Discover what's possible
+
+**Topic-local** — what's in front of you:
 
 | Call | Purpose |
 |---|---|
@@ -133,6 +135,18 @@ The shell runs as the OS user that launched the daemon. The cwd is the user's St
 | `/help` | Top-level command reference. |
 | `/act --help` | List every action on the current document with its schema. |
 | `/ls [path]` | List files in the String home. |
+
+**Global** — what exists across the whole runtime, via the four **hub topics**.
+One `/open` on a hub gives you an aggregated view + the management commands
+for that kind. Use these when the user asks something open-ended like *"what
+apps do I have?"* or *"is the daemon up?"* before guessing.
+
+| Call | What you get |
+|---|---|
+| `mcp__string__string({ topic: "app",    cmd: "/open" })` | Installed apps + open app sessions + install/uninstall commands |
+| `mcp__string__string({ topic: "tool",   cmd: "/open" })` | Installed tools + run/manage commands |
+| `mcp__string__string({ topic: "bash",   cmd: "/open" })` | Active bash sessions + how to spawn one |
+| `mcp__string__string({ topic: "system", cmd: "/open" })` | Home dir, daemon stats, env scope, session counts |
 
 ## 9. Common error codes and what to do
 
