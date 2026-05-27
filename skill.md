@@ -4,7 +4,7 @@ title: String — Install Skill for AI Agents
 
 # Install String (skill for AI agents)
 
-You are reading this to learn how to install String and call SFMD apps from any shell tool. Follow these steps in order.
+You are reading this to learn how to install String and call String apps from any shell tool. Follow these steps in order.
 
 ## 1. Install
 

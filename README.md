@@ -124,6 +124,15 @@ The agent learns the verbs once and uses them everywhere. New capabilities come 
 
 Two lines in Claude Code: registers the `mcp__string__string` tool (the plugin's `.mcp.json` spawns `string` via `npx`, so no separate npm install) and loads a skill that walks Claude through using it. After install, ask Claude something like *"install gh-kanban from string-os/apps and try it"* — it'll take it from there.
 
+**Codex CLI plugin** (same idea, parallel `.codex-plugin/` manifest in the same repo):
+
+```bash
+codex plugin marketplace add string-os/string
+codex plugin install string@string-os
+```
+
+Skills and MCP config are shared between the two manifests — one source, two runtimes.
+
 **Option B — npm (recommended for CLI use)**
 
 ```bash
@@ -197,7 +206,7 @@ Add a feature once — it works in all four paths.
 
 The structural differences matter more than the protocol differences:
 
-- **vs MCP.** Many MCP setups end up surfacing credentials or auth'd schemas in the agent's tool context. SFMD apps in String default to app-scoped env vars — credentials don't pass through the agent. The app itself still uses the key, so app trust still matters in v0.1.
+- **vs MCP.** Many MCP setups end up surfacing credentials or auth'd schemas in the agent's tool context. String apps in String default to app-scoped env vars — credentials don't pass through the agent. The app itself still uses the key, so app trust still matters in v0.1.
 - **vs llms.txt.** Read-only. SFMD declares executable actions as first-class.
 - **vs SKILL.md.** A skill is per-agent-runtime instruction. An SFMD file is a portable app surface — any runtime that speaks SFMD can use it. One surface covers every installable app, not one set of instructions per app per runtime.
 

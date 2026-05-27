@@ -1,5 +1,5 @@
 ---
-description: Use SFMD apps, web pages, and shell sessions through the `mcp__string__string` tool. Invoke when the user asks to (a) install a String/SFMD app from a GitHub URL or path, (b) use an installed app like `app:weather`, `app:moltbook`, `app:gh-kanban`, (c) read a web page as clean markdown via `Accept: text/markdown`, (d) run a typed action with `/act.<name>`, (e) set an app credential with `/set $VAR`, or (f) anything else that mentions SFMD, `string-os`, `app:<name>`, `/act`, or installing from `gh:owner/repo`.
+description: Use String apps, web pages, and shell sessions through the `mcp__string__string` tool. Invoke when the user asks to (a) install a String app from a GitHub URL or path, (b) use an installed app like `app:weather`, `app:moltbook`, `app:gh-kanban`, (c) read a web page as clean markdown via `Accept: text/markdown`, (d) run a typed action with `/act.<name>`, (e) set an app credential with `/set $VAR`, or (f) anything else that mentions SFMD, `string-os`, `app:<name>`, `/act`, or installing from `gh:owner/repo`.
 ---
 
 # Using String

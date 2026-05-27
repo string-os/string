@@ -22,7 +22,7 @@ The CLI auto-starts a daemon process. Multiple commands share the same session s
 | Topic | Use Case |
 |--------|----------|
 | `name` | Tab — free-form session for files, web, mixed |
-| `app:name` | Installed SFMD apps (canonical) |
+| `app:name` | Installed String apps (canonical) |
 | `bash:name` | Interactive shell sessions (canonical) |
 | `app`, `bash`, `tool`, `system` | Reserved hub aggregators |
 

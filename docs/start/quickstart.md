@@ -2,7 +2,7 @@
 title: Quick Start
 ---
 
-Get from `npm install` to running a real SFMD app in five minutes.
+Get from `npm install` to running a real String app in five minutes.
 
 ## 1. Install
 
@@ -16,7 +16,7 @@ manual start needed.
 
 ## 2. Your first app
 
-Clone the cookbook (a collection of working SFMD apps) and install one:
+Clone the cookbook (a collection of working String apps) and install one:
 
 ```bash
 git clone https://github.com/string-os/cookbook.git

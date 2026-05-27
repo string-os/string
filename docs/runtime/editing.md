@@ -4,7 +4,7 @@ title: Editing
 
 String is not read-only. AI creates, modifies, and manages documents
 as a core part of its workflow — writing reports, updating configs,
-building SFMD apps, maintaining notes.
+building String apps, maintaining notes.
 
 This section covers how AI edits documents through String.
 
@@ -557,7 +557,7 @@ Revised total: $45,000
 /open ~/docs/proposal.md#budget
 ```
 
-### Build an SFMD app
+### Build an String app
 
 ```
 # 1. Create the nav file
@@ -604,7 +604,7 @@ GET https://api.example.com/search
 ```
 ```
 
-AI creates a multi-page SFMD app — nav file, pages, action specs,
+AI creates a multi-page String app — nav file, pages, action specs,
 response templates — all through String's editing commands.
 
 ---

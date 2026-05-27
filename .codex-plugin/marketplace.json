@@ -12,7 +12,7 @@
     {
       "name": "string",
       "source": "./",
-      "description": "The String runtime as a Claude Code plugin. Installs the `string` MCP server (via npx — no manual install) and a skill that walks Claude through installing apps, calling actions, browsing pages as markdown, and recovering from errors.",
+      "description": "The String runtime as a Codex plugin. Installs the `string` MCP server (via npx — no manual install) and a skill that walks Codex through installing apps, calling actions, browsing pages as markdown, and recovering from errors.",
       "version": "0.1.5",
       "author": {
         "name": "H1R AI",
