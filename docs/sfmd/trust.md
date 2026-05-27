@@ -111,5 +111,5 @@ A runtime MAY:
 ## References
 
 - [String runtime SECURITY.md](https://github.com/string-os/string/blob/main/SECURITY.md)
-- [SFMD spec overview](./01-overview.md)
-- [Actions (`/act.*` grammar)](./06-actions.md)
+- [SFMD spec overview](./overview.md)
+- [Actions (`/act.*` grammar)](./actions.md)

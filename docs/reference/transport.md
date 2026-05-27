@@ -38,7 +38,7 @@ app                      hub (reserved bare name)
 Bare names are tabs. Canonical topics carry an explicit `app:` or
 `bash:` prefix. The bare names `app`, `bash`, `tool`, `system` are
 reserved as hub aggregators. Empty/absent topics default to the tab
-`main`. See [04-topics.md](./04-topics.md).
+`main`. See [Topics](../runtime/topics.md).
 
 ---
 

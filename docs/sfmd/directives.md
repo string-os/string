@@ -47,7 +47,7 @@ The file referenced by a nav directive contains shortcut lines:
 [@guide Blocks Guide](../guide/blocks.md)
 ```
 
-Each line is a shortcut (see [05-shortcuts.md](./05-shortcuts.md)).
+Each line is a shortcut (see [Shortcuts](./shortcuts.md)).
 Paths are relative to the menu file's own location.
 
 A menu file SHOULD contain only shortcut lines. Other content is
