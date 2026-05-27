@@ -1,12 +1,7 @@
 {
   "name": "string-os",
-  "owner": {
-    "name": "string-os",
-    "url": "https://github.com/string-os"
-  },
-  "metadata": {
-    "description": "String — a universal surface for AI agent work. String apps, web pages, and shell sessions through one MCP tool.",
-    "version": "0.1.5"
+  "interface": {
+    "displayName": "String OS"
   },
   "plugins": [
     {
@@ -15,16 +10,10 @@
         "source": "local",
         "path": "./"
       },
-      "description": "The String runtime as a Codex plugin. Installs the `string` MCP server (via npx — no manual install) and a skill that walks Codex through installing apps, calling actions, browsing pages as markdown, and recovering from errors.",
-      "version": "0.1.5",
-      "author": {
-        "name": "H1R AI",
-        "url": "https://h1r.ai"
+      "policy": {
+        "installation": "AVAILABLE"
       },
-      "homepage": "https://string-os.org",
-      "license": "MIT",
-      "keywords": ["mcp", "sfmd", "markdown", "agent", "runtime", "apps"],
-      "category": "workflow"
+      "category": "Productivity"
     }
   ]
 }
