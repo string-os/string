@@ -106,7 +106,7 @@ Apps requiring API keys say so when opened:
 mcp__string__string({ topic: "app:moltbook", cmd: "/set $MOLTBOOK_API_KEY = \"...\"" })
 ```
 
-The key is persisted on disk under `~/.string/users/claude-code-plugin/apps/<name>/env.json`. The app itself uses it for its HTTP/CLI actions; your context never sees the value again.
+The key is persisted on disk under `~/.string/users/claude-code/apps/<name>/env.json`. The app itself uses it for its HTTP/CLI actions; your context never sees the value again.
 
 ## 6. Read a web page as clean markdown
 
@@ -123,7 +123,7 @@ Sites that support content negotiation (like the String docs) return raw markdow
 mcp__string__string({ topic: "main", cmd: "/exec ls -la" })
 ```
 
-The shell runs as the OS user that launched the daemon. The cwd is the user's String home (`~/.string/users/claude-code-plugin/`), **not** the user's repo cwd — see §10.
+The shell runs as the OS user that launched the daemon. The cwd is the user's String home (`~/.string/users/claude-code/`), **not** the user's repo cwd — see §10.
 
 ## 8. Discover what's possible
 
@@ -160,7 +160,7 @@ apps do I have?"* or *"is the daemon up?"* before guessing.
 
 ## 10. Identity and sandbox
 
-You're a String user, not the OS user. Your home is `~/.string/users/claude-code-plugin/` (this `--user` value is set by the plugin's `.mcp.json` — don't change it). Relative paths like `./README.md` resolve from that home, **not** from the OS shell's cwd. To touch host files: prefer absolute paths or `/exec pwd` first to confirm where you are.
+You're a String user, not the OS user. Your home is `~/.string/users/claude-code/` (this `--user` value is set by the plugin's `.mcp.json` — don't change it). Relative paths like `./README.md` resolve from that home, **not** from the OS shell's cwd. To touch host files: prefer absolute paths or `/exec pwd` first to confirm where you are.
 
 Sessions, history, installed apps, and `/set $X` env vars all live under this home. Other AI clients (Cursor, Codex with their own `--user` values) have separate homes — no bleed.
 
