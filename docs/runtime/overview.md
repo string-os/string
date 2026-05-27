@@ -88,11 +88,8 @@ cookbook lives in its own repository: [`string-os/cookbook`](https://github.com/
 
 | # | Guide | Scenario |
 |---|-------|----------|
-| 0 | [CLI Quick Start](https://github.com/string-os/cookbook/blob/main/00-cli-quickstart.md) | Install `string` and run your first command |
-| 1 | [Document Editing](https://github.com/string-os/cookbook/blob/main/01-editing.md) | Create, edit, undo, commit, and version a document |
-| 2 | [Web Browsing](https://github.com/string-os/cookbook/blob/main/02-web-browsing.md) | Research multiple sites, manage tabs, compile findings |
-| 3 | [Single-Page App](https://github.com/string-os/cookbook/blob/main/03-single-page-app.md) | One-file weather app — all /act, no navigation |
-| 4 | [Multi-Page App](https://github.com/string-os/cookbook/blob/main/04-multi-page-app.md) | Multi-file weather app — /open to move, /act to do |
-| 5 | [Multi-Topic Workflows](https://github.com/string-os/cookbook/blob/main/05-multi-topic.md) | API docs→code, email→report, build+changelog |
-| 6 | [CLI App](https://github.com/string-os/cookbook/blob/main/06-cli-app.md) | Wrap a shell CLI as an SFMD action surface |
-| 7 | [Cross-Agent Portability](https://github.com/string-os/cookbook/blob/main/07-portability.md) | One file, three AI agents, same behavior |
+| 1 | [Weather](https://github.com/string-os/cookbook/blob/main/00-weather.md) | Simplest example, end to end. Start here. |
+| 2 | [Anatomy](https://github.com/string-os/cookbook/blob/main/01-anatomy.md) | The weather app dissected — why it's shaped this way. |
+| 3 | [Compare](https://github.com/string-os/cookbook/blob/main/02-compare.md) | MCP, function calling, and a String app — compared. |
+| 4 | [Client Library](https://github.com/string-os/cookbook/blob/main/03-client-library.md) | The `@string-os/client` API and the single-tool pattern. |
+| 5 | [Porting (Nano Banana Pro)](https://github.com/string-os/cookbook/blob/main/04-porting-nano-banana-pro.md) | Porting the Gemini Image API into a String app, end to end. |
