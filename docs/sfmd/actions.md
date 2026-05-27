@@ -586,7 +586,7 @@ GET https://api.example.com/search?key=$API_KEY
   q: string (required)
 ```
 
-See [07-variables.md](./07-variables.md) for variable syntax rules.
+See [Variables](./variables.md) for variable syntax rules.
 
 ---
 

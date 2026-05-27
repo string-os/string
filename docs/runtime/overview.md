@@ -62,19 +62,19 @@ agent work* — see [string-os.org](https://string-os.org).
 
 | # | Document | What it covers |
 |---|----------|----------------|
-| 1 | [Why String](./01-why.md) | The problem, the vision, and why AI needs its own OS |
-| 2 | [The Model](./02-the-model.md) | Context hierarchy, SFMD principles, command surface |
-| 3 | [The AI Loop](./03-the-ai-loop.md) | How an AI agent discovers, navigates, and acts |
-| 4 | [Topics](./04-topics.md) | Sessions, typed topics (tab, app, bash, hub) |
-| 5 | [Actions](./05-actions.md) | Action definition, invocation, response templates |
-| 6 | [State](./06-state.md) | Variables, secrets, session state, configuration |
-| 7 | [Navigation](./07-navigation.md) | /open, /nav, menus, shortcuts, history |
-| 8 | [Authoring](./08-authoring.md) | How to write SFMD documents |
-| 9 | [Editing](./09-editing.md) | Creating and modifying documents through String |
-| 10 | [Errors](./10-errors.md) | Error codes, format, and handling |
-| 11 | [Transport](./11-transport.md) | ChanFlow channel tags, AI ↔ String communication |
-| 12 | [Response Format](./12-response-format.md) | Response structure and formatting |
-| 13 | [Tools](./13-tools.md) | /tool invocation, cmd blocks, tool vs app |
+| 1 | [Why String](./why.md) | The problem, the vision, and why AI needs its own OS |
+| 2 | [The Model](./model.md) | Context hierarchy, SFMD principles, command surface |
+| 3 | [The AI Loop](./ai-loop.md) | How an AI agent discovers, navigates, and acts |
+| 4 | [Topics](./topics.md) | Sessions, typed topics (tab, app, bash, hub) |
+| 5 | [Actions](./actions.md) | Action definition, invocation, response templates |
+| 6 | [State](./state.md) | Variables, secrets, session state, configuration |
+| 7 | [Navigation](./navigation.md) | /open, /nav, menus, shortcuts, history |
+| 8 | [Authoring](./authoring.md) | How to write SFMD documents |
+| 9 | [Editing](./editing.md) | Creating and modifying documents through String |
+| 10 | [Errors](./errors.md) | Error codes, format, and handling |
+| 11 | [Transport](../reference/transport.md) | ChanFlow channel tags, AI ↔ String communication |
+| 12 | [Response Format](../reference/response-format.md) | Response structure and formatting |
+| 13 | [Tools](./tools.md) | /tool invocation, cmd blocks, tool vs app |
 | 14 | [Packages](./packages.md) | `/install`, `/uninstall`, registry, multi-file apps, namespace identity |
 | 15 | [Install Manifest](./install-manifest.md) | JSON contract for HTTP-source installs |
 

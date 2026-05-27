@@ -171,7 +171,7 @@ String returns an error listing available actions.
 
 **For apps:** `/open` loads the document and runs the default action.
 AI sees document content + action result combined (separated by
-`---`). See [Actions — Default action](./05-actions.md) for details.
+`---`). See [Actions — Default action](./actions.md) for details.
 
 ### Response templates
 
