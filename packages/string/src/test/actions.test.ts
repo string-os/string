@@ -1137,3 +1137,113 @@ await section('Positional args — optional fields bind in declaration order', a
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+// ─── Multiline argument values ───────────────────────────────────────────────
+// Regression: parseCommand split a command into a first-line header + body
+// (for /write etc.), so a quoted value spanning newlines (e.g. /act.post -c
+// "line1\nline2") lost everything after the first newline. Real bug: Moltbook
+// posts only got their first paragraph. These verify multiline survives intact.
+
+const ECHO_APP = [
+  '```act.echo',
+  "CLI printf '%s' {content}",
+  '  content, -c: string (required) "body"',
+  '```',
+].join('\n');
+
+// Spin up a one-shot HTTP server that captures the request body.
+async function captureBodyServer(): Promise<{ port: number; body: () => string; close: () => void }> {
+  const http = await import('http');
+  let received = '';
+  const server = http.createServer((req, res) => {
+    let b = '';
+    req.on('data', c => (b += c));
+    req.on('end', () => { received = b; res.writeHead(200, { 'Content-Type': 'application/json' }); res.end('{"ok":true}'); });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+  return { port, body: () => received, close: () => server.close() };
+}
+
+await section('Multiline — CLI action keeps every line', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-ml-cli-');
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), ECHO_APP);
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+
+  const r = await b.exec('/act.echo -c "alpha\nbeta\ngamma"');
+  assert(r.ok, 'multiline CLI ok');
+  assert(r.content.includes('alpha'), 'line 1 present');
+  assert(r.content.includes('beta'), 'line 2 present (dropped before fix)');
+  assert(r.content.includes('gamma'), 'line 3 present (dropped before fix)');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Multiline — HTTP default JSON body preserves newlines', async () => {
+  const srv = await captureBodyServer();
+  const tmpDir = fs.mkdtempSync('/tmp/string-ml-http-');
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '```act.post',
+    `POST http://127.0.0.1:${srv.port}/p -H "Content-Type: application/json"`,
+    '  content, -c: string (required) "body"',
+    '```',
+  ].join('\n'));
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+  await b.exec('/act.post -c "alpha\nbeta\ngamma"');
+  srv.close();
+
+  const parsed = JSON.parse(srv.body());
+  assert(parsed.content === 'alpha\nbeta\ngamma', 'default-serialized body has all 3 lines as real newlines');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Multiline — inline -d JSON template preserves newlines', async () => {
+  const srv = await captureBodyServer();
+  const tmpDir = fs.mkdtempSync('/tmp/string-ml-d-');
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '```act.post',
+    `POST http://127.0.0.1:${srv.port}/p -H "Content-Type: application/json" -d '{"content":"{content}"}'`,
+    '  content, -c: string (required) "body"',
+    '```',
+  ].join('\n'));
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+  await b.exec('/act.post -c "alpha\nbeta"');
+  srv.close();
+
+  const parsed = JSON.parse(srv.body());
+  assert(parsed.content === 'alpha\nbeta', '-d template content escaped to real newlines');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Multiline — unicode + internal spaces intact', async () => {
+  const srv = await captureBodyServer();
+  const tmpDir = fs.mkdtempSync('/tmp/string-ml-uni-');
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '```act.post',
+    `POST http://127.0.0.1:${srv.port}/p -H "Content-Type: application/json"`,
+    '  content, -c: string (required) "body"',
+    '```',
+  ].join('\n'));
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+  await b.exec('/act.post -c "한글 첫 줄\n  들여쓴 둘째 줄"');
+  srv.close();
+
+  const parsed = JSON.parse(srv.body());
+  assert(parsed.content === '한글 첫 줄\n  들여쓴 둘째 줄', 'unicode + internal leading spaces + newline preserved');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Single-line value still works (multiline-fix regression)', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-sl-');
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), ECHO_APP);
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+  const r = await b.exec('/act.echo -c "just one line"');
+  assert(r.ok && r.content.includes('just one line'), 'single-line preserved');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
