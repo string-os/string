@@ -50,15 +50,22 @@ function parseCommand(input: string): ParsedCommand {
     const body = trimmed.slice(firstNewline + 1); // Preserve exact body content
 
     if (header.startsWith('/')) {
-      const [cmd, ...rest] = header.slice(1).split(/\s+/);
-      return { cmd, args: rest.join(' '), body };
+      // Preserve raw args (don't collapse internal whitespace via split/join).
+      const after = header.slice(1);
+      const sp = after.search(/\s/);
+      const cmd = sp === -1 ? after : after.slice(0, sp);
+      const args = sp === -1 ? '' : after.slice(sp + 1).trimStart();
+      return { cmd, args, body };
     }
   }
 
-  // Single-line format: split by whitespace
+  // Single-line format
   if (trimmed.startsWith('/')) {
-    const [cmd, ...rest] = trimmed.slice(1).split(/\s+/);
-    return { cmd, args: rest.join(' ') };
+    const after = trimmed.slice(1);
+    const sp = after.search(/\s/);
+    const cmd = sp === -1 ? after : after.slice(0, sp);
+    const args = sp === -1 ? '' : after.slice(sp + 1).trimStart();
+    return { cmd, args };
   }
 
   // Plain content (no slash command)
@@ -104,11 +111,19 @@ export async function dispatch(
 
   const cmd = parsed.cmd.toLowerCase();
 
+  // parseCommand splits a command into a first-line header and a multiline body
+  // (designed for /write etc.). For actions/tools, a quoted value can legitimately
+  // span newlines (e.g. /act.post -c "line1\nline2"), so re-attach the body to the
+  // args. parsePosixFlags keeps newlines inside quotes, so multiline values survive.
+  const actionArgs = parsed.body !== undefined
+    ? `${parsed.args}\n${parsed.body}`
+    : parsed.args;
+
   switch (cmd) {
     case 'help':    return cmdHelp(session);
     case 'open':    return cmdOpen(parsed.args, session, loader);
     case 'nav':     return cmdNav(parsed.args, session, loader);
-    case 'act':     return cmdAction(parsed.args, session, loader);
+    case 'act':     return cmdAction(actionArgs, session, loader);
     case 'back':    return cmdBack(session, loader);
     case 'close':   return cmdClose(session);
     case 'refresh': return cmdRefresh(session, loader);
@@ -129,15 +144,15 @@ export async function dispatch(
       const dotMatch = cmd.match(/^act\.([a-zA-Z0-9_-]+)$/);
       if (dotMatch) {
         const actionId = dotMatch[1];
-        const actionArgs = parsed.args ? `${actionId} ${parsed.args}` : actionId;
-        return cmdAction(actionArgs, session, loader);
+        const dotArgs = actionArgs ? `${actionId} ${actionArgs}` : actionId;
+        return cmdAction(dotArgs, session, loader);
       }
       // Tool routing: /tool:name or /tool:name.act
       const toolMatch = cmd.match(/^tool:([a-zA-Z0-9_-]+)(?:\.([a-zA-Z0-9_-]+))?$/);
       if (toolMatch) {
         const toolName = toolMatch[1];
         const subAction = toolMatch[2];
-        return cmdTool(toolName, subAction, parsed.args, session, loader);
+        return cmdTool(toolName, subAction, actionArgs, session, loader);
       }
       return err(`Unknown command: /${parsed.cmd}\nUse /info to see available commands.`, 'COMMAND_UNSUPPORTED');
     }
