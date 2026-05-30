@@ -147,20 +147,26 @@ export async function executeAction(
   }
 
   // Fill missing fields with default values
+  const defaultedKeys = new Set<string>();
   for (const field of action.fields) {
     if (field.defaultValue !== undefined && !(field.name in payload)) {
       payload[field.name] = field.defaultValue;
+      defaultedKeys.add(field.name);
     }
   }
 
-  // Resolve $VAR refs that appear in default values. This pass runs *before*
-  // URI/body substitution so `$VAR` doesn't get URL-encoded (`$` → `%24`),
-  // which would defeat the later resolveEnvVars pass on the URI. Lets authors
+  // Resolve $VAR refs that appear in field DEFAULT values. Runs *before* URI/body
+  // substitution so `$VAR` doesn't get URL-encoded (`$` → `%24`). Lets authors
   // write `city: string = "$CITY"` and have the env var land naturally.
-  // Only acts on string-typed payload entries (tuples, numbers untouched).
+  //
+  // SECURITY: only AUTHOR-defined defaults are env-resolved. Caller/AI-provided
+  // values are literal data — a `$VAR` inside user content (e.g. a post body)
+  // must NEVER be expanded, or secrets leak into the payload. So skip any key the
+  // caller supplied; only touch `defaultedKeys`.
   const earlyEnvScope = deriveEnvScope(session.name);
   const earlyUnresolved = new Set<string>();
   for (const k of Object.keys(payload)) {
+    if (!defaultedKeys.has(k)) continue;
     const v = payload[k];
     if (typeof v === 'string' && v.includes('$')) {
       const resolved = resolveEnvVars(v, loader, earlyEnvScope, extraEnv);
@@ -201,7 +207,11 @@ export async function executeAction(
   // Substitute {var} and $var in action URI (path params)
   // Track which fields were consumed by URI substitution (skip required validation for these)
   const consumedByUri = new Set<string>();
-  let resolvedUri = action.uri;
+  // Resolve the author's $VAR in the URI/command TEMPLATE up front — before any
+  // caller {field} values are substituted in. Caller values are then inserted
+  // literal and never env-resolved (SECURITY: a $VAR inside a caller value must
+  // not expand to a secret, even for CLI commands).
+  let resolvedUri = resolveEnvVars(action.uri, loader, earlyEnvScope, extraEnv);
 
   const isCli = action.method === 'cli';
 
@@ -269,9 +279,9 @@ export async function executeAction(
   );
   // Delete payload entries consumed by URI substitution (after replace pass).
   for (const k of uriConsumedFromPayload) delete payload[k];
-  // $var substitution in URI — resolved from extraEnv → EnvStore
+  // URI $VAR was already resolved on the template above (before field
+  // substitution), so caller-provided values are never env-expanded here.
   const envScope = deriveEnvScope(session.name);
-  resolvedUri = resolveEnvVars(resolvedUri, loader, envScope, extraEnv);
 
   // Resolve headers: {var} and $var substitution
   const resolvedHeaders: Record<string, string> = {};
@@ -305,12 +315,17 @@ export async function executeAction(
   // and backslashes don't break the resulting JSON. `$var` env refs are
   // also resolved (extraEnv → env-store → process.env).
   let resolvedBody: string | undefined;
+  let resolvedBodyTemplate: string | undefined;
   if (action.body !== undefined && !isCli) {
-    // Use the input snapshot — URI substitution may have deleted fields that
-    // the body template still wants to reference (e.g. `{reply[0]}` in URI
-    // path AND `{reply[1]}` in body for a tuple-shaped input).
-    resolvedBody = substituteBodyTemplate(action.body, inputFields, session);
-    resolvedBody = resolveEnvVars(resolvedBody, loader, envScope, extraEnv);
+    // Separate env substitution from caller-value insertion (SECURITY): resolve
+    // the author's $VAR in the body TEMPLATE first, THEN substitute caller
+    // {field} values — which are never env-resolved. A $VAR that appears inside
+    // a caller-provided value (e.g. an API-key string typed into a post body)
+    // stays literal and never expands to the real secret.
+    // Use the input snapshot — URI substitution may have deleted fields the body
+    // still references (e.g. `{reply[0]}` in URI AND `{reply[1]}` in body).
+    resolvedBodyTemplate = resolveEnvVars(action.body, loader, envScope, extraEnv);
+    resolvedBody = substituteBodyTemplate(resolvedBodyTemplate, inputFields, session);
   }
 
   // Detect unresolved $VAR before sending HTTP requests. A literal $NAME
@@ -325,8 +340,11 @@ export async function executeAction(
   for (const v of Object.values(resolvedHeaders)) {
     for (const m of v.matchAll(unresolvedVarRe)) unresolvedVars.add(m[1]);
   }
-  if (resolvedBody) {
-    for (const m of resolvedBody.matchAll(unresolvedVarRe)) unresolvedVars.add(m[1]);
+  // Scan the body TEMPLATE (before caller values were inserted): caller-provided
+  // values may legitimately contain `$WORD` text that must not be flagged here
+  // (nor resolved), so only the author template is checked for unset env vars.
+  if (resolvedBodyTemplate) {
+    for (const m of resolvedBodyTemplate.matchAll(unresolvedVarRe)) unresolvedVars.add(m[1]);
   }
   if (unresolvedVars.size > 0) {
     const names = [...unresolvedVars];
