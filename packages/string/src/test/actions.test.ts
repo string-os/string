@@ -1247,3 +1247,65 @@ await section('Single-line value still works (multiline-fix regression)', async 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+// ─── SECURITY: env vars resolve only in author templates, never in caller values ──
+// Regression for the incident where `$MOLTBOOK_API_KEY` typed into a post body was
+// expanded to the real key and published. Caller/AI-provided values must stay literal.
+
+await section('SECURITY: $VAR in file content stays literal; author-template $VAR resolves', async () => {
+  // Reproduces the real incident: a file whose CONTENT contains `$SECRET`, inlined
+  // via {content|file}. The author's own `$SECRET` in the template must resolve;
+  // the file content's `$SECRET` must stay literal (never expand to the secret).
+  const srv = await captureBodyServer();
+  const tmpDir = fs.mkdtempSync('/tmp/string-sec-file-');
+  const draft = path.join(tmpDir, 'draft.md');
+  fs.writeFileSync(draft, 'leak test: $SECRET must stay literal');
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '```act.post',
+    `POST http://127.0.0.1:${srv.port}/p -H "Content-Type: application/json" -d '{"author":"$SECRET","body":"{content|file}"}'`,
+    '  content, -c: path (required) "draft file path"',
+    '```',
+  ].join('\n'));
+  const b = new Browser({ home: tmpDir });
+  await b.exec('/set $SECRET = "REAL-SECRET-VALUE"', 'app:sectest');
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`, 'app:sectest');
+  const r = await b.exec(`/act.post -c ${draft}`, 'app:sectest');
+  srv.close();
+  const raw = srv.body();
+  assert(raw.length > 0, `server received a body (exec ok=${r.ok}, content=${JSON.stringify(r.content).slice(0, 200)})`);
+  const parsed = JSON.parse(raw);
+  assert(parsed.author === 'REAL-SECRET-VALUE', 'author-template $SECRET resolves (env is set)');
+  assert(parsed.body === 'leak test: $SECRET must stay literal', 'file-content $SECRET stays literal');
+  assert(!String(parsed.body).includes('REAL-SECRET-VALUE'), 'real secret NOT leaked into file-sourced content');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('SECURITY: bare $var in a caller arg is rejected', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-sec-arg-');
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), ECHO_APP);
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+  const r = await b.exec('/act.echo -c "$SECRET"');
+  assert(!r.ok, 'bare $var in caller arg is rejected (not silently expanded)');
+  assert(r.content.includes('cannot be used in command arguments'), 'clear guard message');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Field default $VAR still resolves (author-controlled, regression)', async () => {
+  const srv = await captureBodyServer();
+  const tmpDir = fs.mkdtempSync('/tmp/string-def-var-');
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '```act.post',
+    `POST http://127.0.0.1:${srv.port}/p -H "Content-Type: application/json" -d '{"tag":"{tag}"}'`,
+    '  tag, -t: string "label" = "$DEFAULT_TAG"',
+    '```',
+  ].join('\n'));
+  const b = new Browser({ home: tmpDir });
+  await b.exec('/set $DEFAULT_TAG = "resolved-from-store"', 'app:deftest');
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`, 'app:deftest');
+  await b.exec('/act.post', 'app:deftest');  // no --tag → default (references $DEFAULT_TAG) used
+  srv.close();
+  const parsed = JSON.parse(srv.body());
+  assert(parsed.tag === 'resolved-from-store', 'author field-default $VAR still resolves from store');
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
