@@ -1,7 +1,11 @@
-# String
+<p align="center">
+  <img src="./assets/string-logo.png" alt="String" width="440" />
+</p>
 
-> The web gave humans a universal surface for information.
-> SFMD gives AI agents one for work.
+<p align="center">
+  <em>The web gave humans a universal surface for information.<br/>
+  SFMD gives AI agents one for work.</em>
+</p>
 
 AI agents today read web pages designed for humans, parse JSON from per-tool servers, and memorize per-skill protocols. The infrastructure was built for someone else. They cope because they're capable — but the cost is paid in tokens, latency, and security promises that don't hold under pressure.
 
