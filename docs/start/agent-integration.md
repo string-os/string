@@ -27,8 +27,13 @@ The CLI auto-starts `stringd` on first use. Default daemon port is `3923`.
 Advanced isolation:
 
 ```bash
-string --agent codex-reviewer main '/info'
+string agent add reviewer --home /home/alice/crew/reviewer
+STRING_AGENT_ID=reviewer string main '/info'
 ```
+
+`--agent reviewer` is equivalent for one command. Prefer `STRING_AGENT_ID` when
+you launch a long-running AI session and want every CLI and MCP call in that
+process to use the same agent.
 
 ## 2. MCP
 
@@ -53,16 +58,29 @@ This exposes one MCP tool:
 
 Advanced isolation:
 
+Keep the MCP server name as `string` so the tool id stays stable, then select
+the agent when launching the AI client:
+
 ```json
 {
   "mcpServers": {
     "string": {
       "command": "npx",
-      "args": ["-y", "@string-os/string", "--mcp", "--agent", "claude-research"]
+      "args": ["-y", "@string-os/string", "--mcp"]
     }
   }
 }
 ```
+
+```bash
+string agent add claude-research --home /home/alice/crew/claude-research
+STRING_AGENT_ID=claude-research claude
+```
+
+For Claude Code, this keeps the visible tool id as `mcp__string__string`.
+Registering separate MCP server names such as `string-claude-research` changes
+the tool id and is only useful when one AI session must see several String
+agents at the same time.
 
 ## 3. TypeScript Library
 

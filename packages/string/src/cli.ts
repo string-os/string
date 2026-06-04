@@ -451,8 +451,8 @@ Flags:
 Environment:
   STRING_PORT        Daemon port (default: 3923)
   STRING_AGENT_ID    Agent ID — overrides config.currentAgent (default: "default")
-  STRING_HOME        Home directory — forces home for this invocation
-                  (default: ~/.string/agents/{agent})
+  STRING_HOME        One-shot home override for this invocation
+                  (normal setup: string agent add <id> --home <path>)
   STRING_CONFIG  Client config path (default: ~/.string/config.json)
 `);
 }

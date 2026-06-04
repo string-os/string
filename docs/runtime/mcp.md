@@ -55,23 +55,47 @@ Same shape:
 
 That is enough for the common single-agent setup. String uses the `default` agent automatically.
 
-### Custom agent id
+### Multiple Claude Code sessions
 
-Only set an agent id when you intentionally want separate homes, installed apps,
-history, and `/set $X` values for different AI clients or roles:
+Keep the MCP server name stable (`string`) and select the String agent through
+the Claude Code process environment. This keeps Claude Code's tool id stable as
+`mcp__string__string` while each session gets its own String home.
+
+Register the MCP server once:
 
 ```json
 {
   "mcpServers": {
     "string": {
       "command": "string",
-      "args": ["--mcp", "--agent", "codex-reviewer"]
+      "args": ["--mcp"]
     }
   }
 }
 ```
 
-The equivalent environment variable is `STRING_AGENT_ID`.
+Map each agent id to a home once:
+
+```bash
+string agent add leo --home /home/ubuntu/crew/leo
+string agent add reviewer --home /home/ubuntu/crew/reviewer
+```
+
+Then start each Claude Code session with a different environment:
+
+```bash
+STRING_AGENT_ID=leo claude
+STRING_AGENT_ID=reviewer claude
+```
+
+Avoid registering separate MCP server names like `string-leo` unless you need
+multiple String agents visible in the same Claude Code session. Claude Code
+includes the server name in the tool id (`mcp__<server-name>__string`), so a
+stable server name makes skills and prompts easier to reuse.
+
+For a fixed project-level or client-level agent, `string --mcp --agent <id>` is
+still supported. Prefer `STRING_AGENT_ID` when the agent varies by launched
+session.
 
 ---
 
@@ -155,6 +179,11 @@ Every request carries an agent identity:
 - HTTP: `X-Agent-Id` header
 
 Each agent has a private home at `~/.string/agents/{id}/`. Sessions, history, installed apps, and `/set $X` env vars are scoped to that home.
+
+Set a custom home with `string agent add <id> --home <path>` or
+`string agent set-home <id> <path>`. Do this once, then select the agent by id
+from CLI or MCP sessions. `STRING_HOME` exists as a one-shot override for
+debugging and launch wrappers; it is not the normal multi-agent setup.
 
 Unknown agents are auto-registered on first call — no separate provisioning step.
 

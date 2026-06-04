@@ -10,7 +10,7 @@
  *  - agent add <id> --home X --allow a,b  → agents.json has X + allowedPaths
  *  - agent use <id>                       → config.currentAgent = id
  *  - terse exec resolves the current agent (no flags) and does NOT clobber home
- *  - --agent default overrides the current agent
+ *  - STRING_AGENT_ID and --agent override the current agent
  *  - agent current / list reflect state
  *  - set-home updates home; rm removes + clears current
  *  - allowedPaths preserved across a home-only update (clobber fix, P1)
@@ -50,9 +50,13 @@ function makeEnv(): Env {
 }
 
 /** Run the CLI synchronously with the given args + isolated env. */
-function runCli(env: Env, args: string[]): { code: number; stdout: string; stderr: string } {
+function runCli(
+  env: Env,
+  args: string[],
+  extraEnv: NodeJS.ProcessEnv = {},
+): { code: number; stdout: string; stderr: string } {
   const r = spawnSync('npx', ['tsx', CLI, ...args], {
-    env: env.base,
+    env: { ...env.base, ...extraEnv },
     encoding: 'utf-8',
     timeout: 30_000,
   });
@@ -130,6 +134,18 @@ await section('agent CLI — add/use/current + clobber fix (e2e)', async () => {
     // leo's home is still intact after the default call.
     assert(readAgents(env).find(u => u.id === 'leo')!.home === leoHome,
       'leo home intact after --agent default');
+
+    // STRING_AGENT_ID selects a different registered agent for the whole process.
+    const mayaHome = path.join(env.dataDir, 'mayahome');
+    const addMaya = runCli(env, ['agent', 'add', 'maya', '--home', mayaHome]);
+    assert(addMaya.code === 0, 'agent add maya exits 0');
+    const asMaya = runCli(env, ['main', '/help'], { STRING_AGENT_ID: 'maya' });
+    assert(asMaya.code === 0 || asMaya.code === 1, 'STRING_AGENT_ID maya call ran');
+    agents = readAgents(env);
+    assert(agents.find(u => u.id === 'maya')!.home === mayaHome,
+      'STRING_AGENT_ID uses maya without clobbering its home');
+    assert(readConfig(env).currentAgent === 'leo',
+      'STRING_AGENT_ID call does not change config.currentAgent');
 
     // agent list marks the current agent.
     const list = runCli(env, ['agent', 'list']);

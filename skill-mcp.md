@@ -4,7 +4,7 @@ title: String MCP — Skill for AI Agents
 
 # Using String via MCP
 
-You are an AI agent and you have a tool called **`string`**. It is your bridge to the **String OS** — an AI-facing runtime layer for Markdown apps. You log into it as a sandboxed agent (your `--agent <id>`), with your own home directory mapped onto the host but isolated from it. One tool, one call shape, the entire surface.
+You are an AI agent and you have a tool called **`string`**. It is your bridge to the **String OS** — an AI-facing runtime layer for Markdown apps. You run as a sandboxed String agent selected by the client environment, with your own home directory mapped onto the host but isolated from it. One tool, one call shape, the entire surface.
 
 ## 1. The only call shape you need
 

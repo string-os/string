@@ -169,7 +169,7 @@ apps do I have?"* or *"is the daemon up?"* before guessing.
 
 You're a String agent, not the OS user. Your home is `~/.string/agents/default/` . Relative paths like `./README.md` resolve from that home, **not** from the OS shell's cwd. To touch host files: prefer absolute paths or `/exec pwd` first to confirm where you are.
 
-Sessions, history, installed apps, and `/set $X` env vars all live under this home. Other AI clients (Cursor, Codex with their own `--agent` values) have separate homes — no bleed.
+Sessions, history, installed apps, and `/set $X` env vars all live under this home. Other AI clients or launched sessions can use separate homes by setting `STRING_AGENT_ID` before they start; homes are mapped with `string agent add <id> --home <path>`.
 
 ## 11. Mental model in one paragraph
 
