@@ -1,6 +1,6 @@
 {
   "name": "@string-os/string",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "description": "String runtime — an OS for AI agents, built on SFMD",
   "type": "module",
   "exports": {
@@ -17,7 +17,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsc",
+    "build": "rm -rf dist && tsc",
     "prepack": "pnpm build",
     "dev": "tsx src/cli.ts",
     "test": "tsx src/test/index.ts"
