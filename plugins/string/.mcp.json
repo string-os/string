@@ -1,1 +1,8 @@
-../../.mcp.json
+{
+  "mcpServers": {
+    "string": {
+      "command": "npx",
+      "args": ["-y", "@string-os/string", "--mcp"]
+    }
+  }
+}

@@ -31,7 +31,7 @@ const TOOL_DESCRIPTION = [
   'Run a String command in a topic. Topic is `main`, `app:NAME`, ',
   '`app:NAME:CONFIG`, or `bash:NAME`. `cmd` must start with `/`. ',
   'Examples: `/open ./doc.md`, `/act.search --q "..."`, `/exec "ls -la"`. ',
-  'To discover what is available in a topic, run `/info` or `/act --help`.',
+  'To discover what is available, run `/help`, `/info`, or `/act --help`.',
 ].join('');
 
 const inputSchema = {

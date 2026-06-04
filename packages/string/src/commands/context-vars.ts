@@ -5,7 +5,7 @@
  * Sits above the app's own env store in the lookup chain. Never reads
  * process.env: apps must not see OS-level environment vars.
  *
- * `HOME` is the *String* per-user home (`~/.string/users/{userId}`), not
+ * `HOME` is the *String* per-agent home (`~/.string/agents/{agentId}`), not
  * the OS process's HOME.
  */
 

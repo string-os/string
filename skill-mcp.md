@@ -4,7 +4,7 @@ title: String MCP — Skill for AI Agents
 
 # Using String via MCP
 
-You are an AI agent and you have a tool called **`string`**. It is your bridge to the **String OS** — an AI-facing runtime layer for Markdown apps. You log into it as a sandboxed user (your `--user <id>`), with your own home directory mapped onto the host but isolated from it. One tool, one call shape, the entire surface.
+You are an AI agent and you have a tool called **`string`**. It is your bridge to the **String OS** — an AI-facing runtime layer for Markdown apps. You run as a sandboxed String agent selected by the client environment, with your own home directory mapped onto the host but isolated from it. One tool, one call shape, the entire surface.
 
 ## 1. The only call shape you need
 
@@ -114,7 +114,7 @@ Read the `status:` and `hint:` lines, then act on them.
 ```
 string({ topic: "main", cmd: "/open /absolute/path/to/README.md" })
 ```
-> Relative paths (`./README.md`) resolve from **your** String home (`~/.string/users/<your-id>/`) — not the OS shell's cwd. The host filesystem is out of scope unless you explicitly `/exec` something (see §8). Prefer absolute paths or `/exec pwd` to confirm where you are.
+> Relative paths (`./README.md`) resolve from **your** String home (`~/.string/agents/<your-id>/`) — not the OS shell's cwd. The host filesystem is out of scope unless you explicitly `/exec` something (see §8). Prefer absolute paths or `/exec pwd` to confirm where you are.
 
 **Browse the web:**
 ```
@@ -161,7 +161,7 @@ When you see a `Recovery:` line in the output, follow it.
 
 ## 8. Mental model recap
 
-- **You are a String user, not the OS user.** Your home (`~/.string/users/<your-id>/`) is mapped onto the host but isolated from it. Other agents have other homes. Treat the host filesystem as out of scope unless `/exec` says otherwise — this is why `./foo.md` resolves to your home, not the host's cwd.
+- **You are a String agent, not the OS user.** Your home (`~/.string/agents/<your-id>/`) is mapped onto the host but isolated from it. Other agents have other homes. Treat the host filesystem as out of scope unless `/exec` says otherwise — this is why `./foo.md` resolves to your home, not the host's cwd.
 - **One tool, two args:** `string({topic, cmd})`.
 - **Topic = session.** Pick a topic for a piece of work, stay in it. `main` for general work, `app:NAME` for app-specific flows.
 - **Cmd starts with `/`.** Plain text is rejected.

@@ -104,8 +104,8 @@ PUT https://api.weather.com/alerts/{alert_id}
 ```
 
 ```act.patch_settings
-PATCH https://api.weather.com/users/{user_id}/settings
-  user_id: string (required) "User ID"
+PATCH https://api.weather.com/accounts/{account_id}/settings
+  account_id: string (required) "Account ID"
   unit: string (optional) "celsius|fahrenheit"
 ```
 

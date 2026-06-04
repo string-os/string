@@ -9,5 +9,22 @@
   "homepage": "https://string-os.org",
   "repository": "https://github.com/string-os/string",
   "license": "MIT",
-  "keywords": ["mcp", "sfmd", "markdown", "agent", "runtime", "apps"]
+  "keywords": ["mcp", "sfmd", "markdown", "agent", "runtime", "apps"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "String",
+    "shortDescription": "Use String apps, pages, and shell sessions through one MCP tool.",
+    "longDescription": "String gives Codex one small command surface for installable SFMD apps, markdown pages, web pages, and shell sessions. The bundled MCP server exposes a single `string` tool with `topic` and `cmd` arguments.",
+    "developerName": "H1R AI",
+    "category": "Productivity",
+    "capabilities": ["MCP", "Skills", "Apps"],
+    "websiteURL": "https://string-os.org",
+    "defaultPrompt": [
+      "Use String to open https://docs.string-os.org/runtime/mcp",
+      "Install a String app from GitHub and try it",
+      "Use String to inspect the current app sessions"
+    ],
+    "brandColor": "#111827"
+  }
 }

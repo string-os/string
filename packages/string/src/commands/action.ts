@@ -120,7 +120,7 @@ export async function executeAction(
   // substitution then accesses elements via {name[N]} syntax.
   //
   // Only resolve when the whole value matches the @<slug> shape (single token,
-  // slug chars only) — that signals intent. A value like "@user said hi" is a
+  // slug chars only) — that signals intent. A value like "@agent said hi" is a
   // normal string, not a shortcut reference, and falls through unchanged.
   // An unresolved single-token @<slug> errors out so the action doesn't run
   // against an empty value and silently succeed against an unrelated target.
@@ -160,7 +160,7 @@ export async function executeAction(
   // write `city: string = "$CITY"` and have the env var land naturally.
   //
   // SECURITY: only AUTHOR-defined defaults are env-resolved. Caller/AI-provided
-  // values are literal data — a `$VAR` inside user content (e.g. a post body)
+  // values are literal data — a `$VAR` inside agent content (e.g. a post body)
   // must NEVER be expanded, or secrets leak into the payload. So skip any key the
   // caller supplied; only touch `defaultedKeys`.
   const earlyEnvScope = deriveEnvScope(session.name);
@@ -590,7 +590,7 @@ export async function cmdAction(
   }
 
   // App actions get the same context vars as tools — $CWD, $HOME (String
-  // per-user home), $CURRENT_FILE/URI/TARGET/BLOCK, $ARGS. These are
+  // per-agent.home), $CURRENT_FILE/URI/TARGET/BLOCK, $ARGS. These are
   // daemon-defined, computed per call, and isolated from process.env. Apps
   // never see OS-level env vars.
   return executeAction(action, flagStr, session, loader, buildContextVars(session, loader, flagStr));

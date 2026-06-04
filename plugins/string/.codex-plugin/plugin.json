@@ -1,1 +1,30 @@
-../../../.codex-plugin/plugin.json
+{
+  "name": "string",
+  "description": "Use String apps and the web through one MCP tool. Install an app from a GitHub URL, read pages as markdown, run typed actions on documents — the whole String runtime exposed as a single `mcp__string__string` tool, with a skill that teaches Codex when and how to use it.",
+  "version": "0.1.6",
+  "author": {
+    "name": "H1R AI",
+    "url": "https://h1r.ai"
+  },
+  "homepage": "https://string-os.org",
+  "repository": "https://github.com/string-os/string",
+  "license": "MIT",
+  "keywords": ["mcp", "sfmd", "markdown", "agent", "runtime", "apps"],
+  "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
+  "interface": {
+    "displayName": "String",
+    "shortDescription": "Use String apps, pages, and shell sessions through one MCP tool.",
+    "longDescription": "String gives Codex one small command surface for installable SFMD apps, markdown pages, web pages, and shell sessions. The bundled MCP server exposes a single `string` tool with `topic` and `cmd` arguments.",
+    "developerName": "H1R AI",
+    "category": "Productivity",
+    "capabilities": ["MCP", "Skills", "Apps"],
+    "websiteURL": "https://string-os.org",
+    "defaultPrompt": [
+      "Use String to open https://docs.string-os.org/runtime/mcp",
+      "Install a String app from GitHub and try it",
+      "Use String to inspect the current app sessions"
+    ],
+    "brandColor": "#111827"
+  }
+}

@@ -117,7 +117,7 @@ First public npm release.
 @string-os/string    0.1.0
 ```
 
-`@string-os/string-mcp` is not part of this release; it will publish separately when MCP integration is wired up.
+`@string-os/string` is not part of this release; it will publish separately when MCP integration is wired up.
 
 ### `@string-os/core`
 
@@ -128,7 +128,7 @@ First public npm release.
 ### `@string-os/client`
 
 - HTTP/SSE client for `stringd` with zero runtime dependencies (Node built-ins only).
-- API: `ping`, `ensureUser`, `exec`, `health`, `shutdown` plus SSE helpers.
+- API: `ping`, `ensureAgent`, `exec`, `health`, `shutdown` plus SSE helpers.
 - Speaks stringd protocol v0.1.
 
 ### `@string-os/compiler`
@@ -162,8 +162,8 @@ First public npm release.
 - Setup hint on action failure when a sibling `requirements.md` exists.
 
 **Daemon**
-- HTTP server (default port 3100) with SSE streaming for long-running actions.
-- Per-user home directory under `~/.string/users/{user}/` (flat layout — no nested `.string/`).
+- HTTP server (default port 3923) with SSE streaming for long-running actions.
+- Per-agent.home directory under `~/.string/agents/{agent}/` (flat layout — no nested `.string/`).
 - Auto-start on first CLI call; manage explicitly with `string --daemon start|stop|status`.
 
 **CLI**

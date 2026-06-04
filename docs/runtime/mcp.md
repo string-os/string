@@ -6,7 +6,7 @@ title: MCP
 
 The MCP server is **not a separate package**. It's part of the daemon. Two transports:
 
-- **stdio** — `string --mcp [--user <id>]`. The CLI hosts an stdio MCP server, auto-starts the daemon, and forwards calls to it. Easiest for clients that spawn child processes.
+- **stdio** — `string --mcp`. The CLI hosts an stdio MCP server, auto-starts the daemon, and forwards calls to it. Easiest for clients that spawn child processes.
 - **HTTP** — `POST /mcp` on the running daemon (Streamable HTTP). Best for clients that connect by URL.
 
 Both expose the same tool, the same behavior, the same isolation guarantees.
@@ -28,7 +28,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
   "mcpServers": {
     "string": {
       "command": "string",
-      "args": ["--mcp", "--user", "claude-desktop"]
+      "args": ["--mcp"]
     }
   }
 }
@@ -40,20 +40,62 @@ Restart Claude Desktop. The `string` tool appears in the tool list. Claude calls
 
 ## Quick start (Cursor / Codex / other clients)
 
-Same shape, distinct `--user`:
+Same shape:
 
 ```json
 {
   "mcpServers": {
     "string": {
       "command": "string",
-      "args": ["--mcp", "--user", "cursor"]
+      "args": ["--mcp"]
     }
   }
 }
 ```
 
-Each MCP client should use a different `--user` value. Sessions, history, `/set` env vars, and installed apps are isolated by user — no bleed-over between Claude, Cursor, Codex.
+That is enough for the common single-agent setup. String uses the `default` agent automatically.
+
+### Multiple Claude Code sessions
+
+Keep the MCP server name stable (`string`) and select the String agent through
+the Claude Code process environment. This keeps Claude Code's tool id stable as
+`mcp__string__string` while each session gets its own String home.
+
+Register the MCP server once:
+
+```json
+{
+  "mcpServers": {
+    "string": {
+      "command": "string",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+Map each agent id to a home once:
+
+```bash
+string agent add leo --home /home/ubuntu/crew/leo
+string agent add reviewer --home /home/ubuntu/crew/reviewer
+```
+
+Then start each Claude Code session with a different environment:
+
+```bash
+STRING_AGENT_ID=leo claude
+STRING_AGENT_ID=reviewer claude
+```
+
+Avoid registering separate MCP server names like `string-leo` unless you need
+multiple String agents visible in the same Claude Code session. Claude Code
+includes the server name in the tool id (`mcp__<server-name>__string`), so a
+stable server name makes skills and prompts easier to reuse.
+
+For a fixed project-level or client-level agent, `string --mcp --agent <id>` is
+still supported. Prefer `STRING_AGENT_ID` when the agent varies by launched
+session.
 
 ---
 
@@ -66,8 +108,8 @@ For clients that connect by URL (some MCP libraries, custom agent frameworks, re
   "mcpServers": {
     "string": {
       "type": "http",
-      "url": "http://127.0.0.1:3100/mcp",
-      "headers": { "X-User-Id": "my-agent" }
+      "url": "http://127.0.0.1:3923/mcp",
+      "headers": { "X-Agent-Id": "my-agent" }
     }
   }
 }
@@ -129,16 +171,24 @@ On error (`string({ topic: "main", cmd: "/open ./missing.md" })`):
 
 ---
 
-## User isolation
+## Agent isolation
 
-Every request carries a user identity:
+Every request carries an agent identity:
 
-- stdio shim: `--user <id>` flag (or `STRINGD_USER` env)
-- HTTP: `X-User-Id` header
+- stdio shim: `--agent <id>` flag (or `STRING_AGENT_ID` env)
+- HTTP: `X-Agent-Id` header
 
-Each user has a private home at `~/.string/users/{id}/`. Sessions, history, installed apps, and `/set $X` env vars are scoped to that home. A `/set` from Claude Desktop never reaches Cursor's view, and vice versa.
+Each agent has a private home at `~/.string/agents/{id}/`. Sessions, history, installed apps, and `/set $X` env vars are scoped to that home.
 
-Unknown users are auto-registered on first call — no separate provisioning step.
+Set a custom home with `string agent add <id> --home <path>` or
+`string agent set-home <id> <path>`. Do this once, then select the agent by id
+from CLI or MCP sessions. `STRING_HOME` exists as a one-shot override for
+debugging and launch wrappers; it is not the normal multi-agent setup.
+
+For persistent per-workspace selection, create `.string/config.json` in the
+workspace. See [Agent Identity](../start/agent-identity.md).
+
+Unknown agents are auto-registered on first call — no separate provisioning step.
 
 ---
 

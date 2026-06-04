@@ -1,7 +1,7 @@
 /**
  * stringd logger — structured file-based logging with rotation.
  *
- * Activation: STRINGD_LOG=1 env var or --log CLI flag.
+ * Activation: STRING_LOG=1 env var or --log CLI flag.
  * Default: off (security-first).
  *
  * Format: grep-friendly structured text lines.
