@@ -280,7 +280,7 @@ async function cmdDaemon(args: string[]): Promise<void> {
 // ─── Agent management ───────────────────────────────────────────────────────────
 //
 // `string agent` manages the persistent agent registry and the configured
-// "current agent" (~/.string/config.json). Adding an agent sets its home; the
+// "current agent" (selected .string/config.json). Adding an agent sets its home; the
 // current agent is what terse `string <topic> '<cmd>'` calls resolve to when no
 // --agent flag or STRING_AGENT_ID is present.
 
@@ -425,7 +425,7 @@ Agent management:
   string agent rm <id>                  Remove an agent (clears current if it was)
 
 Agent resolution (highest precedence first):
-  --agent <id>  >  STRING_AGENT_ID  >  config.currentAgent  >  "default"
+  --agent <id>  >  STRING_AGENT_ID  >  selected config.currentAgent  >  "default"
   Set the home at add-time or via \`agent set-home\`. Terse calls never reset a
   stored home — only \`agent add\`/\`set-home\` (or STRING_HOME) write home.
 
@@ -453,7 +453,8 @@ Environment:
   STRING_AGENT_ID    Agent ID — overrides config.currentAgent (default: "default")
   STRING_HOME        One-shot home override for this invocation
                   (normal setup: string agent add <id> --home <path>)
-  STRING_CONFIG  Client config path (default: ~/.string/config.json)
+  STRING_CONFIG      Client config path override
+                  (default: nearest .string/config.json, then ~/.string/config.json)
 `);
 }
 

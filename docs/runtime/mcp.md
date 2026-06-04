@@ -185,6 +185,9 @@ Set a custom home with `string agent add <id> --home <path>` or
 from CLI or MCP sessions. `STRING_HOME` exists as a one-shot override for
 debugging and launch wrappers; it is not the normal multi-agent setup.
 
+For persistent per-workspace selection, create `.string/config.json` in the
+workspace. See [Agent Identity](../start/agent-identity.md).
+
 Unknown agents are auto-registered on first call — no separate provisioning step.
 
 ---

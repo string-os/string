@@ -10,7 +10,8 @@ string({ topic, cmd })
 ```
 
 Use the default `default` agent unless you explicitly need isolated homes for
-different clients or roles.
+different clients or roles. See [Agent Identity](./agent-identity.md) for the
+full config precedence and multi-user setup.
 
 ## 1. CLI
 
@@ -34,6 +35,15 @@ STRING_AGENT_ID=reviewer string main '/info'
 `--agent reviewer` is equivalent for one command. Prefer `STRING_AGENT_ID` when
 you launch a long-running AI session and want every CLI and MCP call in that
 process to use the same agent.
+
+For persistent per-workspace selection, create `.string/config.json` in the
+workspace instead:
+
+```bash
+cd /home/alice/crew/reviewer
+mkdir -p .string
+string agent use reviewer
+```
 
 ## 2. MCP
 
@@ -81,6 +91,11 @@ For Claude Code, this keeps the visible tool id as `mcp__string__string`.
 Registering separate MCP server names such as `string-claude-research` changes
 the tool id and is only useful when one AI session must see several String
 agents at the same time.
+
+If String is installed through the Claude Code plugin, the bundled MCP config
+already runs `string --mcp`. You can still select the agent with
+`STRING_AGENT_ID` or workspace-local `.string/config.json`; no plugin override is
+needed.
 
 ## 3. TypeScript Library
 

@@ -6,6 +6,7 @@ title: String Documentation
 
 - [Quick Start](./start/quickstart.md) — install and run your first app in 5 minutes
 - [Agent Integration](./start/agent-integration.md) — connect String to your agent framework
+- [Agent Identity](./start/agent-identity.md) — choose default, env, or workspace-local agents
 - [Writing your first app](./start/writing-an-app.md) — the minimum to author your own app
 
 ## Cookbook

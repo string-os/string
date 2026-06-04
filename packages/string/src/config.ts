@@ -4,9 +4,9 @@
  * AI can adjust via `/set {_diff_context} = "5"` etc.
  */
 
-import { readFileSync, writeFileSync, mkdirSync } from 'fs';
+import { existsSync, readFileSync, writeFileSync, mkdirSync } from 'fs';
 import { homedir } from 'os';
-import { join, dirname } from 'path';
+import { dirname, isAbsolute, join, resolve } from 'path';
 import type { Session } from './session.js';
 
 export interface StringConfig {
@@ -49,21 +49,59 @@ function intVarMin1(session: Session, name: string, fallback: number): number {
   return Number.isFinite(n) && n > 0 ? n : fallback;
 }
 
-// ─── Client config (~/.string/config.json) ────────────────────────────────────
+// ─── Client config (.string/config.json or ~/.string/config.json) ─────────────
 //
 // Persistent client-side config, separate from per-session StringConfig above.
 // Today it holds the "current agent" so terse `string <topic> '<cmd>'` calls can
-// resolve to a configured agent instead of always `default`. Stored as a
-// forward-compatible object so new keys can be added without a migration.
+// resolve to a configured agent instead of always `default`. A project-local
+// `.string/config.json` wins over the global `~/.string/config.json` when it
+// exists, which lets plugin-provided MCP (`string --mcp`) pick the right agent
+// from the launched workspace without changing the MCP server name.
 
 /** Client config schema persisted to ~/.string/config.json. */
 export interface ClientConfig {
   currentAgent?: string;
 }
 
-/** Path to the client config file. Override with STRING_CONFIG (tests/isolated installs). */
+/** Global client config path. */
+export function globalConfigPath(): string {
+  return join(homedir(), '.string', 'config.json');
+}
+
+function normalizeStartDir(value: string): string {
+  return resolve(isAbsolute(value) ? value : join(process.cwd(), value));
+}
+
+/**
+ * Find the nearest project-local String config.
+ *
+ * Claude Code exposes CLAUDE_PROJECT_DIR to MCP server processes. Outside
+ * Claude, cwd is the natural project root candidate. A `.string/` directory is
+ * enough to select the local config path so `string agent use` can create the
+ * file there after a user intentionally creates the local config directory.
+ */
+export function projectConfigPath(): string | undefined {
+  const rawStart = process.env.STRING_PROJECT_DIR?.trim()
+    || process.env.CLAUDE_PROJECT_DIR?.trim()
+    || process.cwd();
+  let dir = normalizeStartDir(rawStart);
+  const home = resolve(homedir());
+
+  while (true) {
+    if (dir === home) break;
+    const stringDir = join(dir, '.string');
+    const file = join(stringDir, 'config.json');
+    if (existsSync(file) || existsSync(stringDir)) return file;
+    const parent = dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  return undefined;
+}
+
+/** Path to the selected client config file. Override with STRING_CONFIG. */
 export function configPath(): string {
-  return process.env.STRING_CONFIG || join(homedir(), '.string', 'config.json');
+  return process.env.STRING_CONFIG || projectConfigPath() || globalConfigPath();
 }
 
 /** Load the client config. Missing/corrupt file → empty config (back-compat). */
@@ -107,7 +145,9 @@ export function clearCurrentAgent(): void {
 
 /**
  * Centralized agent-id resolution.
- * Precedence: `agentFlag` > STRING_AGENT_ID > config.currentAgent > 'default'.
+ * Precedence:
+ *   agentFlag > STRING_AGENT_ID > STRING_CONFIG/current project config >
+ *   global config > 'default'.
  */
 export function resolveAgentId(agentFlag?: string | null): string {
   const flag = agentFlag?.trim();

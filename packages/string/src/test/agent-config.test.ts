@@ -9,6 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import {
+  configPath,
   loadClientConfig,
   saveClientConfig,
   getCurrentAgent,
@@ -34,6 +35,32 @@ function withIsolatedConfig(fn: (configFile: string) => void): void {
     if (prevUser === undefined) delete process.env.STRING_AGENT_ID;
     else process.env.STRING_AGENT_ID = prevUser;
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** Run `fn` with isolated project-local config discovery. */
+function withProjectConfig(fn: (root: string) => void): void {
+  const root = fs.mkdtempSync('/tmp/string-project-cfg-');
+  const prevConfig = process.env.STRING_CONFIG;
+  const prevProject = process.env.STRING_PROJECT_DIR;
+  const prevClaudeProject = process.env.CLAUDE_PROJECT_DIR;
+  const prevAgent = process.env.STRING_AGENT_ID;
+  delete process.env.STRING_CONFIG;
+  delete process.env.CLAUDE_PROJECT_DIR;
+  delete process.env.STRING_AGENT_ID;
+  process.env.STRING_PROJECT_DIR = root;
+  try {
+    fn(root);
+  } finally {
+    if (prevConfig === undefined) delete process.env.STRING_CONFIG;
+    else process.env.STRING_CONFIG = prevConfig;
+    if (prevProject === undefined) delete process.env.STRING_PROJECT_DIR;
+    else process.env.STRING_PROJECT_DIR = prevProject;
+    if (prevClaudeProject === undefined) delete process.env.CLAUDE_PROJECT_DIR;
+    else process.env.CLAUDE_PROJECT_DIR = prevClaudeProject;
+    if (prevAgent === undefined) delete process.env.STRING_AGENT_ID;
+    else process.env.STRING_AGENT_ID = prevAgent;
+    fs.rmSync(root, { recursive: true, force: true });
   }
 }
 
@@ -97,5 +124,35 @@ await section('config — resolveAgentId precedence', async () => {
     delete process.env.STRING_AGENT_ID;
     assert(resolveAgentId() === 'leo', 'back to config.currentAgent when env cleared');
     assert(resolveAgentId('flag-agent') === 'flag-agent', '--agent still wins over config');
+  });
+});
+
+await section('config — project-local .string/config.json', async () => {
+  withProjectConfig((root) => {
+    const localDir = path.join(root, '.string');
+    const localConfig = path.join(localDir, 'config.json');
+    fs.mkdirSync(localDir, { recursive: true });
+    fs.writeFileSync(localConfig, JSON.stringify({ currentAgent: 'project-agent' }));
+
+    assert(configPath() === localConfig, 'project-local config path selected');
+    assert(getCurrentAgent() === 'project-agent', 'project-local currentAgent used');
+    assert(resolveAgentId() === 'project-agent', 'project-local agent beats default');
+
+    process.env.STRING_AGENT_ID = 'env-agent';
+    assert(resolveAgentId() === 'env-agent', 'env still beats project-local config');
+    assert(resolveAgentId('flag-agent') === 'flag-agent', 'flag still beats env');
+  });
+});
+
+await section('config — .string directory makes local saves explicit', async () => {
+  withProjectConfig((root) => {
+    const localDir = path.join(root, '.string');
+    const localConfig = path.join(localDir, 'config.json');
+    fs.mkdirSync(localDir, { recursive: true });
+
+    assert(configPath() === localConfig, '.string dir selects local config path');
+    setCurrentAgent('workspace-agent');
+    assert(fs.existsSync(localConfig), 'setCurrentAgent writes project-local config');
+    assert(getCurrentAgent() === 'workspace-agent', 'project-local saved agent reads back');
   });
 });
