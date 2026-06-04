@@ -11,6 +11,7 @@
  *  - agent use <id>                       → config.currentAgent = id
  *  - terse exec resolves the current agent (no flags) and does NOT clobber home
  *  - STRING_AGENT_ID and --agent override the current agent
+ *  - agent use <id> --local writes workspace-local config
  *  - agent current / list reflect state
  *  - set-home updates home; rm removes + clears current
  *  - allowedPaths preserved across a home-only update (clobber fix, P1)
@@ -146,6 +147,16 @@ await section('agent CLI — add/use/current + clobber fix (e2e)', async () => {
       'STRING_AGENT_ID uses maya without clobbering its home');
     assert(readConfig(env).currentAgent === 'leo',
       'STRING_AGENT_ID call does not change config.currentAgent');
+
+    const localRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'string-agent-local-'));
+    const localConfig = path.join(localRoot, '.string', 'config.json');
+    const localUse = runCli(env, ['agent', 'use', 'maya', '--local'], { STRING_PROJECT_DIR: localRoot });
+    assert(localUse.code === 0, 'agent use --local exits 0');
+    assert(JSON.parse(fs.readFileSync(localConfig, 'utf-8')).currentAgent === 'maya',
+      'agent use --local writes workspace-local config');
+    assert(readConfig(env).currentAgent === 'leo',
+      'agent use --local does not change global currentAgent');
+    fs.rmSync(localRoot, { recursive: true, force: true });
 
     // agent list marks the current agent.
     const list = runCli(env, ['agent', 'list']);

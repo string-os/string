@@ -77,8 +77,8 @@ function normalizeStartDir(value: string): string {
  *
  * Claude Code exposes CLAUDE_PROJECT_DIR to MCP server processes. Outside
  * Claude, cwd is the natural project root candidate. A `.string/` directory is
- * enough to select the local config path so `string agent use` can create the
- * file there after a user intentionally creates the local config directory.
+ * enough to select the local config path for reads. Writes stay global unless
+ * the caller explicitly asks for project-local config.
  */
 export function projectConfigPath(): string | undefined {
   const rawStart = process.env.STRING_PROJECT_DIR?.trim()
@@ -99,6 +99,16 @@ export function projectConfigPath(): string | undefined {
   return undefined;
 }
 
+/** Project-local config path for writes: nearest existing local config, else cwd/.string/config.json. */
+export function projectConfigPathForWrite(): string {
+  const existing = projectConfigPath();
+  if (existing) return existing;
+  const rawStart = process.env.STRING_PROJECT_DIR?.trim()
+    || process.env.CLAUDE_PROJECT_DIR?.trim()
+    || process.cwd();
+  return join(normalizeStartDir(rawStart), '.string', 'config.json');
+}
+
 /** Path to the selected client config file. Override with STRING_CONFIG. */
 export function configPath(): string {
   return process.env.STRING_CONFIG || projectConfigPath() || globalConfigPath();
@@ -115,10 +125,24 @@ export function loadClientConfig(): ClientConfig {
   return {};
 }
 
+export type ConfigWriteScope = 'selected' | 'project' | 'global';
+
+function configPathForWrite(scope: ConfigWriteScope): string {
+  if (scope === 'project') return projectConfigPathForWrite();
+  if (process.env.STRING_CONFIG) return process.env.STRING_CONFIG;
+  if (scope === 'global') return globalConfigPath();
+  return configPath();
+}
+
 /** Persist the client config, merging into any existing on-disk config. */
-export function saveClientConfig(patch: ClientConfig): void {
-  const merged = { ...loadClientConfig(), ...patch };
-  const file = configPath();
+export function saveClientConfig(patch: ClientConfig, scope: ConfigWriteScope = 'selected'): void {
+  const file = configPathForWrite(scope);
+  let existing: ClientConfig = {};
+  try {
+    const data = JSON.parse(readFileSync(file, 'utf-8'));
+    if (data && typeof data === 'object' && !Array.isArray(data)) existing = data as ClientConfig;
+  } catch { /* missing/corrupt target config — overwrite with the patch */ }
+  const merged = { ...existing, ...patch };
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   writeFileSync(file, JSON.stringify(merged, null, 2) + '\n', { mode: 0o600 });
 }
@@ -129,9 +153,9 @@ export function getCurrentAgent(): string | undefined {
   return id && id.trim() ? id.trim() : undefined;
 }
 
-/** Set the configured current agent id. */
-export function setCurrentAgent(id: string): void {
-  saveClientConfig({ currentAgent: id.trim() });
+/** Set the configured current agent id. Defaults to global; use project for workspace-local. */
+export function setCurrentAgent(id: string, scope: ConfigWriteScope = 'global'): void {
+  saveClientConfig({ currentAgent: id.trim() }, scope);
 }
 
 /** Clear the configured current agent (e.g. after removing that agent). */

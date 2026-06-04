@@ -86,7 +86,7 @@ Any agent framework with a shell tool (Claude Code, OpenClaw, etc.) can drive `s
 
 > You have `string` installed. It's a Markdown browser with installable apps. Call it as `string <topic> '<command>'`. Output sits between `<𝒞=string:topic>` and `</𝒞>`. To find what an app can do: `/open app:<name>`. Currently installed: `weather`.
 
-For MCP clients (Claude Desktop, Cursor, Codex), run `string --mcp` as the stdio server, or point them at `http://localhost:3923/mcp`. `stringd` serves MCP natively — no separate package. For multiple AI sessions, map homes once with `string agent add <id> --home <path>`, then select the agent with `STRING_AGENT_ID=<id>` or a workspace-local `.string/config.json`.
+For MCP clients (Claude Desktop, Cursor, Codex), run `string --mcp` as the stdio server, or point them at `http://localhost:3923/mcp`. `stringd` serves MCP natively — no separate package. For multiple AI sessions, map homes once with `string agent add <id> --home <path>`, then select the agent with `STRING_AGENT_ID=<id>` or `string agent use <id> --local`.
 
 ## Environment
 

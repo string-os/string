@@ -128,6 +128,8 @@ The agent learns the verbs once and uses them everywhere. New capabilities come 
 
 Two lines in Claude Code: registers the `mcp__string__string` tool (the plugin's `.mcp.json` spawns `string` via `npx`, so no separate npm install) and loads a skill that walks Claude through using it. After install, ask Claude something like *"install gh-kanban from string-os/apps and try it"* — it'll take it from there.
 
+For multiple local agents or workspace-specific homes, see [Agent Identity](./docs/start/agent-identity.md).
+
 **Codex CLI plugin** (same idea, parallel `.codex-plugin/` manifest in the same repo):
 
 ```bash

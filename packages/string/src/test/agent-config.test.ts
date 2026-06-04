@@ -144,15 +144,14 @@ await section('config — project-local .string/config.json', async () => {
   });
 });
 
-await section('config — .string directory makes local saves explicit', async () => {
+await section('config — explicit project-local saves', async () => {
   withProjectConfig((root) => {
     const localDir = path.join(root, '.string');
     const localConfig = path.join(localDir, 'config.json');
-    fs.mkdirSync(localDir, { recursive: true });
 
-    assert(configPath() === localConfig, '.string dir selects local config path');
-    setCurrentAgent('workspace-agent');
+    setCurrentAgent('workspace-agent', 'project');
     assert(fs.existsSync(localConfig), 'setCurrentAgent writes project-local config');
+    assert(configPath() === localConfig, 'project-local config path selected after write');
     assert(getCurrentAgent() === 'workspace-agent', 'project-local saved agent reads back');
   });
 });

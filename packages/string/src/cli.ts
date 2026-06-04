@@ -22,6 +22,9 @@ import {
   getCurrentAgent,
   setCurrentAgent,
   clearCurrentAgent,
+  configPath,
+  globalConfigPath,
+  projectConfigPathForWrite,
 } from './config.js';
 
 /** Derive agent home directory: ~/.string/agents/{agentId}/ */
@@ -285,14 +288,15 @@ async function cmdDaemon(args: string[]): Promise<void> {
 // --agent flag or STRING_AGENT_ID is present.
 
 /** Parse `--home <path>` and `--allow <p1,p2>` from `string agent` args. */
-function parseAgentOpts(args: string[]): { home?: string; allow?: string[] } {
-  const opts: { home?: string; allow?: string[] } = {};
+function parseAgentOpts(args: string[]): { home?: string; allow?: string[]; local?: boolean } {
+  const opts: { home?: string; allow?: string[]; local?: boolean } = {};
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
     if (a === '--home') opts.home = args[++i];
     else if (a.startsWith('--home=')) opts.home = a.slice('--home='.length);
     else if (a === '--allow') opts.allow = splitAllow(args[++i]);
     else if (a.startsWith('--allow=')) opts.allow = splitAllow(a.slice('--allow='.length));
+    else if (a === '--local') opts.local = true;
   }
   return opts;
 }
@@ -332,13 +336,15 @@ async function cmdAgent(args: string[]): Promise<void> {
     case 'use': {
       const id = rest[0];
       if (!id) {
-        process.stderr.write('Usage: string agent use <id>\n');
+        process.stderr.write('Usage: string agent use <id> [--local]\n');
         process.exit(1);
       }
+      const opts = parseAgentOpts(rest.slice(1));
       await ensureDaemonUp(port);
       const exists = (await client.listAgents(port)).some(u => u.id === id);
-      setCurrentAgent(id);
-      console.log(`Current agent set to '${id}'.`);
+      setCurrentAgent(id, opts.local ? 'project' : 'global');
+      const file = opts.local ? projectConfigPathForWrite() : globalConfigPath();
+      console.log(`Current agent set to '${id}' (${opts.local ? 'local' : 'global'}: ${file}).`);
       if (!exists) {
         console.log(`Note: agent '${id}' is not registered yet — run \`string agent add ${id}\` to set its home.`);
       }
@@ -349,7 +355,7 @@ async function cmdAgent(args: string[]): Promise<void> {
       await ensureDaemonUp(port);
       const agent = (await client.listAgents(port)).find(u => u.id === current);
       const home = agent ? agent.home : '(not registered)';
-      console.log(`${current}\t${home}`);
+      console.log(`${current}\t${home}\tconfig: ${configPath()}`);
       break;
     }
     case 'list': {
@@ -418,14 +424,15 @@ Agent management:
                                        Register an agent with a home (and optional
                                        allowed paths). Home defaults to
                                        ~/.string/agents/<id> when omitted.
-  string agent use <id>                 Set the current agent (in config.json)
+  string agent use <id> [--local]       Set the current agent globally, or in
+                                       the current workspace with --local
   string agent current                  Show the current agent + its home
   string agent list                     List all agents (* marks the current one)
   string agent set-home <id> <path>     Change an agent's home
   string agent rm <id>                  Remove an agent (clears current if it was)
 
 Agent resolution (highest precedence first):
-  --agent <id>  >  STRING_AGENT_ID  >  selected config.currentAgent  >  "default"
+  --agent <id>  >  STRING_AGENT_ID  >  local config  >  global config  >  "default"
   Set the home at add-time or via \`agent set-home\`. Terse calls never reset a
   stored home — only \`agent add\`/\`set-home\` (or STRING_HOME) write home.
 

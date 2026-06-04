@@ -41,8 +41,7 @@ workspace instead:
 
 ```bash
 cd /home/alice/crew/reviewer
-mkdir -p .string
-string agent use reviewer
+string agent use reviewer --local
 ```
 
 ## 2. MCP

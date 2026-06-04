@@ -22,7 +22,17 @@ string agent add leo --home /home/ubuntu/crew/leo
 From then on, select only the agent id. Do not pass the home path in every MCP
 or CLI launch.
 
-## Option A: session environment
+## Global default
+
+Use this when most String calls on your machine should use one agent:
+
+```bash
+string agent use leo
+```
+
+This writes `~/.string/config.json`.
+
+## Session environment
 
 Use this when one terminal, tmux pane, or AI client process should run as a
 specific agent:
@@ -35,15 +45,14 @@ STRING_AGENT_ID=leo string main '/info'
 This works for CLI and MCP because `string --mcp` reads the same environment as
 the process that launches it.
 
-## Option B: workspace-local config
+## Workspace-local config
 
 Use this when a directory should always select the same String agent without an
 environment variable:
 
 ```bash
 cd /home/ubuntu/crew/leo
-mkdir -p .string
-string agent use leo
+string agent use leo --local
 ```
 
 This writes:
@@ -91,7 +100,7 @@ can still make each workspace run as a different agent.
 
 ## Claude MCP local scope
 
-If you do not want to use the plugin's bundled MCP server, Claude Code also
+If you need to replace the plugin's bundled MCP server, Claude Code also
 supports project-local MCP entries:
 
 ```bash
@@ -103,8 +112,8 @@ This stores a private MCP override for the current project path in
 `~/.claude.json`. Keep the server name `string` so Claude Code's tool id stays
 `mcp__string__string`.
 
-Use this only when you need to replace the plugin-provided MCP server for one
-project. Otherwise prefer the workspace-local `.string/config.json` approach.
+This is rarely needed. Prefer the workspace-local `.string/config.json`
+approach so the plugin-provided MCP server can stay generic.
 
 ## One-shot overrides
 
