@@ -8,6 +8,6 @@ export default defineConfig({
     format: 'directory',
   },
   integrations: [
-    sfmd({ contentDir: 'content' }),
+    sfmd({ contentDir: 'content', sidebar: false }),
   ],
 });
