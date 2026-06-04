@@ -241,12 +241,20 @@ export interface RenderResult {
   autoShortcuts: Map<string, string>;
 }
 
+export interface RenderOptions {
+  /** Menu names to show inline once instead of only hinting at /nav. */
+  unfoldNavNames?: Set<string>;
+  /** Maximum number of nav entries to show inline per menu. */
+  navPreviewLimit?: number;
+}
+
 export async function render(
   doc: LoadedDocument,
   blockId?: string,
   home?: string,
   loader?: Loader,
   envScope?: import('./env-store.js').EnvScope,
+  options: RenderOptions = {},
 ): Promise<RenderResult> {
   let source = doc.source;
 
@@ -303,8 +311,19 @@ export async function render(
   const hints: string[] = [];
 
   if (!blockId && doc.menus.size > 0) {
-    const menuNames = [...doc.menus.keys()].join(', ');
-    hints.push(`[nav] ${menuNames} — /nav <name>`);
+    const folded: string[] = [];
+    const unfoldNavNames = options.unfoldNavNames ?? new Set<string>();
+    for (const menuName of doc.menus.keys()) {
+      if (unfoldNavNames.has(menuName)) {
+        hints.push(`[nav] ${menuName} — first view`);
+        hints.push(renderNav(menuName, doc, options.navPreviewLimit ?? 20));
+      } else {
+        folded.push(menuName);
+      }
+    }
+    if (folded.length > 0) {
+      hints.push(`[nav] ${folded.join(', ')} — /nav <name>`);
+    }
   }
   if (!blockId && doc.actions.length > 0) {
     // Names only — full signatures are noisy at the top of every render.
@@ -344,11 +363,16 @@ export async function render(
 }
 
 /** Render the entries of a named menu. */
-export function renderNav(menuName: string, doc: LoadedDocument): string {
+export function renderNav(menuName: string, doc: LoadedDocument, limit?: number): string {
   const entries = doc.menus.get(menuName);
   if (!entries) return `Menu not found: ${menuName}`;
   if (entries.length === 0) return `Menu ${menuName} is empty.`;
-  return entries.map(e => `[${e.label}][@${e.id}]`).join('\n');
+  const shown = limit === undefined ? entries : entries.slice(0, Math.max(0, limit));
+  const lines = shown.map(e => `[${e.label}][@${e.id}]`);
+  if (limit !== undefined && entries.length > shown.length) {
+    lines.push(`... ${entries.length - shown.length} more — /nav ${menuName}`);
+  }
+  return lines.join('\n');
 }
 
 /** Render a list of all menus on the current document. */

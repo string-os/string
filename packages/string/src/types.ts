@@ -25,6 +25,8 @@ export interface LoadedDocument {
   references: Map<string, string>;
   /** Menu/nav entries by menu name, with shortcuts namespaced as `menu_name.id` */
   menus: Map<string, ResolvedMenuEntry[]>;
+  /** Resolved source URI for each menu/nav file. Used for session-scoped hints. */
+  menuSources: Map<string, string>;
   /** Raw include directives found in this document */
   includes: IncludeDirective[];
   /** Action directives defined in this document */

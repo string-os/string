@@ -18,6 +18,7 @@ export class Session {
   private _variables: Map<string, string> = new Map();
   private _autoShortcuts: Map<string, string> = new Map();
   private _valueShortcuts: Map<string, string | string[]> = new Map();
+  private _seenNavSources: Set<string> = new Set();
   private _bash: BashSession | null = null;
   private _lastUndoPath: string | null = null;
   private _cwdOverride: string | null = null;
@@ -142,6 +143,22 @@ export class Session {
   refresh(doc: LoadedDocument): void {
     if (!this._current) return;
     this._current = { doc, blockId: this._current.blockId };
+  }
+
+  /**
+   * Return menu names whose source files have not been shown in this session,
+   * and mark them as seen. The key is the resolved nav/menu URI when available,
+   * so the same shared nav only unfolds once across pages in a session.
+   */
+  markUnseenNavs(doc: LoadedDocument): Set<string> {
+    const names = new Set<string>();
+    for (const name of doc.menus.keys()) {
+      const source = doc.menuSources.get(name) ?? `${doc.uri}#nav:${name}`;
+      if (this._seenNavSources.has(source)) continue;
+      this._seenNavSources.add(source);
+      names.add(name);
+    }
+    return names;
   }
 
   // ── Auto Shortcuts ─────────────────────────────────────────────────────────

@@ -7,7 +7,7 @@ import type { ActionDirective } from '@string-os/core';
 import type { Loader, ActionResult } from '../loader.js';
 import type { Session } from '../session.js';
 import type { CommandResult, StringErrorCode, LoadedDocument } from '../types.js';
-import { StringError, parseTopic } from '../types.js';
+import { StringError } from '../types.js';
 import { resolve } from '../resolver.js';
 import { render, renderActions } from '../renderer.js';
 import { deriveEnvScope } from '../env-store.js';
@@ -19,7 +19,7 @@ import {
   executeResponseTemplate,
 } from './helpers.js';
 import { buildContextVars } from './context-vars.js';
-import { cmdOpen } from './open.js';
+import { hydrateAppDocument } from './app-session.js';
 
 /**
  * Execute an action directive with parsed flags.
@@ -545,13 +545,9 @@ export async function cmdAction(
     // so a first /act after a daemon restart or fresh session shouldn't make
     // the agent run /open separately. tab/bash/hub topics still error — they
     // have no canonical doc to auto-open.
-    const parsed = parseTopic(session.name);
-    if (parsed?.type === 'app') {
-      const appName = parsed.namespace.split(':')[0];
-      const openResult = await cmdOpen(`app:${appName}`, session, loader);
-      if (!openResult.ok) return openResult;
-      doc = session.currentDoc;
-    }
+    const hydrateResult = await hydrateAppDocument(session, loader);
+    if (hydrateResult) return hydrateResult;
+    doc = session.currentDoc;
     if (!doc) return err('No document open. Use /open <uri> first.', 'INVALID_TARGET');
   }
 

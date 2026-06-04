@@ -298,6 +298,39 @@ await section('Default action skipped for block view', async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+await section('App /act auto-hydrates without running default action', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-app-act-hydrate-');
+  const appSource = path.join(tmpDir, 'toolbox.md');
+  fs.writeFileSync(appSource, [
+    '---',
+    'name: toolbox',
+    'type: app',
+    'default: boot',
+    '---',
+    '',
+    '# Toolbox',
+    '',
+    '```act.boot',
+    'CLI echo "default-boot"',
+    '```',
+    '',
+    '```act.convert',
+    'CLI echo "converted $ARGS"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  const install = await b.exec(`/install --app ${appSource}`);
+  assert(install.ok, 'install app ok');
+
+  const r = await b.exec('/act.convert report.pdf', 'app:toolbox');
+  assert(r.ok, 'direct app /act ok');
+  assert(r.content.includes('converted report.pdf'), 'requested action ran');
+  assert(!r.content.includes('default-boot'), 'default action did not run during /act hydration');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
 // ─── Field default values ────────────────────────────────────────────────────
 
 await section('act field default values', async () => {
@@ -1308,4 +1341,3 @@ await section('Field default $VAR still resolves (author-controlled, regression)
   assert(parsed.tag === 'resolved-from-store', 'author field-default $VAR still resolves from store');
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
-
