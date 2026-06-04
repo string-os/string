@@ -1,27 +1,20 @@
 ---
 name: using-string
 description: >
-  Use the installed String MCP tool for String apps, SFMD documents, web pages,
-  app actions, shell sessions, or commands like /open, /act, /install, /set,
-  and app:<name>.
+  Use the installed String MCP tool for String apps, SFMD, web pages, shell
+  sessions, and commands like /open, /act, /install, or /set.
 ---
 
 # Using String
 
-You have the installed MCP tool `mcp__string__string`.
+You have the installed String MCP tool named `string`; some hosts display it with a server prefix.
 
-Call it as `mcp__string__string({ topic: "main", cmd: "/info" })`.
+Call it with `{ topic, cmd }`, for example `{ "topic": "main", "cmd": "/info" }`.
 
-`topic` is the session: use `main`, `app:<name>`, `app:<name>:<config>`, `bash:<name>`, or hubs like `app`, `tool`, `bash`, `system`.
+Use topics like `main`, `app:<name>`, `app:<name>:<config>`, `bash:<name>`, or hubs `app`, `tool`, `bash`, `system`.
 
-`cmd` must start with `/`; use `/info` or `/help` first when unsure.
+`cmd` must start with `/`; use `/help`, `/info`, and `/act --help` to discover what to do.
 
-Use `/open <path|url|app:name>` to read files, web pages, or app home pages.
+Use `/open` to read files, URLs, or apps; `/act.<name>` to run actions; `/install` to add apps; `/set $VAR = "..."` for app credentials.
 
-Use `/act` to list actions and `/act.<name> ...` to run one; `/act.<name> --help` shows arguments.
-
-Use `/install <github-url|path>` to install a String app, then open it in `app:<name>`.
-
-Use `/set $VAR = "..."` inside an `app:<name>` topic for app credentials.
-
-Read only the payload inside `<𝒞=string:TOPIC>...</𝒞>` and follow any `Recovery:` or `next:` hints.
+Read the payload inside `<𝒞=string:TOPIC>...</𝒞>` and follow `Recovery:` or `next:` hints.
