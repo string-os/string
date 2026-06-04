@@ -19,26 +19,26 @@ npm install -g @string-os/string
 string --daemon start
 ```
 
-Default port is `3100`. Change with `STRINGD_PORT=...` in the daemon's environment.
+Default port is `3923`. Change with `STRING_PORT=...` in the daemon's environment.
 
 ## Usage
 
 ```typescript
-import { ping, ensureUser, exec } from '@string-os/client';
+import { ping, ensureAgent, exec } from '@string-os/client';
 
-const port = 3100;
-const userId = 'default';
-const home = '/home/alice/.string/users/default';
+const port = 3923;
+const agentId = 'default';
+const home = '/home/alice/.string/agents/default';
 
 // 1. Check the daemon is alive
 const alive = await ping(port);
 if (!alive) throw new Error('stringd not running on port ' + port);
 
-// 2. Make sure the user exists (idempotent)
-await ensureUser(port, { id: userId, home });
+// 2. Make sure the agent exists (idempotent)
+await ensureAgent(port, { id: agentId, home });
 
 // 3. Execute a command in a topic
-const result = await exec(port, userId, 'main', '/open ./README.md');
+const result = await exec(port, agentId, 'main', '/open ./README.md');
 
 console.log(result.ok);       // true
 console.log(result.code);     // null on success, error code on failure
@@ -50,9 +50,9 @@ console.log(result.meta);     // current document metadata or null
 
 ```typescript
 ping(port: number): Promise<boolean>
-ensureUser(port: number, user: { id: string; home: string }): Promise<void>
-exec(port: number, userId: string, topic: string, cmd: string, requestId?: string): Promise<ExecResult>
-health(port: number): Promise<{ ok: boolean; users: number; sessions: number }>
+ensureAgent(port: number, agent: { id: string; home: string }): Promise<void>
+exec(port: number, agentId: string, topic: string, cmd: string, requestId?: string): Promise<ExecResult>
+health(port: number): Promise<{ ok: boolean; agents: number; sessions: number }>
 shutdown(port: number): Promise<void>
 
 // SSE utilities
@@ -70,13 +70,13 @@ interface ExecResult {
 
 ## Protocol
 
-The client speaks [stringd protocol v0.1](https://github.com/string-os/string/blob/main/docs/stringd-protocol-v0.1.md). If you want to implement this protocol in another language, start there — the spec is the source of truth, not this TypeScript client.
+The client speaks [stringd protocol v0.1](https://github.com/string-os/string/blob/main/docs/reference/protocol.md). If you want to implement this protocol in another language, start there — the spec is the source of truth, not this TypeScript client.
 
 ## Related
 
 - [`@string-os/string`](https://www.npmjs.com/package/@string-os/string) — the runtime, daemon, and CLI
-- [`@string-os/string-mcp`](https://www.npmjs.com/package/@string-os/string-mcp) — MCP server for Claude Desktop, Cursor, etc.
-- [stringd protocol v0.1](https://github.com/string-os/string/blob/main/docs/stringd-protocol-v0.1.md)
+- [`@string-os/string`](https://www.npmjs.com/package/@string-os/string) — MCP server for Claude Code, Claude Desktop, Codex, Cursor, etc.
+- [stringd protocol v0.1](https://github.com/string-os/string/blob/main/docs/reference/protocol.md)
 - [SFMD spec](https://github.com/string-os/sfmd)
 
 ## License

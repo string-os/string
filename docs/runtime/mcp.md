@@ -6,7 +6,7 @@ title: MCP
 
 The MCP server is **not a separate package**. It's part of the daemon. Two transports:
 
-- **stdio** — `string --mcp [--user <id>]`. The CLI hosts an stdio MCP server, auto-starts the daemon, and forwards calls to it. Easiest for clients that spawn child processes.
+- **stdio** — `string --mcp`. The CLI hosts an stdio MCP server, auto-starts the daemon, and forwards calls to it. Easiest for clients that spawn child processes.
 - **HTTP** — `POST /mcp` on the running daemon (Streamable HTTP). Best for clients that connect by URL.
 
 Both expose the same tool, the same behavior, the same isolation guarantees.
@@ -28,7 +28,7 @@ Edit `~/Library/Application Support/Claude/claude_desktop_config.json` (macOS) o
   "mcpServers": {
     "string": {
       "command": "string",
-      "args": ["--mcp", "--user", "claude-desktop"]
+      "args": ["--mcp"]
     }
   }
 }
@@ -40,20 +40,38 @@ Restart Claude Desktop. The `string` tool appears in the tool list. Claude calls
 
 ## Quick start (Cursor / Codex / other clients)
 
-Same shape, distinct `--user`:
+Same shape:
 
 ```json
 {
   "mcpServers": {
     "string": {
       "command": "string",
-      "args": ["--mcp", "--user", "cursor"]
+      "args": ["--mcp"]
     }
   }
 }
 ```
 
-Each MCP client should use a different `--user` value. Sessions, history, `/set` env vars, and installed apps are isolated by user — no bleed-over between Claude, Cursor, Codex.
+That is enough for the common single-agent setup. String uses the `default` agent automatically.
+
+### Custom agent id
+
+Only set an agent id when you intentionally want separate homes, installed apps,
+history, and `/set $X` values for different AI clients or roles:
+
+```json
+{
+  "mcpServers": {
+    "string": {
+      "command": "string",
+      "args": ["--mcp", "--agent", "codex-reviewer"]
+    }
+  }
+}
+```
+
+The equivalent environment variable is `STRING_AGENT_ID`.
 
 ---
 
@@ -66,8 +84,8 @@ For clients that connect by URL (some MCP libraries, custom agent frameworks, re
   "mcpServers": {
     "string": {
       "type": "http",
-      "url": "http://127.0.0.1:3100/mcp",
-      "headers": { "X-User-Id": "my-agent" }
+      "url": "http://127.0.0.1:3923/mcp",
+      "headers": { "X-Agent-Id": "my-agent" }
     }
   }
 }
@@ -129,16 +147,16 @@ On error (`string({ topic: "main", cmd: "/open ./missing.md" })`):
 
 ---
 
-## User isolation
+## Agent isolation
 
-Every request carries a user identity:
+Every request carries an agent identity:
 
-- stdio shim: `--user <id>` flag (or `STRINGD_USER` env)
-- HTTP: `X-User-Id` header
+- stdio shim: `--agent <id>` flag (or `STRING_AGENT_ID` env)
+- HTTP: `X-Agent-Id` header
 
-Each user has a private home at `~/.string/users/{id}/`. Sessions, history, installed apps, and `/set $X` env vars are scoped to that home. A `/set` from Claude Desktop never reaches Cursor's view, and vice versa.
+Each agent has a private home at `~/.string/agents/{id}/`. Sessions, history, installed apps, and `/set $X` env vars are scoped to that home.
 
-Unknown users are auto-registered on first call — no separate provisioning step.
+Unknown agents are auto-registered on first call — no separate provisioning step.
 
 ---
 

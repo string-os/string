@@ -2,164 +2,114 @@
 title: Agent Integration
 ---
 
-String provides four ways for AI agents to interact with documents and skills. Pick the one that matches how your agent runs.
+String gives agents one command shape across CLI, MCP, and HTTP:
 
-## 1. CLI Pipe
+```text
+string <topic> '<cmd>'
+string({ topic, cmd })
+```
 
-Best for: shell scripts, simple automation, AI agents with command execution.
+Use the default `default` agent unless you explicitly need isolated homes for
+different clients or roles.
+
+## 1. CLI
+
+Best for agents with a shell tool.
 
 ```bash
-# Topic mode: string <topic> '<command>'
 string main '/open ./index.md'
-string main '/act.search --query "hello"'
-string app:weather '/act.forecast --city "Seoul"'
+string app:weather '/act.now Seoul'
+string bash:dev 'pwd && ls'
 ```
 
-The CLI auto-starts a daemon process. Multiple commands share the same session state.
+The CLI auto-starts `stringd` on first use. Default daemon port is `3923`.
 
-### Topic Types
-
-| Topic | Use Case |
-|--------|----------|
-| `name` | Tab — free-form session for files, web, mixed |
-| `app:name` | Installed String apps (canonical) |
-| `bash:name` | Interactive shell sessions (canonical) |
-| `app`, `bash`, `tool`, `system` | Reserved hub aggregators |
-
-### Environment Variables
+Advanced isolation:
 
 ```bash
-export STRINGD_PORT=3100    # Daemon port (default: 3100)
-export STRINGD_USER=default # User ID
-export STRINGD_HOME=~       # Home directory
+string --agent codex-reviewer main '/info'
 ```
 
-## 2. MCP Server
+## 2. MCP
 
-Best for: Claude Desktop, Cursor, and other MCP-compatible AI clients.
-
-### Setup
+Best for Claude Desktop, Cursor, Codex, and other MCP-compatible clients.
 
 ```json
 {
   "mcpServers": {
     "string": {
       "command": "npx",
-      "args": ["@string-os/string-mcp"]
+      "args": ["-y", "@string-os/string", "--mcp"]
     }
   }
 }
 ```
 
-### Available Tools
+This exposes one MCP tool:
 
-| Tool | Maps to | Description |
-|------|---------|-------------|
-| `string_open` | `/open` | Open a document, URL, or directory |
-| `string_act` | `/act` | Execute an action |
-| `string_exec` | `/exec` | Run a shell command |
-| `string_ls` | `/ls` | List files and directories |
-| `string_nav` | `/nav` | Navigate shortcuts and menus |
-| `string_info` | `/info` | Get session state |
-| `string_write` | `/write` | Write content to a file |
+```json
+{ "topic": "main", "cmd": "/info" }
+```
 
-Each tool wraps the corresponding String command. The MCP server creates a single Browser instance and routes tool calls through it.
+Advanced isolation:
+
+```json
+{
+  "mcpServers": {
+    "string": {
+      "command": "npx",
+      "args": ["-y", "@string-os/string", "--mcp", "--agent", "claude-research"]
+    }
+  }
+}
+```
 
 ## 3. TypeScript Library
 
-Best for: custom agents, embedded use, programmatic control.
+Best for embedded use without the daemon.
 
 ```typescript
 import { Browser } from '@string-os/string';
 
-// Create a browser with a home directory
-const browser = new Browser({
-  home: '/path/to/workspace',
-  allowHttp: true,
-});
+const browser = new Browser({ home: '/path/to/workspace' });
+const result = await browser.exec('/open ./index.md', 'main');
 
-// Execute commands
-const result = await browser.exec('/open ./index.md');
-console.log(result.ok);       // true
-console.log(result.content);   // Rendered document
-
-// Work with multiple sessions
-await browser.exec('/open ./app.md', 'app:myapp');
-await browser.exec('/act.fetch --query "test"', 'app:myapp');
-
-// Session management
-browser.listSessions();         // ['main', 'app:myapp']
-browser.switchSession('main');
-browser.closeSession('app:myapp');
+console.log(result.ok);
+console.log(result.content);
 ```
 
-### Key Classes
+## 4. Daemon Client
 
-| Class | Purpose |
-|-------|---------|
-| `Browser` | Top-level entry point. Manages sessions and loader. |
-| `Session` | Single browsing session with history, variables, and state. |
-| `Loader` | Loads documents from file:// and http:// URIs. |
-
-### Loader Options
+Best for custom Node.js agents that want to talk to a running `stringd`.
 
 ```typescript
-const browser = new Browser({
-  home: '/workspace',
-  allowHttp: true,           // Enable web fetching (default: true)
-  accessMode: 'workspace',   // Restrict file access to home directory
-  htmlToMarkdown: customFn,  // Custom HTML→Markdown converter
-});
-```
+import { ping, ensureAgent, exec } from '@string-os/client';
 
-## 4. Daemon Client (`@string-os/client`)
-
-Best for: custom Node.js programs that want to talk to a running `stringd` without pulling in the full runtime, and as a reference for implementing the protocol in other languages.
-
-```typescript
-import { ping, ensureUser, exec } from '@string-os/client';
-
-const port = 3100;
-const userId = 'default';
-const home = process.env.HOME + '/.string/users/default';
+const port = 3923;
+const agentId = 'default';
+const home = process.env.HOME + '/.string/agents/default';
 
 if (!(await ping(port))) {
   throw new Error('stringd is not running on port ' + port);
 }
 
-await ensureUser(port, { id: userId, home });
+await ensureAgent(port, { id: agentId, home });
 
-const result = await exec(port, userId, 'main', '/open ./index.md');
-console.log(result.ok);       // true on success
-console.log(result.code);     // null on success, string error code on failure
-console.log(result.content);  // the command output
-console.log(result.meta);     // current document metadata or null
+const result = await exec(port, agentId, 'main', '/open ./index.md');
+console.log(result.ok);
+console.log(result.content);
 ```
 
-No runtime dependencies — the client uses only Node's built-in `http` module.
-
-The CLI itself is built on `@string-os/client`. If you wrote `cli.ts` from scratch using this package, the result would be nearly identical.
-
-### Protocol
-
-`@string-os/client` speaks the [stringd protocol v0.1](./stringd-protocol-v0.1.md). That document is normative and is the source of truth for any other-language client. Planned clients include:
-
-- **Python** (`string-os` on PyPI, in progress) — for Python-based agents and shell tools
-- Other languages welcome — open an issue if you implement one
-
-### Direct HTTP
-
-You can also talk to `stringd` with any HTTP client and no SDK:
+## Direct HTTP
 
 ```bash
-# Health check
-curl http://localhost:3100/health
+curl http://127.0.0.1:3923/health
 
-# Execute a command (SSE response)
-curl -N -X POST http://localhost:3100/exec \
-  -H "X-User-Id: default" \
+curl -N -X POST http://127.0.0.1:3923/exec \
+  -H "X-Agent-Id: default" \
   -H "Content-Type: application/json" \
   -d '{"cmd": "/open index.md", "topic": "main"}'
 ```
 
-The SSE response contains `head`, `content`, and `done` events. See the [protocol spec](./stringd-protocol-v0.1.md) for the full schema.
+The SSE response contains `head`, `content`, and `done` events. See the
+[protocol spec](../reference/protocol.md) for the full schema.

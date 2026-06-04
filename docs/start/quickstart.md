@@ -28,7 +28,7 @@ string app:weather '/act.now Seoul'
 ```
 
 That's the loop: **clone → install → call**. A String daemon started, the
-weather app got copied under `~/.string/users/default/packages/weather/` and
+weather app got copied under `~/.string/agents/default/packages/weather/` and
 registered, and your `/act.now` ran an HTTP `GET` declared in a Markdown file.
 
 ## 3. Open a document

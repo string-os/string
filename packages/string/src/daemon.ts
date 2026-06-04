@@ -3,28 +3,28 @@
  *
  * Manages Browser sessions and exposes them over HTTP + SSE.
  *
- * Architecture: one Browser per user, sessions identified by topic string.
- *   e.g. user "neo" → Browser { sessions: "main", "work", "bash:dev" }
+ * Architecture: one Browser per agent, sessions identified by topic string.
+ *   e.g. agent "neo" → Browser { sessions: "main", "work", "bash:dev" }
  *
  * Endpoints:
- *   POST   /users             — register user  { user_id, home }
- *   GET    /users             — list all users
- *   DELETE /users/:id         — remove user + all their sessions
+ *   POST   /agents             — register agent  { agent_id, home }
+ *   GET    /agents             — list all agents
+ *   DELETE /agents/:id         — remove agent + all their sessions
  *
- *   GET    /sessions          — list sessions (?user_id= optional filter)
- *   POST   /sessions          — create session  { user_id, topic }
- *   DELETE /sessions/:user_id/:topic — destroy session
+ *   GET    /sessions          — list sessions (?agent_id= optional filter)
+ *   POST   /sessions          — create session  { agent_id, topic }
+ *   DELETE /sessions/:agent_id/:topic — destroy session
  *
  *   POST   /exec              — execute command (SSE response)
- *     headers: X-User-Id (required)
+ *     headers: X-Agent-Id (required)
  *     body:    { cmd: string, topic?: string, request_id?: string }
  *
- *   GET    /health            — { ok, users, sessions }
+ *   GET    /health            — { ok, agents, sessions }
  *   POST   /shutdown          — graceful shutdown
  *
  * SSE response (POST /exec):
  *   event: head
- *   data: { ok, code, cmd, request_id, user_id, topic, topic_type, meta }
+ *   data: { ok, code, cmd, request_id, agent_id, topic, topic_type, meta }
  *
  *   event: content
  *   data: "re: [request_id] /cmd\n<rendered text>"
@@ -41,7 +41,7 @@ import { Browser } from './index.js';
 import { createHtmlToMarkdown } from './html-to-md.js';
 import { createLogger, type Logger } from './logger.js';
 import { parseTopic, topicToString } from './types.js';
-import { UserRegistry, type User } from './user.js';
+import { AgentRegistry, type Agent } from './agent.js';
 import { createStringServer, type McpExecFn } from './mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 
@@ -62,10 +62,10 @@ interface TopicState {
   queue: CommandQueueItem[];
 }
 
-/** One runtime per user — shared Browser, per-topic state. */
+/** One runtime per agent — shared Browser, per-topic state. */
 interface RuntimeEntry {
   browser: Browser;
-  userId: string;
+  agentId: string;
   created: string;
   topics: Map<string, TopicState>;
 }
@@ -75,7 +75,7 @@ interface ExecHead {
   code: string | null;
   cmd: string;
   request_id: string | null;
-  user_id: string;
+  agent_id: string;
   topic: string;
   topic_type: string;
   meta: SessionMeta | null;
@@ -94,11 +94,11 @@ interface SessionMeta {
 
 // ─── State ────────────────────────────────────────────────────────────────────
 
-// Daemon data dir is per-OS-user and cwd-independent: a daemon started from
-// any directory must see the same user registry. Override with STRINGD_DATA_DIR
+// Daemon data dir is per-OS-agent and cwd-independent: a daemon started from
+// any directory must see the same agent registry. Override with STRING_DATA_DIR
 // only for tests / isolated installs.
-const STRINGD_DATA_DIR = process.env.STRINGD_DATA_DIR || join(homedir(), '.string', 'daemon');
-const users = new UserRegistry([], join(STRINGD_DATA_DIR, 'users.json'));
+const STRING_DATA_DIR = process.env.STRING_DATA_DIR || join(homedir(), '.string', 'daemon');
+const agents = new AgentRegistry([], join(STRING_DATA_DIR, 'agents.json'));
 const runtimes = new Map<string, RuntimeEntry>();
 let log: Logger;
 
@@ -159,7 +159,7 @@ function buildMeta(browser: Browser, topic: string): SessionMeta | null {
 
 function buildSessionSummary(runtime: RuntimeEntry, topic: string, state: TopicState): object {
   return {
-    user_id: runtime.userId,
+    agent_id: runtime.agentId,
     topic,
     created: state.created,
     ...buildMeta(runtime.browser, topic) ?? {
@@ -169,16 +169,16 @@ function buildSessionSummary(runtime: RuntimeEntry, topic: string, state: TopicS
   };
 }
 
-function getOrCreateRuntime(userId: string, home: string): RuntimeEntry {
-  if (!runtimes.has(userId)) {
-    runtimes.set(userId, {
-      browser: new Browser({ home, userId, htmlToMarkdown: createHtmlToMarkdown() }),
-      userId,
+function getOrCreateRuntime(agentId: string, home: string): RuntimeEntry {
+  if (!runtimes.has(agentId)) {
+    runtimes.set(agentId, {
+      browser: new Browser({ home, agentId, htmlToMarkdown: createHtmlToMarkdown() }),
+      agentId,
       created: new Date().toISOString(),
       topics: new Map(),
     });
   }
-  return runtimes.get(userId)!;
+  return runtimes.get(agentId)!;
 }
 
 function getOrCreateTopic(runtime: RuntimeEntry, topic: string): TopicState {
@@ -201,19 +201,19 @@ function truncateCmd(cmd: string): string {
   return firstLine.length > 80 ? firstLine.slice(0, 77) + '...' : firstLine;
 }
 
-// ─── User handlers ───────────────────────────────────────────────────────────
+// ─── Agent handlers ───────────────────────────────────────────────────────────
 
-async function handleRegisterUser(
+async function handleRegisterAgent(
   req: http.IncomingMessage,
   res: http.ServerResponse,
 ): Promise<void> {
   const body = await readBody(req);
-  let data: { user_id?: string; home?: string; allowed_paths?: string[] } = {};
+  let data: { agent_id?: string; home?: string; allowed_paths?: string[] } = {};
   try { data = JSON.parse(body); } catch { /* ignore */ }
 
-  const userId = data.user_id?.trim();
-  if (!userId) {
-    sendJson(res, 400, { error: 'user_id required' });
+  const agentId = data.agent_id?.trim();
+  if (!agentId) {
+    sendJson(res, 400, { error: 'agent_id required' });
     return;
   }
 
@@ -221,84 +221,84 @@ async function handleRegisterUser(
   const allowedPaths = Array.isArray(data.allowed_paths)
     ? data.allowed_paths.map(p => String(p).trim()).filter(Boolean)
     : undefined;
-  const existing = users.get(userId);
+  const existing = agents.get(agentId);
 
   // No explicit home → "ensure exists" without clobbering a stored home.
-  // Existing user is kept as-is (home untouched); a brand-new user is
-  // auto-provisioned via the shared ensureUserAuto scheme. allowedPaths is
+  // Existing agent is kept as-is (home untouched); a brand-new agent is
+  // auto-provisioned via the shared ensureAgentAuto scheme. allowedPaths is
   // only applied when explicitly provided.
   if (!home) {
-    const user = existing ?? ensureUserAuto(userId);
+    const agent = existing ?? ensureAgentAuto(agentId);
     if (allowedPaths !== undefined) {
-      users.register({ ...user, allowedPaths });
+      agents.register({ ...agent, allowedPaths });
     }
-    sendJson(res, 200, { user_id: userId, home: user.home, created: !existing });
+    sendJson(res, 200, { agent_id: agentId, home: agent.home, created: !existing });
     return;
   }
 
   // Explicit home → register/update. Preserve existing allowedPaths unless
   // new ones are provided; preserve original createdAt on update.
   const resolvedPaths = allowedPaths ?? existing?.allowedPaths ?? [];
-  users.register({
-    id: userId,
+  agents.register({
+    id: agentId,
     home,
     allowedPaths: resolvedPaths,
     createdAt: existing ? existing.createdAt : new Date().toISOString(),
   });
-  log.info(existing ? 'user.update' : 'user.register', { userId, home });
-  sendJson(res, 200, { user_id: userId, home, created: !existing });
+  log.info(existing ? 'agent.update' : 'agent.register', { agentId, home });
+  sendJson(res, 200, { agent_id: agentId, home, created: !existing });
 }
 
-function handleListUsers(_req: http.IncomingMessage, res: http.ServerResponse): void {
-  sendJson(res, 200, { users: users.list() });
+function handleListAgents(_req: http.IncomingMessage, res: http.ServerResponse): void {
+  sendJson(res, 200, { agents: agents.list() });
 }
 
-function handleDeleteUser(res: http.ServerResponse, userId: string): void {
-  const existed = users.delete(userId);
-  runtimes.delete(userId);
-  log.info('user.delete', { userId, existed });
-  sendJson(res, 200, { user_id: userId, deleted: existed });
+function handleDeleteAgent(res: http.ServerResponse, agentId: string): void {
+  const existed = agents.delete(agentId);
+  runtimes.delete(agentId);
+  log.info('agent.delete', { agentId, existed });
+  sendJson(res, 200, { agent_id: agentId, deleted: existed });
 }
 
 /**
- * Get or auto-register a user. Used by entry points (like /mcp) where the
- * client has no separate user-provisioning step. The home is derived as
- * `~/.string/users/{userId}` — the same scheme the CLI uses — and created
+ * Get or auto-register an agent. Used by entry points (like /mcp) where the
+ * client has no separate agent-provisioning step. The home is derived as
+ * `~/.string/agents/{agentId}` — the same scheme the CLI uses — and created
  * on disk if it does not exist. Idempotent.
  *
- * Returns the User record; never null.
+ * Returns the Agent record; never null.
  */
-function ensureUserAuto(userId: string): User {
-  const existing = users.get(userId);
+function ensureAgentAuto(agentId: string): Agent {
+  const existing = agents.get(agentId);
   if (existing) return existing;
 
-  const home = join(homedir(), '.string', 'users', userId);
+  const home = join(homedir(), '.string', 'agents', agentId);
   try {
     mkdirSync(home, { recursive: true, mode: 0o700 });
   } catch (e) {
     // mkdir failures land here only on permissions/IO. Surface them as logs;
     // the subsequent registry write will fail too and the caller will 500.
-    log.error('user.auto_register.mkdir_failed', { userId, home, error: String(e) });
+    log.error('agent.auto_register.mkdir_failed', { agentId, home, error: String(e) });
   }
-  users.register({
-    id: userId,
+  agents.register({
+    id: agentId,
     home,
     allowedPaths: [],
     createdAt: new Date().toISOString(),
   });
-  log.info('user.auto_register', { userId, home });
-  return users.get(userId)!;
+  log.info('agent.auto_register', { agentId, home });
+  return agents.get(agentId)!;
 }
 
 // ─── Session handlers ────────────────────────────────────────────────────────
 
 function handleListSessions(req: http.IncomingMessage, res: http.ServerResponse): void {
   const url = new URL(req.url ?? '/', 'http://localhost');
-  const filterUserId = url.searchParams.get('user_id');
+  const filterAgentId = url.searchParams.get('agent_id');
 
   const list: object[] = [];
-  for (const [userId, runtime] of runtimes) {
-    if (filterUserId && userId !== filterUserId) continue;
+  for (const [agentId, runtime] of runtimes) {
+    if (filterAgentId && agentId !== filterAgentId) continue;
     for (const [topic, state] of runtime.topics) {
       list.push(buildSessionSummary(runtime, topic, state));
     }
@@ -311,18 +311,18 @@ async function handleCreateSession(
   res: http.ServerResponse,
 ): Promise<void> {
   const body = await readBody(req);
-  let data: { user_id?: string; topic?: string } = {};
+  let data: { agent_id?: string; topic?: string } = {};
   try { data = JSON.parse(body); } catch { /* ignore */ }
 
-  const userId = data.user_id?.trim();
-  if (!userId) {
-    sendJson(res, 400, { error: 'user_id required' });
+  const agentId = data.agent_id?.trim();
+  if (!agentId) {
+    sendJson(res, 400, { error: 'agent_id required' });
     return;
   }
 
-  const user = users.get(userId);
-  if (!user) {
-    sendJson(res, 401, { error: `Unknown user: ${userId}` });
+  const agent = agents.get(agentId);
+  if (!agent) {
+    sendJson(res, 401, { error: `Unknown agent: ${agentId}` });
     return;
   }
 
@@ -333,30 +333,30 @@ async function handleCreateSession(
     return;
   }
   const topic = topicToString(parsed);
-  const runtime = getOrCreateRuntime(userId, user.home);
+  const runtime = getOrCreateRuntime(agentId, agent.home);
   const existed = runtime.topics.has(topic);
   getOrCreateTopic(runtime, topic);
   runtime.browser.session(topic); // ensure Browser session exists
-  if (!existed) log.info('session.create', { userId, topic });
-  sendJson(res, 200, { user_id: userId, topic, topic_type: parsed.type, created: !existed });
+  if (!existed) log.info('session.create', { agentId, topic });
+  sendJson(res, 200, { agent_id: agentId, topic, topic_type: parsed.type, created: !existed });
 }
 
 function handleDeleteSession(
   res: http.ServerResponse,
-  userId: string,
+  agentId: string,
   topic: string,
 ): void {
-  const runtime = runtimes.get(userId);
+  const runtime = runtimes.get(agentId);
   if (!runtime) {
-    sendJson(res, 200, { user_id: userId, topic, deleted: false });
+    sendJson(res, 200, { agent_id: agentId, topic, deleted: false });
     return;
   }
   const existed = runtime.topics.delete(topic);
   if (existed) {
     runtime.browser.closeSession(topic);
-    log.info('session.delete', { userId, topic });
+    log.info('session.delete', { agentId, topic });
   }
-  sendJson(res, 200, { user_id: userId, topic, deleted: existed });
+  sendJson(res, 200, { agent_id: agentId, topic, deleted: existed });
 }
 
 // ─── Exec handler ────────────────────────────────────────────────────────────
@@ -365,17 +365,17 @@ async function handleExec(
   req: http.IncomingMessage,
   res: http.ServerResponse,
 ): Promise<void> {
-  const userId = (req.headers['x-user-id'] as string | undefined)?.trim();
-  if (!userId) {
-    log.error('exec.validation', { reason: 'missing X-User-Id' });
-    sendJson(res, 400, { error: 'X-User-Id header required' });
+  const agentId = (req.headers['x-agent-id'] as string | undefined)?.trim();
+  if (!agentId) {
+    log.error('exec.validation', { reason: 'missing X-Agent-Id' });
+    sendJson(res, 400, { error: 'X-Agent-Id header required' });
     return;
   }
 
-  const user = users.get(userId);
-  if (!user) {
-    log.error('exec.validation', { reason: 'unknown user', userId });
-    sendJson(res, 401, { error: `Unknown user: ${userId}` });
+  const agent = agents.get(agentId);
+  if (!agent) {
+    log.error('exec.validation', { reason: 'unknown agent', agentId });
+    sendJson(res, 401, { error: `Unknown agent: ${agentId}` });
     return;
   }
 
@@ -397,24 +397,24 @@ async function handleExec(
   const rawTopic = (data.topic ?? '').trim();
   const parsed = parseTopic(rawTopic);
   if (!parsed) {
-    log.error('exec.validation', { reason: 'invalid topic', userId, topic: rawTopic });
+    log.error('exec.validation', { reason: 'invalid topic', agentId, topic: rawTopic });
     sendJson(res, 400, { error: `Invalid topic: ${rawTopic}` });
     return;
   }
   const topic = topicToString(parsed);
   const requestId = (data.request_id ?? '').trim() || null;
 
-  const runtime = getOrCreateRuntime(userId, user.home);
+  const runtime = getOrCreateRuntime(agentId, agent.home);
   const state = getOrCreateTopic(runtime, topic);
   const cmdLabel = truncateCmd(cmd);
 
   // Queue if topic is busy; reject if queue is full
   if (state.executing) {
     if (state.queue.length >= MAX_QUEUE_SIZE) {
-      log.info('exec.queue_full', { userId, topic, queueLength: state.queue.length });
+      log.info('exec.queue_full', { agentId, topic, queueLength: state.queue.length });
       sendJson(res, 429, {
         error: 'QUEUE_FULL',
-        message: `Topic ${userId}:${topic} has ${MAX_QUEUE_SIZE} commands queued. Try again later.`,
+        message: `Topic ${agentId}:${topic} has ${MAX_QUEUE_SIZE} commands queued. Try again later.`,
       });
       return;
     }
@@ -446,14 +446,14 @@ async function handleExec(
       };
 
       state.queue.push(item);
-      log.info('exec.queued', { userId, topic, cmd: cmdLabel, queueLength: state.queue.length });
+      log.info('exec.queued', { agentId, topic, cmd: cmdLabel, queueLength: state.queue.length });
     });
 
     if (aborted) {
       // Remove from queue if still there
       const idx = state.queue.indexOf(item);
       if (idx !== -1) state.queue.splice(idx, 1);
-      log.info('exec.queue_timeout', { userId, topic, cmd: cmdLabel });
+      log.info('exec.queue_timeout', { agentId, topic, cmd: cmdLabel });
       if (!res.headersSent && !res.writableEnded) {
         sendJson(res, 504, { error: 'QUEUE_TIMEOUT', message: 'Timed out waiting in queue.' });
       }
@@ -467,7 +467,7 @@ async function handleExec(
     return;
   }
 
-  await executeCommand(runtime, state, cmd, cmdLabel, parsed!, userId, topic, requestId, res);
+  await executeCommand(runtime, state, cmd, cmdLabel, parsed!, agentId, topic, requestId, res);
 
   // Process next queued command if any
   drainQueue(state);
@@ -479,7 +479,7 @@ async function executeCommand(
   cmd: string,
   cmdLabel: string,
   parsed: NonNullable<ReturnType<typeof parseTopic>>,
-  userId: string,
+  agentId: string,
   topic: string,
   requestId: string | null,
   res: http.ServerResponse,
@@ -508,7 +508,7 @@ async function executeCommand(
       code: result.code ?? null,
       cmd: cmdLabel,
       request_id: requestId,
-      user_id: userId,
+      agent_id: agentId,
       topic,
       topic_type: parsed.type,
       meta: buildMeta(runtime.browser, topic),
@@ -516,7 +516,7 @@ async function executeCommand(
     sseEvent(res, 'head', head);
 
     log.info('exec', {
-      userId, topic, cmd: cmdLabel,
+      agentId, topic, cmd: cmdLabel,
       ok: result.ok, code: result.code ?? '', durationMs,
     });
 
@@ -534,7 +534,7 @@ async function executeCommand(
       code: 'INTERNAL_ERROR',
       cmd: cmdLabel,
       request_id: requestId,
-      user_id: userId,
+      agent_id: agentId,
       topic,
       topic_type: parsed.type,
       meta: null,
@@ -542,7 +542,7 @@ async function executeCommand(
     sseEvent(res, 'head', head);
     sseEvent(res, 'content', `re: ${reqLabel}${cmdLabel}\nERROR(INTERNAL_ERROR): ${String(e)}`);
     log.error('exec', {
-      userId, topic, cmd: cmdLabel,
+      agentId, topic, cmd: cmdLabel,
       message: String(e), stack: (e as Error).stack ?? '', durationMs,
     });
   } finally {
@@ -568,13 +568,13 @@ function drainQueue(state: TopicState): void {
 // /mcp speaks the MCP protocol over StreamableHTTP transport. One tool —
 // `string({ topic, cmd })` — wraps the same execution surface as /exec.
 // Stateless mode: a fresh server+transport per request, no session IDs.
-// X-User-Id picks the user; unknown users are auto-registered on first
+// X-Agent-Id picks the agent; unknown agents are auto-registered on first
 // touch so MCP clients don't need a separate provisioning call.
 
 async function handleMcp(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
-  const userId = (req.headers['x-user-id'] as string | undefined)?.trim() || 'default';
-  const user = ensureUserAuto(userId);
-  const runtime = getOrCreateRuntime(userId, user.home);
+  const agentId = (req.headers['x-agent-id'] as string | undefined)?.trim() || 'default';
+  const agent = ensureAgentAuto(agentId);
+  const runtime = getOrCreateRuntime(agentId, agent.home);
 
   const execFn: McpExecFn = async (rawTopic, cmd) => {
     const parsed = parseTopic(rawTopic);
@@ -602,7 +602,7 @@ async function handleMcp(req: http.IncomingMessage, res: http.ServerResponse): P
       const result = await runtime.browser.exec(cmd, topic, parsed.type);
       const durationMs = Date.now() - t0;
       log.info('mcp.exec', {
-        userId, topic, cmd: truncateCmd(cmd),
+        agentId, topic, cmd: truncateCmd(cmd),
         ok: result.ok, code: result.code ?? '', durationMs,
       });
       return {
@@ -612,7 +612,7 @@ async function handleMcp(req: http.IncomingMessage, res: http.ServerResponse): P
         topic,
       };
     } catch (e) {
-      log.error('mcp.exec.internal', { userId, topic, error: String(e) });
+      log.error('mcp.exec.internal', { agentId, topic, error: String(e) });
       return {
         ok: false,
         code: 'INTERNAL_ERROR',
@@ -638,7 +638,7 @@ async function handleMcp(req: http.IncomingMessage, res: http.ServerResponse): P
     const parsedBody = body ? JSON.parse(body) : undefined;
     await transport.handleRequest(req, res, parsedBody);
   } catch (e) {
-    log.error('mcp.transport', { userId, error: String(e) });
+    log.error('mcp.transport', { agentId, error: String(e) });
     if (!res.headersSent) sendJson(res, 500, { error: String(e) });
   }
 }
@@ -648,7 +648,7 @@ async function handleMcp(req: http.IncomingMessage, res: http.ServerResponse): P
 function createServer(): http.Server {
   return http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-User-Id');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Agent-Id');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -660,18 +660,18 @@ function createServer(): http.Server {
     const pathname = url.pathname;
     const method = req.method ?? 'GET';
 
-    const reqUserId = req.headers['x-user-id'] as string | undefined;
-    log.info('request', { method, path: pathname, userId: reqUserId ?? '' });
+    const reqUserId = req.headers['x-agent-id'] as string | undefined;
+    log.info('request', { method, path: pathname, agentId: reqUserId ?? '' });
 
     try {
-      // ── User routes ──
-      if (method === 'GET' && pathname === '/users') {
-        handleListUsers(req, res);
-      } else if (method === 'POST' && pathname === '/users') {
-        await handleRegisterUser(req, res);
-      } else if (method === 'DELETE' && pathname.startsWith('/users/')) {
-        const id = decodeURIComponent(pathname.slice('/users/'.length));
-        handleDeleteUser(res, id);
+      // ── Agent routes ──
+      if (method === 'GET' && pathname === '/agents') {
+        handleListAgents(req, res);
+      } else if (method === 'POST' && pathname === '/agents') {
+        await handleRegisterAgent(req, res);
+      } else if (method === 'DELETE' && pathname.startsWith('/agents/')) {
+        const id = decodeURIComponent(pathname.slice('/agents/'.length));
+        handleDeleteAgent(res, id);
 
       // ── Session routes ──
       } else if (method === 'GET' && pathname === '/sessions') {
@@ -679,15 +679,15 @@ function createServer(): http.Server {
       } else if (method === 'POST' && pathname === '/sessions') {
         await handleCreateSession(req, res);
       } else if (method === 'DELETE' && pathname.startsWith('/sessions/')) {
-        // /sessions/:user_id/:topic
+        // /sessions/:agent_id/:topic
         const rest = decodeURIComponent(pathname.slice('/sessions/'.length));
         const slashIdx = rest.indexOf('/');
         if (slashIdx === -1) {
-          sendJson(res, 400, { error: 'Expected /sessions/:user_id/:topic' });
+          sendJson(res, 400, { error: 'Expected /sessions/:agent_id/:topic' });
         } else {
-          const userId = rest.slice(0, slashIdx);
+          const agentId = rest.slice(0, slashIdx);
           const topic = rest.slice(slashIdx + 1);
-          handleDeleteSession(res, userId, topic);
+          handleDeleteSession(res, agentId, topic);
         }
 
       // ── Exec ──
@@ -707,7 +707,7 @@ function createServer(): http.Server {
       } else if (method === 'GET' && pathname === '/health') {
         let totalTopics = 0;
         for (const r of runtimes.values()) totalTopics += r.topics.size;
-        sendJson(res, 200, { ok: true, users: users.list().length, sessions: totalTopics });
+        sendJson(res, 200, { ok: true, agents: agents.list().length, sessions: totalTopics });
 
       } else {
         sendJson(res, 404, { error: `Not found: ${method} ${pathname}` });
@@ -721,27 +721,27 @@ function createServer(): http.Server {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
-export function startDaemon(port = 3100, opts?: { log?: boolean }): void {
-  const logEnabled = opts?.log || process.env.STRINGD_LOG === '1';
+export function startDaemon(port = 3923, opts?: { log?: boolean }): void {
+  const logEnabled = opts?.log || process.env.STRING_LOG === '1';
   log = createLogger({
     enabled: logEnabled,
-    dir: join(STRINGD_DATA_DIR, 'logs'),
+    dir: join(STRING_DATA_DIR, 'logs'),
   });
 
-  // Disk-first recovery: ~/.string/users/<id> is the source of truth for user
+  // Disk-first recovery: ~/.string/agents/<id> is the source of truth for agent
   // homes. If the registry JSON gets lost/corrupted or the daemon migrates
-  // STRINGD_DATA_DIR, re-register any home dirs we discover. Idempotent.
-  const usersRoot = join(homedir(), '.string', 'users');
+  // STRING_DATA_DIR, re-register any home dirs we discover. Idempotent.
+  const agentsRoot = join(homedir(), '.string', 'agents');
   try {
-    for (const entry of readdirSync(usersRoot)) {
-      const home = join(usersRoot, entry);
+    for (const entry of readdirSync(agentsRoot)) {
+      const home = join(agentsRoot, entry);
       try {
         if (!statSync(home).isDirectory()) continue;
       } catch {
         continue;
       }
-      if (users.has(entry)) continue;
-      users.register({
+      if (agents.has(entry)) continue;
+      agents.register({
         id: entry,
         home,
         allowedPaths: [],
@@ -749,12 +749,12 @@ export function startDaemon(port = 3100, opts?: { log?: boolean }): void {
       });
     }
   } catch {
-    // usersRoot doesn't exist yet — fresh install, fine.
+    // agentsRoot doesn't exist yet — fresh install, fine.
   }
 
-  const loadedUsers = users.list().length;
+  const loadedUsers = agents.list().length;
   if (loadedUsers > 0) {
-    console.log(`Loaded ${loadedUsers} user(s) from ${STRINGD_DATA_DIR}/users.json`);
+    console.log(`Loaded ${loadedUsers} agent(s) from ${STRING_DATA_DIR}/agents.json`);
   }
 
   const server = createServer();
@@ -764,8 +764,8 @@ export function startDaemon(port = 3100, opts?: { log?: boolean }): void {
   // explicit `--bind` + auth layer, planned for a later milestone.
   server.listen(port, '127.0.0.1', () => {
     console.log(`stringd listening on http://127.0.0.1:${port}`);
-    console.log('Endpoints: POST/GET/DELETE /users  GET/POST/DELETE /sessions  POST /exec  /mcp');
-    log.info('server.start', { port, dataDir: STRINGD_DATA_DIR, logEnabled });
+    console.log('Endpoints: POST/GET/DELETE /agents  GET/POST/DELETE /sessions  POST /exec  /mcp');
+    log.info('server.start', { port, dataDir: STRING_DATA_DIR, logEnabled });
   });
 
   const shutdown = (signal: string) => {

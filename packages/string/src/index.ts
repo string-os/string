@@ -15,8 +15,8 @@ export { BashSession } from './bash-session.js';
 export { Loader } from './loader.js';
 export type { AccessMode, HtmlToMarkdown } from './loader.js';
 export { createHtmlToMarkdown } from './html-to-md.js';
-export { UserRegistry, createUserRegistry } from './user.js';
-export type { User } from './user.js';
+export { AgentRegistry, createAgentRegistry } from './agent.js';
+export type { Agent } from './agent.js';
 export { formatDiff, formatLineNumbers } from './diff.js';
 export type { DiffOptions } from './diff.js';
 export { resolveConfig, DEFAULT_CONFIG } from './config.js';
@@ -24,10 +24,10 @@ export type { StringConfig } from './config.js';
 export {
   loadClientConfig,
   saveClientConfig,
-  getCurrentUser,
-  setCurrentUser,
-  clearCurrentUser,
-  resolveUserId,
+  getCurrentAgent,
+  setCurrentAgent,
+  clearCurrentAgent,
+  resolveAgentId,
   configPath,
 } from './config.js';
 export type { ClientConfig } from './config.js';
@@ -35,11 +35,11 @@ export { EnvStore, deriveEnvScope } from './env-store.js';
 export type { EnvScope } from './env-store.js';
 export { installPackage } from './installer.js';
 export type { InstallResult } from './installer.js';
-export { ping, ensureUser, exec, listUsers, deleteUser } from '@string-os/client';
-export type { ExecResult, UserInfo } from '@string-os/client';
+export { ping, ensureAgent, exec, listAgents, deleteAgent } from '@string-os/client';
+export type { ExecResult, AgentInfo } from '@string-os/client';
 
 export interface BrowserOptions extends LoaderOptions {
-  userId?: string;
+  agentId?: string;
   defaultSession?: string;
 }
 
@@ -47,12 +47,12 @@ export class Browser {
   private readonly loader: Loader;
   private readonly sessions = new Map<string, Session>();
   private _activeSession: string;
-  readonly userId: string | undefined;
+  readonly agentId: string | undefined;
 
   constructor(options: BrowserOptions = {}) {
     this.loader = new Loader(options);
     this._activeSession = options.defaultSession ?? 'main';
-    this.userId = options.userId;
+    this.agentId = options.agentId;
     // Sessions are created lazily via session()
 
     // Let package commands (e.g. /uninstall) destroy zombie sessions pointing

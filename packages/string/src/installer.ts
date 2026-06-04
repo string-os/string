@@ -1,7 +1,7 @@
 /**
  * String — Package Installer
  * Installs apps/tools by copying source to {home}/packages/ and registering in config.json.
- * `home` here is the String user's home (already a String-only directory).
+ * `home` here is the String agent's home (already a String-only directory).
  */
 
 import fs from 'fs/promises';
@@ -88,7 +88,7 @@ export async function installPackage(
   opts: { type?: 'app' | 'tool'; link?: boolean; as?: string },
   loader: Loader,
 ): Promise<InstallResult> {
-  // --link only makes sense for http(s) URLs. Check up-front so a user who
+  // --link only makes sense for http(s) URLs. Check up-front so an agent who
   // typed `--link ./local-file.md` gets a clear "needs URL" error instead of
   // the loader's generic "File not found" (which sent us down a dead end).
   if (opts.link && !source.startsWith('http://') && !source.startsWith('https://')) {

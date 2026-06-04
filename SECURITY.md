@@ -34,11 +34,11 @@ Signed packages, fine-grained capabilities, and provenance metadata are planned 
 
 ## Runtime threat model (v0.1)
 
-String OS is a **single-user, single-machine agent runtime** in v0.1. The sections below make the trust boundaries explicit so embedders don't ship it with mistaken assumptions.
+String OS is a **single-agent, single-machine agent runtime** in v0.1. The sections below make the trust boundaries explicit so embedders don't ship it with mistaken assumptions.
 
 ### Shell execution is by design
 
-- `/exec` and CLI-method actions invoke `/bin/bash -c <command>` intentionally. The agent runtime assumes the LLM is a first-class shell user. There is no sandbox, no seccomp, no container by default — if the LLM can issue `/exec`, it has the same authority as the user who launched `stringd`.
+- `/exec` and CLI-method actions invoke `/bin/bash -c <command>` intentionally. The agent runtime assumes the LLM is a first-class shell agent. There is no sandbox, no seccomp, no container by default — if the LLM can issue `/exec`, it has the same authority as the OS user who launched `stringd`.
 - Both `/exec` and bash topics (`bash:*`) are **opt-in**: the default action allowlist does not enable them. An embedder who enables bash is accepting full shell authority.
 - `{...args}` and `{name}` path-param substitution in CLI actions use POSIX single-quote escaping so that LLM-supplied *data* cannot break out into *command*. Templates must not wrap `{...args}` in additional quotes — the slot self-quotes. See `packages/string/src/commands/action.ts`.
 
@@ -47,7 +47,7 @@ String OS is a **single-user, single-machine agent runtime** in v0.1. The sectio
 ### Daemon transport trust
 
 - `stringd` binds to `127.0.0.1` only. It is **not** designed to be exposed on a network, behind a reverse proxy, or inside a shared container.
-- `X-User-Id` is an **identity header, not authentication**. It selects which user record to operate under. Any process on the loopback interface can set any header — the assumption is that same-host processes run as the same OS user and therefore trust each other.
+- `X-Agent-Id` is an **identity header, not authentication**. It selects which agent record to operate under. Any process on the loopback interface can set any header — the assumption is that same-host processes run as the same OS user and therefore trust each other.
 - `/shutdown` and `/health` have no auth by design. A hostile local process can kill the daemon; this is equivalent to the same process sending `SIGTERM`, which it could already do.
 - CORS is permissive (`Access-Control-Allow-Origin: *`). Browsers should not call `stringd` directly — treat CORS as a convenience for local tooling, not a security boundary.
 - Request bodies are capped at 10 MiB to prevent trivial OOM. See `packages/string/src/daemon.ts`.
@@ -56,8 +56,8 @@ String OS is a **single-user, single-machine agent runtime** in v0.1. The sectio
 
 ### On-disk secret storage
 
-- `env-store` writes `config.json` (environment variables, including API keys) to the daemon's `STRINGD_DATA_DIR` with mode `0o600` inside a `0o700` directory. On multi-user systems, other local users cannot read the file. On single-user systems this is defense in depth.
-- `users.json` (user registry) uses the same permissions.
+- `env-store` writes `config.json` (environment variables, including API keys) to the daemon's `STRING_DATA_DIR` with mode `0o600` inside a `0o700` directory. On multi-user systems, other local OS users cannot read the file. On single-user systems this is defense in depth.
+- `agents.json` (agent registry) uses the same permissions.
 - Secrets are stored **in plaintext**. There is no OS-keychain integration in v0.1. If the daemon's data directory is on a shared filesystem, an attacker with root or filesystem-level access can read the keys. Mount the data directory on a user-scoped path.
 
 **Not in scope for v0.1:** OS keychain integration, secret encryption at rest, key rotation.

@@ -134,7 +134,7 @@ function renderBashHub(loader: Loader): string {
   const parts: string[] = [
     '# bash hub',
     '',
-    'Active bash sessions across this user.',
+    'Active bash sessions across this agent.',
   ];
 
   if (sessions === null) {
@@ -210,4 +210,3 @@ function renderSystemHub(loader: Loader): string {
   );
   return parts.join('\n');
 }
-

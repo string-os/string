@@ -6,16 +6,16 @@ title: stringd Protocol v0.1
 
 **Version:** 0.1 — matches `@string-os/string@0.1.x`. Breaking changes to this protocol will bump the major version of the daemon and be documented in `stringd-protocol-v0.2.md`, with explicit migration notes.
 
-**Transport:** HTTP/1.1 over loopback (`127.0.0.1`) by default. Port: `3100` by default, configurable via `STRINGD_PORT`.
+**Transport:** HTTP/1.1 over loopback (`127.0.0.1`) by default. Port: `3923` by default, configurable via `STRING_PORT`.
 
 ---
 
 ## Security model
 
-`stringd` is a **single-user, loopback-only** daemon. The protocol is designed around these assumptions — conforming implementations MUST NOT loosen them without an explicit versioned extension.
+`stringd` is a **single-agent, loopback-only** daemon. The protocol is designed around these assumptions — conforming implementations MUST NOT loosen them without an explicit versioned extension.
 
 1. **Loopback only.** The daemon binds `127.0.0.1`. It is not a network service. Do not put it behind a reverse proxy, do not expose it in a shared container, do not publish the port. CORS is permissive for local-tooling convenience, not as a security boundary.
-2. **`X-User-Id` is identity, not authentication.** It selects which user record a request operates under. Any process on the loopback interface can set any value. The trust assumption is "same host, same OS user" — processes on the same machine running as the same UID are trusted to not lie to each other.
+2. **`X-Agent-Id` is identity, not authentication.** It selects which agent record a request operates under. Any process on the loopback interface can set any value. The trust assumption is "same host, same OS user" — processes on the same machine running as the same UID are trusted to not lie to each other.
 3. **No per-request signing or token auth.** `/health` and `/shutdown` accept any caller. A hostile local process can shut the daemon down; this is equivalent to sending `SIGTERM`, which such a process could already do.
 4. **Request body cap.** The daemon rejects bodies larger than 10 MiB to prevent trivial OOM. Clients SHOULD NOT send JSON payloads anywhere near this bound.
 5. **Shell execution is by design.** `/exec` and CLI-method actions run under `/bin/bash -c`. This is a deliberate property of the agent runtime, not a vulnerability. Embedders who need sandboxing must provide it at the OS level (containers, firejail, VMs).
@@ -26,9 +26,9 @@ If your deployment needs multi-tenant access, remote use, or per-request authent
 
 ## Concepts
 
-A **user** is the top-level identity. Each user has a home directory (`user.home`) and an optional allowlist of additional accessible paths. Users are registered via `POST /users` and persist across daemon restarts in `${STRINGD_DATA_DIR}/users.json` (default: `.stringd/users.json` in the daemon's working directory).
+An **agent** is the top-level identity. Each agent has a home directory (`agent.home`) and an optional allowlist of additional accessible paths. Agents are registered via `POST /agents` and persist across daemon restarts in `${STRING_DATA_DIR}/agents.json` (default: `~/.string/daemon/agents.json`).
 
-A **topic** is the unit of session scope. A topic is either a bare name — a free-form `tab` (e.g. `main`, `docs`) — or canonical: `app:name[:config]` (e.g. `app:weather:korea`) or `bash:name` (e.g. `bash:dev`). The bare names `app`, `bash`, `tool`, `system` are reserved as `hub` aggregators. A topic belongs to a user. The runtime maintains per-topic state (current document, variables, history, bash PTY if applicable).
+A **topic** is the unit of session scope. A topic is either a bare name — a free-form `tab` (e.g. `main`, `docs`) — or canonical: `app:name[:config]` (e.g. `app:weather:korea`) or `bash:name` (e.g. `bash:dev`). The bare names `app`, `bash`, `tool`, `system` are reserved as `hub` aggregators. A topic belongs to an agent. The runtime maintains per-topic state (current document, variables, history, bash PTY if applicable).
 
 A **command** is a single `/open`, `/act`, `/nav`, `/info`, `/set`, `/edit`, etc. invocation. Commands execute in a topic's context. A client sends one command per `POST /exec` call; the daemon responds with a Server-Sent Events (SSE) stream containing a head event, a content event, and a done event.
 
@@ -36,17 +36,17 @@ A **command** is a single `/open`, `/act`, `/nav`, `/info`, `/set`, `/edit`, etc
 
 ## Base URL and headers
 
-All endpoints are served under `http://127.0.0.1:${STRINGD_PORT}`. The daemon does not bind to external interfaces.
+All endpoints are served under `http://127.0.0.1:${STRING_PORT}`. The daemon does not bind to external interfaces.
 
-All requests that operate on user data must include the user ID header:
+All requests that operate on agent data must include the agent ID header:
 
 ```
-X-User-Id: <user_id>
+X-Agent-Id: <agent_id>
 ```
 
-Endpoints that do not require a user (`/users`, `/health`, `/shutdown`) ignore this header if present.
+Endpoints that do not require an agent (`/agents`, `/health`, `/shutdown`) ignore this header if present.
 
-CORS is permissive: the daemon sends `Access-Control-Allow-Origin: *` and `Access-Control-Allow-Headers: Content-Type, X-User-Id` on every response, and responds to `OPTIONS` preflight with `204 No Content`. Clients should not rely on CORS for security — `stringd` is intended for loopback only.
+CORS is permissive: the daemon sends `Access-Control-Allow-Origin: *` and `Access-Control-Allow-Headers: Content-Type, X-Agent-Id` on every response, and responds to `OPTIONS` preflight with `204 No Content`. Clients should not rely on CORS for security — `stringd` is intended for loopback only.
 
 All request bodies, where present, MUST be `Content-Type: application/json`.
 
@@ -56,64 +56,63 @@ All error responses are JSON: `{ "error": "<human-readable reason>" }` with an a
 
 ## Endpoints
 
-### Users
+### Agents
 
-#### `GET /users` — list users
+#### `GET /agents` — list agents
 
 **Response 200:**
 ```json
 {
-  "users": [
-    { "id": "default", "home": "/home/alice/.string/users/default", "allowedPaths": [], "createdAt": "2026-04-14T05:52:00.000Z" }
+  "agents": [
+    { "id": "default", "home": "/home/alice/.string/agents/default", "allowedPaths": [], "createdAt": "2026-04-14T05:52:00.000Z" }
   ]
 }
 ```
 
-#### `POST /users` — register or update a user
+#### `POST /agents` — register or update an agent
 
 **Request:**
 ```json
-{ "id": "default", "home": "/home/alice/.string/users/default" }
+{ "agent_id": "default", "home": "/home/alice/.string/agents/default" }
 ```
 
-Both fields are required. `home` must be an absolute path. Registration is idempotent: if `id` already exists, the call updates `home` and preserves `createdAt`.
+`agent_id` is required. `home` is optional; when omitted, the daemon ensures the agent exists without clobbering a stored home. New agents without an explicit home get `~/.string/agents/{agent_id}`. Registration is idempotent: if `agent_id` already exists, the call updates only fields provided by the request and preserves `createdAt`.
 
 **Response 200:**
 ```json
-{ "user_id": "default", "home": "/home/alice/.string/users/default", "created": true }
+{ "agent_id": "default", "home": "/home/alice/.string/agents/default", "created": true }
 ```
 
-`created: true` if the user was newly registered, `false` if the call updated an existing user.
+`created: true` if the agent was newly registered, `false` if the call updated an existing agent.
 
 **Errors:**
-- `400 { "error": "id required" }`
-- `400 { "error": "home required" }`
+- `400 { "error": "agent_id required" }`
 
-#### `DELETE /users/:user_id` — delete a user
+#### `DELETE /agents/:agent_id` — delete an agent
 
-Removes the user record and any in-memory runtime state (sessions, bash PTYs). Does not delete files in the user's home directory.
+Removes the agent record and any in-memory runtime state (sessions, bash PTYs). Does not delete files in the agent's home directory.
 
 **Response 200:**
 ```json
-{ "user_id": "default", "deleted": true }
+{ "agent_id": "default", "deleted": true }
 ```
 
-`deleted: false` if the user did not exist.
+`deleted: false` if the agent did not exist.
 
 ---
 
 ### Sessions (topics)
 
-#### `GET /sessions?user_id=<id>` — list active sessions
+#### `GET /sessions?agent_id=<id>` — list active sessions
 
-The `user_id` query parameter is optional. If omitted, returns sessions across all users.
+The `agent_id` query parameter is optional. If omitted, returns sessions across all agents.
 
 **Response 200:**
 ```json
 {
   "sessions": [
     {
-      "user_id": "default",
+      "agent_id": "default",
       "topic": "main",
       "topic_type": "tab",
       "executing": false,
@@ -132,36 +131,36 @@ The `doc` field is `null` if no document has been opened in the session yet.
 
 #### `POST /sessions` — create or touch a session
 
-Ensures a session exists for the given user+topic. Does not execute any command — the session starts empty and waits for the first `/exec` call.
+Ensures a session exists for the given agent+topic. Does not execute any command — the session starts empty and waits for the first `/exec` call.
 
 **Request:**
 ```json
-{ "user_id": "default", "topic": "main" }
+{ "agent_id": "default", "topic": "main" }
 ```
 
 **Response 200:**
 ```json
-{ "user_id": "default", "topic": "main", "topic_type": "tab", "created": true }
+{ "agent_id": "default", "topic": "main", "topic_type": "tab", "created": true }
 ```
 
 **Errors:**
-- `400 { "error": "user_id required" }`
-- `401 { "error": "Unknown user: <id>" }`
+- `400 { "error": "agent_id required" }`
+- `401 { "error": "Unknown agent: <id>" }`
 - `400 { "error": "Invalid topic: <raw>" }`
 
-#### `DELETE /sessions/:user_id/:topic` — close a session
+#### `DELETE /sessions/:agent_id/:topic` — close a session
 
 Releases the topic's runtime state and closes any bash PTY.
 
 **Response 200:**
 ```json
-{ "user_id": "default", "topic": "main", "deleted": true }
+{ "agent_id": "default", "topic": "main", "deleted": true }
 ```
 
 `deleted: false` if the session did not exist.
 
 **Errors:**
-- `400 { "error": "Expected /sessions/:user_id/:topic" }`
+- `400 { "error": "Expected /sessions/:agent_id/:topic" }`
 
 ---
 
@@ -172,7 +171,7 @@ Releases the topic's runtime state and closes any bash PTY.
 This is the primary endpoint. Clients send a command; the daemon returns an SSE stream with the result.
 
 **Headers:**
-- `X-User-Id: <user_id>` (required)
+- `X-Agent-Id: <agent_id>` (required)
 - `Content-Type: application/json` (required)
 - `Accept: text/event-stream` (recommended; the daemon emits SSE regardless)
 
@@ -206,7 +205,7 @@ Metadata about the command result. Always sent first.
 
 ```
 event: head
-data: {"ok":true,"code":null,"cmd":"/open ./README.md","request_id":null,"user_id":"default","topic": "main","topic_type": "tab","meta":{"uri":"file:///home/alice/work/README.md","title":"README","current_block":null}}
+data: {"ok":true,"code":null,"cmd":"/open ./README.md","request_id":null,"agent_id":"default","topic": "main","topic_type": "tab","meta":{"uri":"file:///home/alice/work/README.md","title":"README","current_block":null}}
 ```
 
 Fields:
@@ -214,7 +213,7 @@ Fields:
 - `code` (string | null): command result code. `null` on success, a short error code like `"NOT_FOUND"` or `"INTERNAL_ERROR"` on failure.
 - `cmd` (string): the command as received, possibly truncated for display. Do not use this for re-execution.
 - `request_id` (string | null): echo of the client's `request_id`, or `null`.
-- `user_id` (string): the user the command ran as.
+- `agent_id` (string): the agent the command ran as.
 - `topic` (string): the topic, canonicalized.
 - `topic_type` (string): one of `"tab"`, `"app"`, `"bash"`, `"hub"`.
 - `meta` (object | null): current document metadata after the command, or `null` if no document is loaded.
@@ -262,14 +261,14 @@ After `done`, the daemon calls `res.end()` and closes the stream. Clients should
 
 ##### Queueing and contention
 
-A topic processes one command at a time. If a second command arrives while the first is executing, it is queued (up to `MAX_QUEUE_SIZE = 16`). If the queue is full, the new request returns immediately:
+A topic processes one command at a time. If a second command arrives while the first is executing, it is queued (up to `MAX_QUEUE_SIZE = 5`). If the queue is full, the new request returns immediately:
 
 **Error 429:**
 ```json
-{ "error": "QUEUE_FULL", "message": "Topic default:main has 16 commands queued. Try again later." }
+{ "error": "QUEUE_FULL", "message": "Topic default:main has 5 commands queued. Try again later." }
 ```
 
-If a queued request waits longer than `QUEUE_WAIT_TIMEOUT_MS = 60000` (1 minute), it times out:
+If a queued request waits longer than `QUEUE_WAIT_TIMEOUT_MS = 30000` (30 seconds), it times out:
 
 **Error 504:**
 ```json
@@ -280,8 +279,8 @@ If the client disconnects while waiting in the queue, the request is aborted sil
 
 ##### Other errors
 
-- `400 { "error": "X-User-Id header required" }` — missing header
-- `401 { "error": "Unknown user: <id>" }` — user not registered
+- `400 { "error": "X-Agent-Id header required" }` — missing header
+- `401 { "error": "Unknown agent: <id>" }` — agent not registered
 - `400 { "error": "Invalid JSON body — expected { \"cmd\": \"...\" }" }` — malformed JSON
 - `400 { "error": "Empty command — provide non-empty \"cmd\" field" }` — missing `cmd`
 - `400 { "error": "Invalid topic: <raw>" }` — topic did not parse
@@ -295,7 +294,7 @@ If the client disconnects while waiting in the queue, the request is aborted sil
 Serves the [Model Context Protocol](https://modelcontextprotocol.io) over the Streamable HTTP transport. One tool — `string({ topic, cmd })` — wraps the entire command surface (same as `/exec`).
 
 **Headers:**
-- `X-User-Id: <user_id>` (optional, defaults to `"default"`)
+- `X-Agent-Id: <agent_id>` (optional, defaults to `"default"`)
 - `Content-Type: application/json` for POST
 - `Accept: application/json, text/event-stream` (recommended)
 
@@ -312,9 +311,9 @@ Serves the [Model Context Protocol](https://modelcontextprotocol.io) over the St
 
 The body is wrapped in a **ChanFlow envelope** identical to the CLI's stdout — the topic lives in the opening tag, so no separate `structuredContent` field is needed. On error, `isError` is `true` and the body carries the code as `ERROR(CODE): <message>` (e.g. `ERROR(NOT_FOUND): …`).
 
-Unknown users are **auto-registered** on first touch — no `POST /users` needed. Home is derived as `~/.string/users/{user_id}`. This is unique to `/mcp` (the `/exec` endpoint still requires explicit registration via `POST /users`).
+Unknown agents are **auto-registered** on first touch — no `POST /agents` needed. Home is derived as `~/.string/agents/{agent_id}`. This is unique to `/mcp` (the `/exec` endpoint still requires explicit registration via `POST /agents`).
 
-Stateless mode: a fresh server+transport per request, no session IDs. Concurrent calls on the same topic from a single user are serialized with a `BUSY` rejection (no queue at v0.1).
+Stateless mode: a fresh server+transport per request, no session IDs. Concurrent calls on the same topic from a single agent are serialized with a `BUSY` rejection (no queue at v0.1).
 
 See [Runtime → MCP](../runtime/mcp.md) for client setup examples.
 
@@ -326,10 +325,10 @@ See [Runtime → MCP](../runtime/mcp.md) for client setup examples.
 
 **Response 200:**
 ```json
-{ "ok": true, "users": 1, "sessions": 3 }
+{ "ok": true, "agents": 1, "sessions": 3 }
 ```
 
-No auth required. Clients use this as a liveness check before sending a command. `sessions` counts active topics across all users.
+No auth required. Clients use this as a liveness check before sending a command. `sessions` counts active topics across all agents.
 
 #### `POST /shutdown` — request daemon shutdown
 
@@ -340,7 +339,7 @@ Sends a final JSON response, then exits the process after a 50 ms grace period.
 { "ok": true, "message": "stringd shutting down" }
 ```
 
-No auth required. Clients are responsible for deciding whether shutdown is appropriate (stringd is typically user-scoped, but a hostile client on loopback can call this).
+No auth required. Clients are responsible for deciding whether shutdown is appropriate (stringd is typically agent-scoped, but a hostile client on loopback can call this).
 
 ---
 
@@ -349,7 +348,7 @@ No auth required. Clients are responsible for deciding whether shutdown is appro
 A conforming v0.1 client SHOULD:
 
 1. **Ping the daemon** via `GET /health` before the first `/exec` call. Auto-start the daemon if unreachable (out of scope for this document — each language has its own spawn mechanism).
-2. **Ensure the user** exists via `POST /users` before the first `/exec` call. Registration is idempotent — calling it on every client startup is fine.
+2. **Ensure the agent** exists via `POST /agents` before the first `/exec` call. Registration is idempotent — calling it on every client startup is fine.
 3. **Accept `text/event-stream`** on `/exec` requests, parse the three SSE events, and return a structured result:
    ```
    { ok: boolean, code: string | null, content: string, meta: object | null }
@@ -368,7 +367,7 @@ A conforming client MAY:
 
 A conforming client MUST NOT:
 
-- Send `/exec` calls without an `X-User-Id` header.
+- Send `/exec` calls without an `X-Agent-Id` header.
 - Interpret the SSE `data:` field as raw bytes — it is always a JSON-encoded value.
 - Assume the `meta` field in the `head` event is non-null.
 - Assume commands are synchronous from the daemon's perspective — always wait for the `done` event.
@@ -386,4 +385,4 @@ If you implement this protocol in another language, open an issue at <https://gi
 
 ## Changelog
 
-- **v0.1.0** (2026-04-14): initial release. Endpoints: `/users` (GET/POST/DELETE), `/sessions` (GET/POST/DELETE), `/exec` (POST), `/health` (GET), `/shutdown` (POST). SSE event triple: `head`/`content`/`done`. Wire field `topic_type` (not `target_type`).
+- **v0.1.0** (2026-04-14): initial release. Endpoints: `/agents` (GET/POST/DELETE), `/sessions` (GET/POST/DELETE), `/exec` (POST), `/health` (GET), `/shutdown` (POST). SSE event triple: `head`/`content`/`done`. Wire field `topic_type` (not `target_type`).

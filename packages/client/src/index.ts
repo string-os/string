@@ -1,5 +1,5 @@
 /**
- * stringd HTTP client — ping, ensureUser, exec (SSE parsing)
+ * stringd HTTP client — ping, ensureAgent, exec (SSE parsing)
  *
  * Uses only Node.js built-in `http` module. No external dependencies.
  */
@@ -15,7 +15,7 @@ export interface ExecResult {
   meta: object | null;
 }
 
-export interface UserInfo {
+export interface AgentInfo {
   id: string;
   home: string;
   allowedPaths: string[];
@@ -133,44 +133,44 @@ export async function ping(port: number): Promise<boolean> {
 }
 
 /**
- * POST /users — register or update a user. Idempotent.
+ * POST /agents — register or update an agent. Idempotent.
  *
- * `home` is OPTIONAL: when omitted, the daemon ensures the user exists without
- * overwriting an existing user's stored home (a brand-new user gets a derived
+ * `home` is OPTIONAL: when omitted, the daemon ensures the agent exists without
+ * overwriting an existing agent's stored home (a brand-new agent gets a derived
  * home). Only an explicit `home` writes/updates the home. `allowedPaths`, when
- * provided, is set on the user; otherwise existing allowedPaths are preserved.
+ * provided, is set on the agent; otherwise existing allowedPaths are preserved.
  */
-export async function ensureUser(
+export async function ensureAgent(
   port: number,
-  user: { id: string; home?: string; allowedPaths?: string[] },
+  agent: { id: string; home?: string; allowedPaths?: string[] },
 ): Promise<void> {
-  const payload: { user_id: string; home?: string; allowed_paths?: string[] } = {
-    user_id: user.id,
+  const payload: { agent_id: string; home?: string; allowed_paths?: string[] } = {
+    agent_id: agent.id,
   };
-  if (user.home !== undefined) payload.home = user.home;
-  if (user.allowedPaths !== undefined) payload.allowed_paths = user.allowedPaths;
+  if (agent.home !== undefined) payload.home = agent.home;
+  if (agent.allowedPaths !== undefined) payload.allowed_paths = agent.allowedPaths;
 
-  const res = await request(port, 'POST', '/users', JSON.stringify(payload));
+  const res = await request(port, 'POST', '/agents', JSON.stringify(payload));
   if (res.status !== 200) {
-    throw new Error(`ensureUser failed (${res.status}): ${res.body}`);
+    throw new Error(`ensureAgent failed (${res.status}): ${res.body}`);
   }
 }
 
-/** GET /users — list all registered users. */
-export async function listUsers(port: number): Promise<UserInfo[]> {
-  const res = await request(port, 'GET', '/users');
+/** GET /agents — list all registered agents. */
+export async function listAgents(port: number): Promise<AgentInfo[]> {
+  const res = await request(port, 'GET', '/agents');
   if (res.status !== 200) {
-    throw new Error(`listUsers failed (${res.status}): ${res.body}`);
+    throw new Error(`listAgents failed (${res.status}): ${res.body}`);
   }
-  const data = JSON.parse(res.body) as { users: UserInfo[] };
-  return data.users ?? [];
+  const data = JSON.parse(res.body) as { agents: AgentInfo[] };
+  return data.agents ?? [];
 }
 
-/** DELETE /users/:id — remove a user. Returns whether the user existed. */
-export async function deleteUser(port: number, id: string): Promise<boolean> {
-  const res = await request(port, 'DELETE', `/users/${encodeURIComponent(id)}`);
+/** DELETE /agents/:id — remove an agent. Returns whether the agent existed. */
+export async function deleteAgent(port: number, id: string): Promise<boolean> {
+  const res = await request(port, 'DELETE', `/agents/${encodeURIComponent(id)}`);
   if (res.status !== 200) {
-    throw new Error(`deleteUser failed (${res.status}): ${res.body}`);
+    throw new Error(`deleteAgent failed (${res.status}): ${res.body}`);
   }
   const data = JSON.parse(res.body) as { deleted?: boolean };
   return data.deleted ?? false;
@@ -179,7 +179,7 @@ export async function deleteUser(port: number, id: string): Promise<boolean> {
 /** POST /exec — execute a command, parse SSE response into ExecResult. */
 export async function exec(
   port: number,
-  userId: string,
+  agentId: string,
   topic: string,
   cmd: string,
 ): Promise<ExecResult> {
@@ -188,7 +188,7 @@ export async function exec(
     'POST',
     '/exec',
     JSON.stringify({ cmd, topic }),
-    { 'X-User-Id': userId },
+    { 'X-Agent-Id': agentId },
   );
 
   // Non-SSE error (400, 401, 429, etc.)
@@ -209,8 +209,8 @@ export async function shutdown(port: number): Promise<void> {
   await request(port, 'POST', '/shutdown');
 }
 
-/** GET /health — daemon health with user/session counts. */
-export async function health(port: number): Promise<{ ok: boolean; users: number; sessions: number }> {
+/** GET /health — daemon health with agent/session counts. */
+export async function health(port: number): Promise<{ ok: boolean; agents: number; sessions: number }> {
   const res = await request(port, 'GET', '/health');
   if (res.status !== 200) {
     throw new Error(`health check failed (${res.status}): ${res.body}`);

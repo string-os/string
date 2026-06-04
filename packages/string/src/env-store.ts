@@ -2,7 +2,7 @@
  * String — Environment Variable Store
  * Per-app persistent $var storage.
  *
- * `home` is the String user's home directory — it's already String-only, so
+ * `home` is the String agent's home directory — it's already String-only, so
  * everything sits at the root (no nested `.string/` subdir).
  *
  * Storage layout:
@@ -31,7 +31,7 @@ export interface EnvScope {
 }
 
 export class EnvStore {
-  private readonly baseDir: string; // String user home — root for config/apps
+  private readonly baseDir: string; // String agent.home — root for config/apps
   // mtime-keyed cache: invalidates if file was edited (or deleted) outside this process.
   private readonly fileCache = new Map<string, { mtimeMs: number; data: Record<string, unknown> }>();
 
@@ -145,8 +145,8 @@ export class EnvStore {
 
   private readJson(filePath: string): Record<string, unknown> {
     // Check on-disk mtime first. If the file was deleted or modified outside
-    // this process (e.g. user did `rm -rf ~/.string`), our cached copy is stale
-    // and reusing it would resurrect data the user just deleted.
+    // this process (e.g. agent did `rm -rf ~/.string`), our cached copy is stale
+    // and reusing it would resurrect data the agent just deleted.
     let mtimeMs: number | null = null;
     try {
       mtimeMs = statSync(filePath).mtimeMs;

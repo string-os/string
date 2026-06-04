@@ -1,11 +1,11 @@
 /**
  * Navigation tests: open, info, block nav, nav, back, close, refresh,
  * shortcuts, auto-shortcuts, renderer, session mgmt, error handling,
- * workspace boundary, user registry
+ * workspace boundary, agent registry
  */
 import fs from 'fs';
 import path from 'path';
-import { Browser, createUserRegistry } from '../index.js';
+import { Browser, createAgentRegistry } from '../index.js';
 import { assert, section, mkBrowser, WIKI } from './runner.js';
 
 await section('Basic open + info', async () => {
@@ -334,29 +334,29 @@ await section('Workspace boundary — /open blocked in workspace mode', async ()
   assert(r3.ok, 'open within home works');
 });
 
-await section('UserRegistry basics', async () => {
-  const registry = createUserRegistry();
+await section('AgentRegistry basics', async () => {
+  const registry = createAgentRegistry();
 
-  const user = registry.register({
+  const agent = registry.register({
     id: 'neo',
     home: '/workspace/neo',
     allowedPaths: ['/workspace/shared'],
     createdAt: '2026-03-11T00:00:00Z',
   });
 
-  assert(user.id === 'neo', 'register returns normalized user');
-  assert(registry.has('neo'), 'has returns true for registered user');
-  assert(registry.get('neo')?.home === '/workspace/neo', 'get returns registered user with home');
-  assert(registry.list().length === 1, 'list returns one user');
+  assert(agent.id === 'neo', 'register returns normalized agent');
+  assert(registry.has('neo'), 'has returns true for registered agent');
+  assert(registry.get('neo')?.home === '/workspace/neo', 'get returns registered agent with home');
+  assert(registry.list().length === 1, 'list returns one agent');
   assert(registry.canAccessPath('neo', '/workspace/neo'), 'home dir is allowed');
   assert(registry.canAccessPath('neo', '/workspace/shared'), 'allowed path is allowed');
   assert(!registry.canAccessPath('neo', '/workspace/other'), 'unlisted path is rejected');
-  assert(!registry.canAccessPath('ghost', '/workspace/neo'), 'unknown user cannot access path');
+  assert(!registry.canAccessPath('ghost', '/workspace/neo'), 'unknown agent cannot access path');
 
-  // Delete user
-  assert(registry.delete('neo'), 'delete returns true for existing user');
-  assert(!registry.has('neo'), 'user removed after delete');
-  assert(!registry.delete('neo'), 'delete returns false for missing user');
+  // Delete agent
+  assert(registry.delete('neo'), 'delete returns true for existing agent');
+  assert(!registry.has('neo'), 'agent removed after delete');
+  assert(!registry.delete('neo'), 'delete returns false for missing agent');
 
   // Re-register after delete
   registry.register({
@@ -374,7 +374,7 @@ await section('UserRegistry basics', async () => {
     allowedPaths: [],
     createdAt: '2026-03-11T00:00:00Z',
   });
-  assert(registry.get('neo')?.home === '/workspace/neo-updated', 'duplicate registration updates existing user');
+  assert(registry.get('neo')?.home === '/workspace/neo-updated', 'duplicate registration updates existing agent');
 });
 
 await section('/ls — rejects non-tab topics with helpful message', async () => {

@@ -21,7 +21,7 @@ until the next action runs.
 ```
 /act.login --provider github
 → Response.body.access_token = "ghp_abc123..."
-→ Response.body.user = "agent01"
+→ Response.body.agent = "agent01"
 ```
 
 A response template stores parts of it as session variables:
@@ -29,7 +29,7 @@ A response template stores parts of it as session variables:
 ````markdown
 ```act.login.response
 {token} = {Response.body.access_token}
-{user} = {Response.body.user}
+{agent} = {Response.body.agent}
 ```
 ````
 
@@ -90,7 +90,7 @@ $USER_EMAIL
 ```
 
 - **Set by:** human (config file) or AI (`/set $VAR = "value"`)
-- **Scoped to:** user account, with optional app/config narrowing
+- **Scoped to:** agent account, with optional app/config narrowing
 - **Lifetime:** persistent until explicitly changed or deleted
 - **Storage:** file-backed (EnvStore)
 - **Used in:** action definitions (URI, headers, CLI commands)
@@ -139,7 +139,7 @@ Human sets once:               AI uses in actions:
 |---|---|---|
 | API response data | Yes | No |
 | API keys, credentials | No | Yes |
-| User preferences | No | Yes |
+| Agent preferences | No | Yes |
 | Intermediate computation | Yes | No |
 | Cross-session config | No | Yes |
 
@@ -152,7 +152,7 @@ nothing is shared across apps, and the OS shell's environment never
 leaks in.
 
 ```
-~/.string/users/{user}/
+~/.string/agents/{agent}/
   apps/
     weather/
       env.json         ← app:weather scope
@@ -193,7 +193,7 @@ opaque to action substitution. The cost — a key needed by N apps must
 be set N times — is the price of isolation.
 
 **System vars** — daemon-defined context vars are still available in
-every action: `$HOME` (the String per-user home, not the OS HOME),
+every action: `$HOME` (the String per-agent.home, not the OS HOME),
 `$CWD`, `$CURRENT_FILE`, `$CURRENT_URI`, `$CURRENT_TARGET`,
 `$CURRENT_BLOCK`, `$ARGS`. These are supplied fresh per call and live
 above the app's own env in the resolution chain.
@@ -225,7 +225,7 @@ variables are set. If `$API_KEY` is missing, String reports:
 ERROR(ENV_REQUIRED): tool requires $API_KEY — "OpenWeather API key"
 ```
 
-The AI then knows to ask the user for the value and set it:
+The AI then knows to ask the agent for the value and set it:
 
 ```
 /set $API_KEY = "sk-abc123"
@@ -393,7 +393,7 @@ Persistent config (from /set or config file):
 ```
 
 The document defines what actions exist (login, refresh, compose,
-search). Session `{var}` tracks where the user is (inbox, 12
+search). Session `{var}` tracks where the agent is (inbox, 12
 messages, authenticated). Persistent `$var` holds credentials set
 once and reused across sessions.
 

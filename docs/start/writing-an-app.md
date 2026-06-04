@@ -46,13 +46,13 @@ string app:hello '/act.greet --name World'
 # → Hello, World!
 ```
 
-The runtime copies the file into `~/.string/users/default/packages/hello/`
+The runtime copies the file into `~/.string/agents/default/packages/hello/`
 and registers `hello` in the apps registry. From now on, `app:hello` is
 addressable from any session.
 
 ## Action types
 
-**CLI** — runs a shell command. `{field}` placeholders get the user's
+**CLI** — runs a shell command. `{field}` placeholders get the agent's
 argument values shell-escaped:
 
 ```markdown
@@ -69,7 +69,7 @@ the env store (set with `/set $VAR = "..."`):
 
 ```markdown
 \`\`\`act.now
-GET https://wttr.in/{city}?format=j1 -H "User-Agent: curl/8"
+GET https://wttr.in/{city}?format=j1 -H "Agent-Agent: curl/8"
   city: string (required) "City name"
 \`\`\`
 ```
@@ -171,7 +171,7 @@ For setup that needs more than one env var (signing into a service,
 installing a CLI tool, etc.), ship a sibling `requirements.md`:
 
 ```
-~/.string/users/default/packages/gh-issue/
+~/.string/agents/default/packages/gh-issue/
 ├── string.md
 └── requirements.md
 ```
@@ -266,7 +266,7 @@ Look for:
 ## Security & distribution
 
 v0.1 trust model in one paragraph: **CLI actions run unsandboxed.** An
-installed app executes with your user's permissions, makes whatever HTTP
+installed app executes with your agent's permissions, makes whatever HTTP
 calls its action templates declare, and reads/writes wherever the shell
 allows. There is no per-host allowlist and no per-command sandbox.
 Inspect `string.md` before installing — it's plain Markdown, which is
@@ -275,7 +275,7 @@ the whole point.
 `$VAR` interpolation is a real shape of trust: if an action's URL or CLI
 template includes `{user_input}`, the runtime shell-escapes (CLI) or
 URL-encodes (HTTP) but the resulting URL/command is still
-user-influenced. Treat actions as you would treat a small CLI tool
+agent-influenced. Treat actions as you would treat a small CLI tool
 shipped over the wire.
 
 Distribute by:

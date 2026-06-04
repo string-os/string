@@ -52,18 +52,18 @@ function intVarMin1(session: Session, name: string, fallback: number): number {
 // ─── Client config (~/.string/config.json) ────────────────────────────────────
 //
 // Persistent client-side config, separate from per-session StringConfig above.
-// Today it holds the "current user" so terse `string <topic> '<cmd>'` calls can
-// resolve to a configured user instead of always `default`. Stored as a
+// Today it holds the "current agent" so terse `string <topic> '<cmd>'` calls can
+// resolve to a configured agent instead of always `default`. Stored as a
 // forward-compatible object so new keys can be added without a migration.
 
 /** Client config schema persisted to ~/.string/config.json. */
 export interface ClientConfig {
-  currentUser?: string;
+  currentAgent?: string;
 }
 
-/** Path to the client config file. Override with STRINGD_CONFIG (tests/isolated installs). */
+/** Path to the client config file. Override with STRING_CONFIG (tests/isolated installs). */
 export function configPath(): string {
-  return process.env.STRINGD_CONFIG || join(homedir(), '.string', 'config.json');
+  return process.env.STRING_CONFIG || join(homedir(), '.string', 'config.json');
 }
 
 /** Load the client config. Missing/corrupt file → empty config (back-compat). */
@@ -85,36 +85,36 @@ export function saveClientConfig(patch: ClientConfig): void {
   writeFileSync(file, JSON.stringify(merged, null, 2) + '\n', { mode: 0o600 });
 }
 
-/** Get the configured current user id, if any. */
-export function getCurrentUser(): string | undefined {
-  const id = loadClientConfig().currentUser;
+/** Get the configured current agent id, if any. */
+export function getCurrentAgent(): string | undefined {
+  const id = loadClientConfig().currentAgent;
   return id && id.trim() ? id.trim() : undefined;
 }
 
-/** Set the configured current user id. */
-export function setCurrentUser(id: string): void {
-  saveClientConfig({ currentUser: id.trim() });
+/** Set the configured current agent id. */
+export function setCurrentAgent(id: string): void {
+  saveClientConfig({ currentAgent: id.trim() });
 }
 
-/** Clear the configured current user (e.g. after removing that user). */
-export function clearCurrentUser(): void {
+/** Clear the configured current agent (e.g. after removing that agent). */
+export function clearCurrentAgent(): void {
   const cfg = loadClientConfig();
-  delete cfg.currentUser;
+  delete cfg.currentAgent;
   const file = configPath();
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   writeFileSync(file, JSON.stringify(cfg, null, 2) + '\n', { mode: 0o600 });
 }
 
 /**
- * Centralized user-id resolution.
- * Precedence: `userFlag` > STRINGD_USER > config.currentUser > 'default'.
+ * Centralized agent-id resolution.
+ * Precedence: `agentFlag` > STRING_AGENT_ID > config.currentAgent > 'default'.
  */
-export function resolveUserId(userFlag?: string | null): string {
-  const flag = userFlag?.trim();
+export function resolveAgentId(agentFlag?: string | null): string {
+  const flag = agentFlag?.trim();
   if (flag) return flag;
-  const env = process.env.STRINGD_USER?.trim();
+  const env = process.env.STRING_AGENT_ID?.trim();
   if (env) return env;
-  const current = getCurrentUser();
+  const current = getCurrentAgent();
   if (current) return current;
   return 'default';
 }

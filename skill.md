@@ -119,7 +119,7 @@ From any HTTPS URL (including install-manifest endpoints):
 string '/install --app https://example.com/my-app/string.md'
 ```
 
-The runtime copies files into `~/.string/users/default/packages/<name>/`
+The runtime copies files into `~/.string/agents/default/packages/<name>/`
 and registers the app. Shell helpers shipped alongside (`#!`-prefixed
 scripts) are automatically marked executable. From this point on,
 `app:<name>` resolves from any session.

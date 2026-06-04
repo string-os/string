@@ -1,5 +1,12 @@
 ---
-description: Use String apps, web pages, and shell sessions through the `mcp__string__string` tool. Invoke when the user asks to (a) install a String app from a GitHub URL or path, (b) use an installed app like `app:weather`, `app:moltbook`, `app:gh-kanban`, (c) read a web page as clean markdown via `Accept: text/markdown`, (d) run a typed action with `/act.<name>`, (e) set an app credential with `/set $VAR`, or (f) anything else that mentions SFMD, `string-os`, `app:<name>`, `/act`, or installing from `gh:owner/repo`.
+name: using-string
+description: >
+  Use String apps, web pages, and shell sessions through the `mcp__string__string`
+  tool. Invoke when the user asks to install a String app from a GitHub URL or
+  path, use an installed app like `app:weather`, read a web page as clean
+  markdown, run a typed action with `/act.<name>`, set an app credential with
+  `/set $VAR`, or anything else that mentions SFMD, `string-os`, `app:<name>`,
+  `/act`, or installing from `gh:owner/repo`.
 ---
 
 # Using String
@@ -106,7 +113,7 @@ Apps requiring API keys say so when opened:
 mcp__string__string({ topic: "app:moltbook", cmd: "/set $MOLTBOOK_API_KEY = \"...\"" })
 ```
 
-The key is persisted on disk under `~/.string/users/claude-code/apps/<name>/env.json`. The app itself uses it for its HTTP/CLI actions; your context never sees the value again.
+The key is persisted on disk under `~/.string/agents/default/apps/<name>/env.json`. The app itself uses it for its HTTP/CLI actions; your context never sees the value again.
 
 ## 6. Read a web page as clean markdown
 
@@ -123,7 +130,7 @@ Sites that support content negotiation (like the String docs) return raw markdow
 mcp__string__string({ topic: "main", cmd: "/exec ls -la" })
 ```
 
-The shell runs as the OS user that launched the daemon. The cwd is the user's String home (`~/.string/users/claude-code/`), **not** the user's repo cwd — see §10.
+The shell runs as the OS user that launched the daemon. The cwd is the String agent home (`~/.string/agents/default/`), **not** the OS repo cwd — see §10.
 
 ## 8. Discover what's possible
 
@@ -160,9 +167,9 @@ apps do I have?"* or *"is the daemon up?"* before guessing.
 
 ## 10. Identity and sandbox
 
-You're a String user, not the OS user. Your home is `~/.string/users/claude-code/` (this `--user` value is set by the plugin's `.mcp.json` — don't change it). Relative paths like `./README.md` resolve from that home, **not** from the OS shell's cwd. To touch host files: prefer absolute paths or `/exec pwd` first to confirm where you are.
+You're a String agent, not the OS user. Your home is `~/.string/agents/default/` . Relative paths like `./README.md` resolve from that home, **not** from the OS shell's cwd. To touch host files: prefer absolute paths or `/exec pwd` first to confirm where you are.
 
-Sessions, history, installed apps, and `/set $X` env vars all live under this home. Other AI clients (Cursor, Codex with their own `--user` values) have separate homes — no bleed.
+Sessions, history, installed apps, and `/set $X` env vars all live under this home. Other AI clients (Cursor, Codex with their own `--agent` values) have separate homes — no bleed.
 
 ## 11. Mental model in one paragraph
 

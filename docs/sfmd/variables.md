@@ -107,7 +107,7 @@ headers, or body template), it resolves the value using this cascade:
 
 1. **Per-call extra env** — context variables passed programmatically
    by the caller (tool context vars in tool blocks, etc.).
-2. **SFMD env-store** — per-user persistent values set via `/set NAME
+2. **SFMD env-store** — per-agent persistent values set via `/set NAME
    = "value"`. Stored encrypted on disk at `~/.string/config.json`.
 3. **Daemon process env** — `process.env` of the running `stringd`
    process. Inherits from the shell that started the daemon, so
@@ -183,7 +183,7 @@ replaced with an empty string (runtime-dependent).
 | Variable type | Scope |
 |--------------|-------|
 | `{variable}` | Topic session — each topic has its own set |
-| `$VARIABLE` | Per-user persistent — with cascade (config > app > global) |
+| `$VARIABLE` | Per-agent persistent — with cascade (config > app > global) |
 
 Session variables in a topic override persistent variables of the
 same name within that topic's scope.
@@ -199,7 +199,7 @@ same name within that topic's scope.
 5. `$VAR` resolution cascade: per-call extra env → SFMD env-store → daemon process.env → unresolved literal.
 6. Assignment: `{var} = {expression}` — full line, no output.
 7. Only `{var}` can be on the left side of assignment.
-8. `{var}` is session-scoped. `$VAR` is persistent per-user (with process.env fallback).
+8. `{var}` is session-scoped. `$VAR` is persistent per-agent (with process.env fallback).
 9. Topic `{var}` overrides `$VAR` of the same name in that scope.
 10. Response paths accept three array-index forms, all equivalent:
     `body.items[0].name`, `body.items.0.name`, and `$.body.items[0].name`

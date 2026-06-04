@@ -132,7 +132,7 @@ Two lines in Claude Code: registers the `mcp__string__string` tool (the plugin's
 
 ```bash
 codex plugin marketplace add string-os/string
-codex plugin install string@string-os
+codex plugin add string@string-os
 ```
 
 Skills and MCP config are shared between the two manifests — one source, two runtimes.
@@ -191,7 +191,7 @@ The cookbook has a dozen runnable examples — Kanban over GitHub Projects, an A
 ## Four ways to embed
 
 - **CLI** — `string '/open something'`. The default; what you just ran.
-- **MCP server** (Claude Desktop, Cursor, …) — `string --mcp` (stdio) or point a client at `http://localhost:3100/mcp` (HTTP). One MCP tool, `string({topic, cmd})`, wraps the entire command surface.
+- **MCP server** (Claude Desktop, Cursor, …) — `string --mcp` (stdio) or point a client at `http://localhost:3923/mcp` (HTTP). One MCP tool, `string({topic, cmd})`, wraps the entire command surface.
 - **In-process library** — `import { Browser } from '@string-os/string'`. No daemon, no HTTP.
 - **HTTP daemon + any-language client** — `string --daemon start`. Wire spec at [`stringd` protocol v0.1](https://docs.string-os.org/reference/protocol/); reference TS client in `@string-os/client`.
 

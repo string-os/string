@@ -18,28 +18,28 @@ import { fileURLToPath } from 'url';
 import * as client from '@string-os/client';
 import { parseTopic, topicToString } from './types.js';
 import {
-  resolveUserId,
-  getCurrentUser,
-  setCurrentUser,
-  clearCurrentUser,
+  resolveAgentId,
+  getCurrentAgent,
+  setCurrentAgent,
+  clearCurrentAgent,
 } from './config.js';
 
-/** Derive user home directory: ~/.string/users/{userId}/ */
-function deriveHome(userId: string): string {
-  const dir = path.join(os.homedir(), '.string', 'users', userId);
+/** Derive agent home directory: ~/.string/agents/{agentId}/ */
+function deriveHome(agentId: string): string {
+  const dir = path.join(os.homedir(), '.string', 'agents', agentId);
   fs.mkdirSync(dir, { recursive: true });
   return dir;
 }
 
 /**
- * Terse-path user provisioning: ensure the user exists WITHOUT clobbering a
- * stored custom home. Only forwards `home` when STRINGD_HOME is explicitly set
+ * Terse-path agent provisioning: ensure the agent exists WITHOUT clobbering a
+ * stored custom home. Only forwards `home` when STRING_HOME is explicitly set
  * (that env still forces home for the invocation). Plain calls send no home,
  * so the daemon keeps whatever home is already on record.
  */
-async function ensureUserTerse(port: number, userId: string): Promise<void> {
-  const home = process.env.STRINGD_HOME?.trim();
-  await client.ensureUser(port, home ? { id: userId, home } : { id: userId });
+async function ensureAgentTerse(port: number, agentId: string): Promise<void> {
+  const home = process.env.STRING_HOME?.trim();
+  await client.ensureAgent(port, home ? { id: agentId, home } : { id: agentId });
 }
 
 // ─── ChanFlow output ─────────────────────────────────────────────────────────
@@ -91,17 +91,17 @@ async function execOneShot(
   topic: string,
   body: string,
   json: boolean,
-  userFlag: string | null,
+  agentFlag: string | null,
 ): Promise<void> {
-  const port = Number(process.env.STRINGD_PORT) || 3100;
-  const userId = resolveUserId(userFlag);
+  const port = Number(process.env.STRING_PORT) || 3923;
+  const agentId = resolveAgentId(agentFlag);
 
   if (!await client.ping(port)) {
     await autoStartDaemon(port);
   }
 
-  await ensureUserTerse(port, userId);
-  const result = await client.exec(port, userId, topic, body);
+  await ensureAgentTerse(port, agentId);
+  const result = await client.exec(port, agentId, topic, body);
 
   process.stdout.write(formatOutput(topic, result, json) + '\n');
   process.exit(result.ok ? 0 : 1);
@@ -112,16 +112,16 @@ async function execOneShot(
 async function enterRepl(
   topic: string,
   json: boolean,
-  userFlag: string | null,
+  agentFlag: string | null,
 ): Promise<void> {
-  const port = Number(process.env.STRINGD_PORT) || 3100;
-  const userId = resolveUserId(userFlag);
+  const port = Number(process.env.STRING_PORT) || 3923;
+  const agentId = resolveAgentId(agentFlag);
 
   if (!await client.ping(port)) {
     await autoStartDaemon(port);
   }
 
-  await ensureUserTerse(port, userId);
+  await ensureAgentTerse(port, agentId);
 
   const isTTY = process.stdin.isTTY ?? false;
 
@@ -156,7 +156,7 @@ async function enterRepl(
       if (cmd === '/exit' || cmd === '/quit') { resolveLoop(); return; }
 
       try {
-        const result = await client.exec(port, userId, topic, cmd);
+        const result = await client.exec(port, agentId, topic, cmd);
         process.stdout.write(formatOutput(topic, result, json) + '\n');
       } catch (e) {
         process.stderr.write(`string: ${String(e)}\n`);
@@ -179,25 +179,24 @@ async function enterRepl(
 // Exposes the daemon's MCP surface over stdio. Used by MCP clients (Claude
 // Desktop, Codex, Cursor) that spawn a child process and speak JSON-RPC
 // over stdin/stdout. The shim auto-starts the daemon if needed, ensures the
-// user is registered, then forwards `string` tool calls to `/exec`.
+// agent is registered, then forwards `string` tool calls to `/exec`.
 //
 // Config example:
-//   { "mcpServers": { "string": { "command": "string",
-//                                  "args": ["--mcp", "--user", "claude-desktop"] } } }
+//   { "mcpServers": { "string": { "command": "string", "args": ["--mcp"] } } }
 //
-// Each MCP client should use a distinct `--user` so sessions and `/set` env
-// vars don't bleed across clients.
+// Advanced users can pass a distinct `--agent` so sessions and `/set` env vars
+// don't bleed across clients.
 
-async function cmdMcp(userId: string): Promise<void> {
-  const port = Number(process.env.STRINGD_PORT) || 3100;
+async function cmdMcp(agentId: string): Promise<void> {
+  const port = Number(process.env.STRING_PORT) || 3923;
 
   if (!await client.ping(port)) {
     await autoStartDaemon(port);
   }
-  await ensureUserTerse(port, userId);
+  await ensureAgentTerse(port, agentId);
 
   // Dynamic imports keep the heavy MCP SDK out of the cold-start path for
-  // every CLI invocation. Only --mcp users pay the cost.
+  // every CLI invocation. Only --mcp agents pay the cost.
   const { createStringServer } = await import('./mcp.js');
   const { StdioServerTransport } = await import('@modelcontextprotocol/sdk/server/stdio.js');
 
@@ -215,7 +214,7 @@ async function cmdMcp(userId: string): Promise<void> {
       };
     }
     const topic = topicToString(parsed);
-    const result = await client.exec(port, userId, topic, cmd);
+    const result = await client.exec(port, agentId, topic, cmd);
     return {
       ok: result.ok,
       code: result.code ?? undefined,
@@ -232,7 +231,7 @@ async function cmdMcp(userId: string): Promise<void> {
 // ─── Daemon management ───────────────────────────────────────────────────────
 
 async function cmdDaemon(args: string[]): Promise<void> {
-  const port = Number(process.env.STRINGD_PORT) || 3100;
+  const port = Number(process.env.STRING_PORT) || 3923;
   const sub = args[0] || 'start';
 
   switch (sub) {
@@ -260,7 +259,7 @@ async function cmdDaemon(args: string[]): Promise<void> {
         process.exit(1);
       }
       const info = await client.health(port);
-      console.log(`stringd running on port ${port} — ${info.users} user(s), ${info.sessions} session(s)`);
+      console.log(`stringd running on port ${port} — ${info.agents} agent(s), ${info.sessions} session(s)`);
       break;
     }
     case 'foreground': {
@@ -278,15 +277,15 @@ async function cmdDaemon(args: string[]): Promise<void> {
   }
 }
 
-// ─── User management ───────────────────────────────────────────────────────────
+// ─── Agent management ───────────────────────────────────────────────────────────
 //
-// `string user` manages the persistent user registry and the configured
-// "current user" (~/.string/config.json). Adding a user sets its home; the
-// current user is what terse `string <topic> '<cmd>'` calls resolve to when no
-// --user flag or STRINGD_USER is present.
+// `string agent` manages the persistent agent registry and the configured
+// "current agent" (~/.string/config.json). Adding an agent sets its home; the
+// current agent is what terse `string <topic> '<cmd>'` calls resolve to when no
+// --agent flag or STRING_AGENT_ID is present.
 
-/** Parse `--home <path>` and `--allow <p1,p2>` from `string user` args. */
-function parseUserOpts(args: string[]): { home?: string; allow?: string[] } {
+/** Parse `--home <path>` and `--allow <p1,p2>` from `string agent` args. */
+function parseAgentOpts(args: string[]): { home?: string; allow?: string[] } {
   const opts: { home?: string; allow?: string[] } = {};
   for (let i = 0; i < args.length; i++) {
     const a = args[i];
@@ -309,8 +308,8 @@ async function ensureDaemonUp(port: number): Promise<void> {
   }
 }
 
-async function cmdUser(args: string[]): Promise<void> {
-  const port = Number(process.env.STRINGD_PORT) || 3100;
+async function cmdAgent(args: string[]): Promise<void> {
+  const port = Number(process.env.STRING_PORT) || 3923;
   const sub = args[0];
   const rest = args.slice(1);
 
@@ -318,47 +317,47 @@ async function cmdUser(args: string[]): Promise<void> {
     case 'add': {
       const id = rest[0];
       if (!id) {
-        process.stderr.write('Usage: string user add <id> [--home <path>] [--allow <p1,p2,...>]\n');
+        process.stderr.write('Usage: string agent add <id> [--home <path>] [--allow <p1,p2,...>]\n');
         process.exit(1);
       }
-      const opts = parseUserOpts(rest.slice(1));
+      const opts = parseAgentOpts(rest.slice(1));
       const home = opts.home ?? deriveHome(id);
       await ensureDaemonUp(port);
-      await client.ensureUser(port, { id, home, allowedPaths: opts.allow ?? [] });
-      console.log(`Added user '${id}' (home: ${home})`);
+      await client.ensureAgent(port, { id, home, allowedPaths: opts.allow ?? [] });
+      console.log(`Added agent '${id}' (home: ${home})`);
       if (opts.allow?.length) console.log(`  allowedPaths: ${opts.allow.join(', ')}`);
-      console.log(`Run \`string user use ${id}\` to make it the current user.`);
+      console.log(`Run \`string agent use ${id}\` to make it the current agent.`);
       break;
     }
     case 'use': {
       const id = rest[0];
       if (!id) {
-        process.stderr.write('Usage: string user use <id>\n');
+        process.stderr.write('Usage: string agent use <id>\n');
         process.exit(1);
       }
       await ensureDaemonUp(port);
-      const exists = (await client.listUsers(port)).some(u => u.id === id);
-      setCurrentUser(id);
-      console.log(`Current user set to '${id}'.`);
+      const exists = (await client.listAgents(port)).some(u => u.id === id);
+      setCurrentAgent(id);
+      console.log(`Current agent set to '${id}'.`);
       if (!exists) {
-        console.log(`Note: user '${id}' is not registered yet — run \`string user add ${id}\` to set its home.`);
+        console.log(`Note: agent '${id}' is not registered yet — run \`string agent add ${id}\` to set its home.`);
       }
       break;
     }
     case 'current': {
-      const current = getCurrentUser() ?? 'default';
+      const current = getCurrentAgent() ?? 'default';
       await ensureDaemonUp(port);
-      const user = (await client.listUsers(port)).find(u => u.id === current);
-      const home = user ? user.home : '(not registered)';
+      const agent = (await client.listAgents(port)).find(u => u.id === current);
+      const home = agent ? agent.home : '(not registered)';
       console.log(`${current}\t${home}`);
       break;
     }
     case 'list': {
       await ensureDaemonUp(port);
-      const current = getCurrentUser();
-      const list = await client.listUsers(port);
+      const current = getCurrentAgent();
+      const list = await client.listAgents(port);
       if (list.length === 0) {
-        console.log('No users registered.');
+        console.log('No agents registered.');
         break;
       }
       for (const u of list) {
@@ -371,29 +370,29 @@ async function cmdUser(args: string[]): Promise<void> {
       const id = rest[0];
       const home = rest[1];
       if (!id || !home) {
-        process.stderr.write('Usage: string user set-home <id> <path>\n');
+        process.stderr.write('Usage: string agent set-home <id> <path>\n');
         process.exit(1);
       }
       await ensureDaemonUp(port);
-      await client.ensureUser(port, { id, home });
+      await client.ensureAgent(port, { id, home });
       console.log(`Set home for '${id}' → ${home}`);
       break;
     }
     case 'rm': {
       const id = rest[0];
       if (!id) {
-        process.stderr.write('Usage: string user rm <id>\n');
+        process.stderr.write('Usage: string agent rm <id>\n');
         process.exit(1);
       }
       await ensureDaemonUp(port);
-      const deleted = await client.deleteUser(port, id);
-      if (getCurrentUser() === id) clearCurrentUser();
-      console.log(deleted ? `Removed user '${id}'.` : `User '${id}' did not exist.`);
+      const deleted = await client.deleteAgent(port, id);
+      if (getCurrentAgent() === id) clearCurrentAgent();
+      console.log(deleted ? `Removed agent '${id}'.` : `Agent '${id}' did not exist.`);
       break;
     }
     default:
-      process.stderr.write(`string: unknown user command: ${sub ?? ''}\n`);
-      process.stderr.write('Usage: string user <add|use|current|list|set-home|rm> ...\n');
+      process.stderr.write(`string: unknown agent command: ${sub ?? ''}\n`);
+      process.stderr.write('Usage: string agent <add|use|current|list|set-home|rm> ...\n');
       process.exit(1);
   }
 }
@@ -409,26 +408,26 @@ Usage:
   string <topic>                       Interactive REPL
   string '<body>'                      Command without topic (uses 'main', or
                                        derives topic from /open app:X targets)
-  string --mcp [--user <id>]           MCP stdio server (for Claude/Codex/Cursor)
+  string --mcp [--agent <id>]          MCP stdio server (for Claude/Codex/Cursor)
   string --daemon [start|stop|status]  Daemon management
-  string user <subcommand>             Manage users / current user (see below)
+  string agent <subcommand>            Manage agents / current agent (see below)
   string --help                        This help
 
-User management:
-  string user add <id> [--home <path>] [--allow <p1,p2,...>]
-                                       Register a user with a home (and optional
+Agent management:
+  string agent add <id> [--home <path>] [--allow <p1,p2,...>]
+                                       Register an agent with a home (and optional
                                        allowed paths). Home defaults to
-                                       ~/.string/users/<id> when omitted.
-  string user use <id>                 Set the current user (in config.json)
-  string user current                  Show the current user + its home
-  string user list                     List all users (* marks the current one)
-  string user set-home <id> <path>     Change a user's home
-  string user rm <id>                  Remove a user (clears current if it was)
+                                       ~/.string/agents/<id> when omitted.
+  string agent use <id>                 Set the current agent (in config.json)
+  string agent current                  Show the current agent + its home
+  string agent list                     List all agents (* marks the current one)
+  string agent set-home <id> <path>     Change an agent's home
+  string agent rm <id>                  Remove an agent (clears current if it was)
 
-User resolution (highest precedence first):
-  --user <id>  >  STRINGD_USER  >  config.currentUser  >  "default"
-  Set the home at add-time or via \`user set-home\`. Terse calls never reset a
-  stored home — only \`user add\`/\`set-home\` (or STRINGD_HOME) write home.
+Agent resolution (highest precedence first):
+  --agent <id>  >  STRING_AGENT_ID  >  config.currentAgent  >  "default"
+  Set the home at add-time or via \`agent set-home\`. Terse calls never reset a
+  stored home — only \`agent add\`/\`set-home\` (or STRING_HOME) write home.
 
 Topics:
   <name>                  Free-form session (e.g. 'main', 'notes', 'research')
@@ -450,11 +449,11 @@ Flags:
   --json      JSON envelope output (suppresses ChanFlow)
 
 Environment:
-  STRINGD_PORT    Daemon port (default: 3100)
-  STRINGD_USER    User ID — overrides config.currentUser (default: "default")
-  STRINGD_HOME    Home directory — forces home for this invocation
-                  (default: ~/.string/users/{user})
-  STRINGD_CONFIG  Client config path (default: ~/.string/config.json)
+  STRING_PORT        Daemon port (default: 3923)
+  STRING_AGENT_ID    Agent ID — overrides config.currentAgent (default: "default")
+  STRING_HOME        Home directory — forces home for this invocation
+                  (default: ~/.string/agents/{agent})
+  STRING_CONFIG  Client config path (default: ~/.string/config.json)
 `);
 }
 
@@ -467,7 +466,7 @@ let json = false;
 let daemon = false;
 let mcp = false;
 let help = false;
-let userFlag: string | null = null;
+let agentFlag: string | null = null;
 const positional: string[] = [];
 
 for (let i = 0; i < argv.length; i++) {
@@ -476,10 +475,10 @@ for (let i = 0; i < argv.length; i++) {
   else if (arg === '--daemon') daemon = true;
   else if (arg === '--mcp') mcp = true;
   else if (arg === '--help' || arg === '-h') help = true;
-  else if (arg === '--user') {
-    userFlag = argv[++i] ?? null;
-  } else if (arg.startsWith('--user=')) {
-    userFlag = arg.slice('--user='.length);
+  else if (arg === '--agent') {
+    agentFlag = argv[++i] ?? null;
+  } else if (arg.startsWith('--agent=')) {
+    agentFlag = arg.slice('--agent='.length);
   } else {
     positional.push(arg);
   }
@@ -491,8 +490,8 @@ if (help) {
 }
 
 if (mcp) {
-  const userId = resolveUserId(userFlag);
-  cmdMcp(userId).catch(e => {
+  const agentId = resolveAgentId(agentFlag);
+  cmdMcp(agentId).catch(e => {
     process.stderr.write(`string: ${e.message}\n`);
     process.exit(1);
   });
@@ -501,12 +500,10 @@ if (mcp) {
     process.stderr.write(`string: ${e.message}\n`);
     process.exit(1);
   });
-} else if (positional[0] === 'user') {
-  // `string user <add|use|current|list|set-home|rm> ...` — user management.
-  // Intercepted before topic dispatch (note: 'user' is also a valid topic
-  // name; `string user` with no subcommand prints user usage rather than
-  // entering a 'user' REPL).
-  cmdUser(positional.slice(1)).catch(e => {
+} else if (positional[0] === 'agent') {
+  // `string agent <add|use|current|list|set-home|rm> ...` — agent management.
+  // Intercepted before topic dispatch.
+  cmdAgent(positional.slice(1)).catch(e => {
     process.stderr.write(`string: ${e.message}\n`);
     process.exit(1);
   });
@@ -552,8 +549,8 @@ if (mcp) {
   }
 
   const run = body
-    ? execOneShot(topic, body, json, userFlag)
-    : enterRepl(topic, json, userFlag);
+    ? execOneShot(topic, body, json, agentFlag)
+    : enterRepl(topic, json, agentFlag);
 
   run.catch(e => {
     process.stderr.write(`string: ${e.message}\n`);
