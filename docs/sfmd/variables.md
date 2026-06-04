@@ -107,23 +107,15 @@ headers, or body template), it resolves the value using this cascade:
 
 1. **Per-call extra env** — context variables passed programmatically
    by the caller (tool context vars in tool blocks, etc.).
-2. **SFMD env-store** — per-agent persistent values set via `/set NAME
-   = "value"`. Stored encrypted on disk at `~/.string/config.json`.
-3. **Daemon process env** — `process.env` of the running `stringd`
-   process. Inherits from the shell that started the daemon, so
-   `export GEMINI_API_KEY=... && string --daemon start` makes the key
-   available to all actions.
-4. **Unresolved** — if none of the above have a value, the literal
-   `$NAME` is left in place so the failure is visible (e.g., the API
-   sees `$API_KEY` as a literal and returns an auth error, which the
-   agent can diagnose).
+2. **SFMD env-store** — app/config persistent values set via
+   `/set $NAME = "value"` from an `app:<name>` or
+   `app:<name>:<config>` topic. Config scope wins over app scope.
+3. **Unresolved** — if none of the above have a value, the action
+   fails before execution with `INVALID_PAYLOAD`.
 
-The process.env fallback (step 3) is a convenience for API keys and
-configuration that are more naturally managed as shell environment
-variables than as SFMD-specific `/set` values. It does NOT expose
-arbitrary process env to the action — only the specific `$NAME`
-referenced in the action definition is resolved. An action that
-does not reference `$HOME` never sees `$HOME`.
+There is no global fallback and no daemon `process.env` fallback for
+action `$VAR` substitution. That isolation keeps one installed app
+from reading credentials intended for another.
 
 ---
 
@@ -183,7 +175,7 @@ replaced with an empty string (runtime-dependent).
 | Variable type | Scope |
 |--------------|-------|
 | `{variable}` | Topic session — each topic has its own set |
-| `$VARIABLE` | Per-agent persistent — with cascade (config > app > global) |
+| `$VARIABLE` | App/config persistent — with cascade (config > app) |
 
 Session variables in a topic override persistent variables of the
 same name within that topic's scope.
@@ -196,10 +188,10 @@ same name within that topic's scope.
 2. Persistent variables: `$NAME` — `[a-zA-Z][a-zA-Z0-9_]*` with `$` prefix.
 3. `{var}` can appear in templates, invocations, and action definitions.
 4. `$VAR` can ONLY appear in action definition blocks (URL, headers, body template).
-5. `$VAR` resolution cascade: per-call extra env → SFMD env-store → daemon process.env → unresolved literal.
+5. `$VAR` resolution cascade: per-call extra env → config env → app env → unresolved error.
 6. Assignment: `{var} = {expression}` — full line, no output.
 7. Only `{var}` can be on the left side of assignment.
-8. `{var}` is session-scoped. `$VAR` is persistent per-agent (with process.env fallback).
+8. `{var}` is session-scoped. `$VAR` is persistent per app/config scope.
 9. Topic `{var}` overrides `$VAR` of the same name in that scope.
 10. Response paths accept three array-index forms, all equivalent:
     `body.items[0].name`, `body.items.0.name`, and `$.body.items[0].name`

@@ -119,7 +119,7 @@ From any HTTPS URL (including install-manifest endpoints):
 string '/install --app https://example.com/my-app/string.md'
 ```
 
-The runtime copies files into `~/.string/agents/default/packages/<name>/`
+The runtime copies files into the current agent's home, under `packages/<name>/`,
 and registers the app. Shell helpers shipped alongside (`#!`-prefixed
 scripts) are automatically marked executable. From this point on,
 `app:<name>` resolves from any session.
@@ -146,7 +146,7 @@ Apps that need API keys declare `requires: [VAR_NAME]` in frontmatter. When you 
     Setup: /open requirements.md
 ```
 
-Set the var with `/set` (persists to disk in the current topic's scope):
+Set the var with `/set` from the app topic:
 
 ```bash
 string app:moltbook '/set $MOLTBOOK_API_KEY = "moltbook_xxx"'
@@ -154,13 +154,11 @@ string app:moltbook '/set $MOLTBOOK_API_KEY = "moltbook_xxx"'
 
 | Topic when running `/set` | Where it persists |
 |---|---|
-| free-form (`main`, `notes`, ...) | Global (`config.json`) |
+| free-form (`main`, `notes`, ...) | Not allowed for `$VAR`; use an app topic |
 | `app:<name>` | App scope (`apps/<name>/env.json`) |
 | `app:<name>:<config>` | Config scope (`apps/<name>/<config>/env.json`) |
 
-Resolution cascades: config → app → global. A var set globally is visible to every app unless overridden at a more specific scope.
-
-Shell-exported `export VAR=...` also works as a fallback (the daemon reads `process.env`), but `/set` is preferred — survives daemon restarts and keeps secrets out of shell history.
+Resolution cascades: config → app. There is no global fallback and no `process.env` fallback for action `$VAR` substitution, so one app cannot read another app's credentials.
 
 ## 8. Handle action errors
 
@@ -192,7 +190,7 @@ When you see that, run `string app:<name> '/open requirements.md'` to see what t
 | `/tool:<name>.<act> [args]` | Run a named action on a tool |
 | `/install --app \| --tool <source>` | Install from local path or URL |
 | `/uninstall <name>` | Remove installed package |
-| `/set $VAR = "value"` | Persistent env var, scoped to current topic |
+| `/set $VAR = "value"` | Persistent app env var; run from `app:<name>` |
 | `/set` | List session vars + persistent vars in scope |
 
 ## More
