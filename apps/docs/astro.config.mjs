@@ -31,6 +31,7 @@ const sidebar = [
 			{ slug: 'runtime/authoring' },
 			{ slug: 'runtime/shell' },
 			{ slug: 'runtime/errors' },
+			{ slug: 'runtime/mcp' },
 			{ slug: 'runtime/install-manifest' },
 		],
 	},
