@@ -29,6 +29,20 @@ await section('Basic open + info', async () => {
   assert(/\bcwd:/i.test(info.content), 'info includes cwd');
 });
 
+await section('Nav unfolds once per session per nav source', async () => {
+  const b = mkBrowser();
+
+  const first = await b.exec(`/open ${WIKI}`);
+  assert(first.ok, 'first open ok');
+  assert(first.content.includes('[nav] main — first view'), 'first open unfolds nav');
+  assert(first.content.includes('[Welcome][@main.welcome]'), 'first open shows nav entries');
+
+  const second = await b.exec(`/open ${WIKI}`);
+  assert(second.ok, 'second open ok');
+  assert(second.content.includes('[nav] main — /nav <name>'), 'second open folds seen nav');
+  assert(!second.content.includes('[Welcome][@main.welcome]'), 'seen nav entries are not repeated');
+});
+
 await section('Block navigation (file#block)', async () => {
   const b = mkBrowser();
 

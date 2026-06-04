@@ -57,10 +57,10 @@ No SDK. No API key in the agent's context. No endpoint memorized. Each response 
 
 Two verbs the agent learns once and uses everywhere:
 
-- `/open` — see something (document, page, app, URL, block). Pure read.
-- `/act` — do something (call an API, run a CLI tool, submit data). Side effects.
+- `/open` — see something (document, page, app, URL, block). Opening an app may also run its declared `default` action to show the app's first useful view.
+- `/act` — do something explicit (call an API, run a CLI tool, submit data).
 
-The separation is load-bearing. `/open` never executes; `/act` always does. An agent reading a feed never accidentally posts.
+The separation is still the important habit: use `/open` to orient, then use `/act.<name>` for intentional work. App authors should keep `default` actions read-only and idempotent.
 
 | Resource | Read | Act |
 |---|---|---|
@@ -91,7 +91,7 @@ Install and call:
 
 ```bash
 npm install -g @string-os/string
-string file:setup '/install --app ./weather.md'
+string main '/install --app ./weather.md'
 string app:weather '/act.now --city Seoul'
 ```
 

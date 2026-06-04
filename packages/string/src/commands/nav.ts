@@ -5,22 +5,17 @@
 import type { Loader } from '../loader.js';
 import type { Session } from '../session.js';
 import type { CommandResult } from '../types.js';
-import { parseTopic } from '../types.js';
 import { renderNav, renderNavList } from '../renderer.js';
 import { ok, err } from './helpers.js';
-import { cmdOpen } from './open.js';
+import { hydrateAppDocument } from './app-session.js';
 
 export async function cmdNav(args: string, session: Session, loader: Loader): Promise<CommandResult> {
   let doc = session.currentDoc;
   if (!doc) {
     // Auto-open: see cmdAction for rationale. tab/bash/hub still error.
-    const parsed = parseTopic(session.name);
-    if (parsed?.type === 'app') {
-      const appName = parsed.namespace.split(':')[0];
-      const openResult = await cmdOpen(`app:${appName}`, session, loader);
-      if (!openResult.ok) return openResult;
-      doc = session.currentDoc;
-    }
+    const hydrateResult = await hydrateAppDocument(session, loader);
+    if (hydrateResult) return hydrateResult;
+    doc = session.currentDoc;
     if (!doc) {
       return err('No document is open in this session. Open a document first, then run /nav again.', 'INVALID_TARGET');
     }

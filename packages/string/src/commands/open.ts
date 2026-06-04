@@ -194,7 +194,15 @@ export async function cmdOpen(
       : loaded.uri;
     const openLabel = blockId ? `${displayPath}#${blockId}` : displayPath;
     const envScope = deriveEnvScope(session.name);
-    const { content: rendered, autoShortcuts } = await render(doc, blockId, loader.home, loader, envScope);
+    const unfoldNavNames = blockId ? undefined : session.markUnseenNavs(doc);
+    const { content: rendered, autoShortcuts } = await render(
+      doc,
+      blockId,
+      loader.home,
+      loader,
+      envScope,
+      { unfoldNavNames },
+    );
     session.setAutoShortcuts(autoShortcuts);
 
     // displaySuffix is appended at the very end — purely cosmetic, not
@@ -272,7 +280,15 @@ export async function cmdBack(session: Session, loader: Loader): Promise<Command
       ? toWorkspacePath(new URL(doc.uri).pathname, loader.home)
       : doc.uri;
     const envScope = deriveEnvScope(session.name);
-    const { content: rendered, autoShortcuts } = await render(doc, prev.blockId, loader.home, loader, envScope);
+    const unfoldNavNames = prev.blockId ? undefined : session.markUnseenNavs(doc);
+    const { content: rendered, autoShortcuts } = await render(
+      doc,
+      prev.blockId,
+      loader.home,
+      loader,
+      envScope,
+      { unfoldNavNames },
+    );
     session.setAutoShortcuts(autoShortcuts);
 
     // Default action on /back (same as /open)
@@ -293,7 +309,15 @@ export async function cmdBack(session: Session, loader: Loader): Promise<Command
       ? toWorkspacePath(new URL(prev.doc.uri).pathname, loader.home)
       : prev.doc.uri;
     const envScope = deriveEnvScope(session.name);
-    const { content: rendered, autoShortcuts } = await render(prev.doc, prev.blockId, loader.home, loader, envScope);
+    const unfoldNavNames = prev.blockId ? undefined : session.markUnseenNavs(prev.doc);
+    const { content: rendered, autoShortcuts } = await render(
+      prev.doc,
+      prev.blockId,
+      loader.home,
+      loader,
+      envScope,
+      { unfoldNavNames },
+    );
     session.setAutoShortcuts(autoShortcuts);
     return ok(`Back to ${displayPath}\n---\n${rendered}`);
   }
@@ -323,7 +347,15 @@ export async function cmdRefresh(session: Session, loader: Loader): Promise<Comm
       ? toWorkspacePath(new URL(doc.uri).pathname, loader.home)
       : doc.uri;
     const envScope = deriveEnvScope(session.name);
-    const { content: rendered, autoShortcuts } = await render(doc, blockId, loader.home, loader, envScope);
+    const unfoldNavNames = blockId ? undefined : session.markUnseenNavs(doc);
+    const { content: rendered, autoShortcuts } = await render(
+      doc,
+      blockId,
+      loader.home,
+      loader,
+      envScope,
+      { unfoldNavNames },
+    );
     session.setAutoShortcuts(autoShortcuts);
 
     // Default action on refresh (same as /open)

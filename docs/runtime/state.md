@@ -90,15 +90,15 @@ $USER_EMAIL
 ```
 
 - **Set by:** human (config file) or AI (`/set $VAR = "value"`)
-- **Scoped to:** agent account, with optional app/config narrowing
+- **Scoped to:** app or app config
 - **Lifetime:** persistent until explicitly changed or deleted
 - **Storage:** file-backed (EnvStore)
 - **Used in:** action definitions (URI, headers, CLI commands)
-- **Declared as requirements:** `env:` in frontmatter
+- **Declared as requirements:** `requires:` in app frontmatter
 
-Persistent variables are the configuration layer. An API key set once
-is available to every action that needs it. An app can declare what
-it requires, and String tells the AI what's missing.
+Persistent variables are the configuration layer. An API key set for one app
+is available to that app's actions, but not to other apps. An app can declare
+what it requires, and String tells the AI what's missing.
 
 ---
 
@@ -204,25 +204,24 @@ it returns `INVALID_TARGET` — there's no app to scope to.
 
 ---
 
-## Requirements — `env:` in frontmatter
+## Requirements — `requires:` in frontmatter
 
-Apps and tools can declare which `$var` values they need. This is
-done in frontmatter:
+Apps declare which `$var` values they need with `requires:` in frontmatter:
 
 ```yaml
 ---
-env:
-  - API_KEY: "OpenWeather API key"
-  - DEFAULT_REGION: "Default region code"
-    default: US
+requires:
+  - API_KEY
+  - DEFAULT_REGION
 ---
 ```
 
-When the app or tool is loaded, String checks whether the required
-variables are set. If `$API_KEY` is missing, String reports:
+When the app is opened, String checks whether the required variables are set.
+If `$API_KEY` is missing, the rendered page starts with a setup hint:
 
 ```
-ERROR(ENV_REQUIRED): tool requires $API_KEY — "OpenWeather API key"
+[!] Missing required env: $API_KEY
+    Set: /set $API_KEY = "..."
 ```
 
 The AI then knows to ask the agent for the value and set it:
@@ -230,8 +229,6 @@ The AI then knows to ask the agent for the value and set it:
 ```
 /set $API_KEY = "sk-abc123"
 ```
-
-Variables with a `default` value pass validation even when unset.
 
 Only `$var` can be declared as requirements. `{var}` is runtime
 data — it doesn't make sense to require it before the app runs.
@@ -254,7 +251,7 @@ The scope is determined by the current topic:
 
 | Topic | Stores in |
 |--------|-----------|
-| `main` | Global (`config.json`) |
+| `main` | Not allowed for `$VAR`; use an app topic |
 | `app:weather` | App scope (`apps/weather/env.json`) |
 | `app:weather:korea` | Config scope (`apps/weather/korea/env.json`) |
 
@@ -412,7 +409,7 @@ before.
 | **`$variable`** | Persistent, set by human or AI, file-backed |
 | **Response** | Last action result, overwritten on next action |
 | **Response template** | Can assign `{var}` only — not `$var` |
-| **`env:` requires** | Declares required `$var` — not `{var}` |
-| **`$var` cascade** | config scope > app scope > global |
+| **`requires:`** | Declares required app `$var` — not `{var}` |
+| **`$var` cascade** | config scope > app scope |
 | **`/set`** | Sets `{var}` (session) or `$var` (persistent) |
 | **Core insight** | Document + variables = application |

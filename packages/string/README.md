@@ -97,7 +97,7 @@ For MCP clients (Claude Desktop, Cursor, Codex), run `string --mcp` as the stdio
 | `STRING_HOME` | `~/.string/agents/{agent}` | One-shot home override; prefer `string agent add <id> --home <path>` for normal use |
 | `STRING_CONFIG` | nearest `.string/config.json`, then `~/.string/config.json` | Force a specific client config file |
 
-`/set $VAR = "value"` persists vars to disk under the current scope (global, app, or app:config). Apps declare what they need with `requires:` in frontmatter; missing values surface as a hint at `/open` time.
+`/set $VAR = "value"` persists app credentials from an `app:<name>` or `app:<name>:<config>` topic. There is no global credential fallback. Apps declare what they need with `requires:` in frontmatter; missing values surface as a hint at `/open` time.
 
 ## Documentation
 
