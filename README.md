@@ -23,6 +23,9 @@ The core loop is intentionally small:
 String can run as a CLI, a daemon, or one MCP tool named `string`. The agent
 learns one surface and uses it everywhere.
 
+Available String apps are maintained at
+[github.com/string-os/apps](https://github.com/string-os/apps).
+
 ---
 
 ## Why
