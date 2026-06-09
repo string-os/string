@@ -18,6 +18,8 @@ This section covers how AI edits documents through String.
 | `/write path` | Create a new file or overwrite existing |
 | `/write path#block` | Write content to a specific block |
 | `/append path` | Add content to the end of a file |
+| `/replace path` | Replace exact text in any UTF-8 text file |
+| `/replace path --all` | Replace every exact text match |
 | `/replace path#block` | Replace a block's content |
 | `/replace path:L5` | Replace a single line |
 | `/replace path:L5-L10` | Replace a range of lines |
@@ -71,6 +73,16 @@ intentional — sometimes you want a clean rewrite. But it means the
 AI should read a file before overwriting to avoid losing content
 it didn't intend to remove.
 
+String enforces this for existing files: whole-file `/write` and
+whole-file `/edit` refuse to overwrite a file the current topic has
+not read yet. Run `/open path` or `/edit path` first, then retry. If
+you intentionally want a blind whole-file overwrite, pass `--force`:
+
+```
+/write --force ~/notes/meeting.md
+replacement content
+```
+
 ---
 
 ## Appending content
@@ -95,8 +107,33 @@ This is useful for:
 
 ## Replacing content
 
-`/replace` is the precision tool. It topics a block or a line range
-and replaces just that portion. Everything else stays untouched.
+`/replace` is the precision tool. It targets exact text, a block, or a
+line range and replaces just that portion. Everything else stays
+untouched.
+
+### Replace exact text
+
+Use exact text replacement for ordinary text files, config files, code
+snippets, and documents without stable block markers.
+
+```
+/replace config.env
+API_URL=http://localhost:3000
+---
+API_URL=https://api.example.com
+```
+
+If the old text appears exactly once, String replaces it. If it does
+not appear, String returns `NOT_FOUND`. If it appears more than once,
+String refuses the edit as ambiguous and tells the AI to either provide
+a larger unique old text or use `--all`:
+
+```
+/replace config.env --all
+dev
+---
+prod
+```
 
 ### Replace a block
 
@@ -390,94 +427,8 @@ previous undo is gone:
 ```
 
 This is deliberately simple. One level of undo is a safety net,
-not a full history system. For version history, use `/commit`.
-
----
-
-## Version control
-
-### /commit
-
-`/commit` creates a named snapshot of a file's current state.
-
-```
-/commit ~/notes/meeting.md --message "회의록 정리 완료"
-```
-
-```
-✓ committed ~/notes/meeting.md
-  c3  2026-03-18 15:30  "회의록 정리 완료"
-```
-
-Commits are explicit and intentional — the AI decides when a version
-is worth preserving. Auto-save happens on every edit, but commits
-mark meaningful milestones.
-
-### /log
-
-`/log` shows the version history of a file.
-
-```
-/log ~/notes/meeting.md
-```
-
-```
-c3  2026-03-18 15:30  "회의록 정리 완료"
-c2  2026-03-18 14:00  "초안 작성"
-c1  2026-03-18 13:45  "파일 생성"
-```
-
-### Reading a previous version
-
-The AI can open a past version using the `@` version reference:
-
-```
-/open ~/notes/meeting.md@c1
-```
-
-This loads the file as it was at commit `c1` — read-only. The AI
-can review, compare, or copy content from it. To restore a previous
-version, the AI reads it and writes it back:
-
-```
-/open ~/notes/meeting.md@c2     ← read the old version
-/write ~/notes/meeting.md       ← overwrite with the old content
-/commit ~/notes/meeting.md --message "c2로 복원"
-```
-
-No special restore command needed. `/open` to read, `/write` to
-apply. The same primitives handle everything.
-
-### The full editing flow
-
-```
-# 1. Create and edit
-/write ~/docs/proposal.md
-...content...
-
-/replace ~/docs/proposal.md#budget
-...updated budget...
-
-/commit ~/docs/proposal.md --message "초안"
-
-# 2. Continue editing
-/replace ~/docs/proposal.md#budget
-...revised budget...
-
-/undo                          ← changed my mind
-
-/replace ~/docs/proposal.md#budget
-...better budget...
-
-/commit ~/docs/proposal.md --message "예산 확정"
-
-# 3. Review history
-/log ~/docs/proposal.md
-/open ~/docs/proposal.md@c1    ← compare with first draft
-```
-
-Auto-save on every edit. `/undo` for immediate mistakes. `/commit`
-for meaningful versions. `/log` and `@version` for history.
+not a full history system. In a git repository, use git for durable
+version history and String's editing commands for the immediate write.
 
 ---
 
@@ -616,12 +567,11 @@ response templates — all through String's editing commands.
 | `/edit path` | View raw source with line numbers |
 | `/write path[#block]` | Create a new file, full rewrite, or write to block |
 | `/append path` | Add content to the end |
+| `/replace path` | Replace exact text; fails if the old text is ambiguous |
+| `/replace path --all` | Replace every exact text match |
 | `/replace path#block` | Replace a block's content |
 | `/replace path:L5[-L10]` | Replace a line or line range |
 | `/undo` | Revert the last edit (one time only) |
-| `/commit path --message "..."` | Create a version snapshot |
-| `/log path` | Show version history |
-| `/open path@version` | Read a previous version |
 | `/refresh` | Reload document after changes |
 
 | Principle | Why |
@@ -631,5 +581,4 @@ response templates — all through String's editing commands.
 | **Prefer blocks** | Stable IDs, don't shift — unlike line numbers |
 | **Diff feedback** | Every edit returns before/after context |
 | **1-time `/undo`** | Safety net for the last edit |
-| **`/commit` for versions** | Meaningful snapshots, not every edit |
 | **Workspace boundary** | All writes scoped to AI's workspace |

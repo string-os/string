@@ -17,6 +17,8 @@ Use topics like `main`, `app:<name>`, `app:<name>:<config>`, `bash:<name>`, or h
 
 Use `/open` to read files, URLs, or apps; installed apps can run `/act.<name>` directly from `app:<name>` if you already know the action.
 
+Use `/edit` to inspect raw files, `/write` to create or overwrite, `/append` to add content, and `/replace` for exact text, block, or line-range edits.
+
 Use `/install` to add apps; `/set $VAR = "..."` for app credentials.
 
 Read the payload inside `<𝒞=string:TOPIC>...</𝒞>` and follow `Recovery:` or `next:` hints.

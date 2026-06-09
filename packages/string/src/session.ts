@@ -19,6 +19,7 @@ export class Session {
   private _autoShortcuts: Map<string, string> = new Map();
   private _valueShortcuts: Map<string, string | string[]> = new Map();
   private _seenNavSources: Set<string> = new Set();
+  private _seenFiles: Map<string, { mtimeMs: number; size: number }> = new Map();
   private _bash: BashSession | null = null;
   private _lastUndoPath: string | null = null;
   private _cwdOverride: string | null = null;
@@ -40,6 +41,18 @@ export class Session {
 
   clearLastUndo(): void {
     this._lastUndoPath = null;
+  }
+
+  // ── File Read Tracking ─────────────────────────────────────────────────────
+
+  /** Record that this topic has seen a file's current disk state. */
+  markFileSeen(resolvedPath: string, stat: { mtimeMs: number; size: number }): void {
+    this._seenFiles.set(resolvedPath, { mtimeMs: stat.mtimeMs, size: stat.size });
+  }
+
+  /** Return the last disk state this topic saw for a file, if any. */
+  seenFile(resolvedPath: string): { mtimeMs: number; size: number } | undefined {
+    return this._seenFiles.get(resolvedPath);
   }
 
   // ── CWD Override ─────────────────────────────────────────────────────────────

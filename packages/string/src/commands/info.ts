@@ -226,6 +226,7 @@ export function cmdHelp(session: Session, mode?: 'bash'): CommandResult {
   lines.push('/edit <path>[#block]         Edit with body: replace content');
   lines.push('/write <path>[#block]        Create or overwrite file/block');
   lines.push('/append <path>               Append to file');
+  lines.push('/replace <path|path#block|path:Lx>  Replace text, block, line, or range');
   lines.push('/verify <path>#block         Verify block exists and show content');
   lines.push('');
   lines.push('### Topics (sessions)');
