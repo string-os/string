@@ -37,7 +37,17 @@ export async function executeAction(
   session: Session,
   loader: Loader,
   extraEnv?: Record<string, string>,
+  actionSourceUri?: string,
 ): Promise<CommandResult> {
+  const sourceUri = actionSourceUri ?? session.currentUri;
+  if (action.method === 'cli' && !sourceUri?.startsWith('file://')) {
+    return err(
+      'CLI actions are only allowed from local file:// documents or locally installed apps. ' +
+      'Remote SFMD can only run HTTP actions because remote content may change after review.',
+      'FILE_NOT_ALLOWED',
+    );
+  }
+
   // Append "Setup info: /open <path>" to error content when the current doc
   // has a requirements file registered. Surfaces the setup doc at the moment
   // it's most likely to help — when an action just failed.

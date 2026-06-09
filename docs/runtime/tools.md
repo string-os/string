@@ -321,8 +321,9 @@ CLI gt --detect $CURRENT_FILE
 ```
 ````
 
-A single tool can mix REST and CLI actions. Each `act` block
-independently chooses its method.
+A single local tool can mix REST and CLI actions. Each `act` block
+independently chooses its method. Tools installed in URL-link mode are
+remote SFMD: they can run HTTP actions, but `CLI` actions are blocked.
 
 ---
 

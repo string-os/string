@@ -8,6 +8,23 @@ title: Trust and Execution (SFMD v0.1)
 
 ---
 
+## Reference String runtime policy
+
+The reference String runtime treats document provenance as the first
+execution boundary:
+
+- `file://` documents, including apps installed as local copies, may run
+  `CLI` actions.
+- `http(s)://` documents, including linked remote apps, may run HTTP
+  actions only. They cannot run local CLI commands.
+
+This keeps web-hosted SFMD useful as an agent-readable web/API surface
+without letting a remote page become an unnoticed local shell program.
+Remote content can change after an agent has reviewed it; local command
+execution requires a local file.
+
+---
+
 ## The v0.1 model in one sentence
 
 **Ship a restrictive default action allowlist, make risky capabilities opt-in only, and tell users explicitly to run SFMD files only from trusted sources.**

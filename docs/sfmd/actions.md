@@ -214,6 +214,11 @@ CLI kubectl apply -f {manifest}
 ```
 ````
 
+The reference String runtime executes `CLI` actions only from local
+`file://` documents: local SFMD files and apps installed as local copies.
+Web-hosted SFMD and linked remote apps may run HTTP actions, but they
+cannot run local commands.
+
 ---
 
 ## Headers

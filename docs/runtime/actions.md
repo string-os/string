@@ -138,6 +138,13 @@ invokes it as:
 
 String runs `kubectl apply -f ./app.yaml`.
 
+CLI actions are local-only. The reference String runtime only executes
+`CLI` actions when the action definition came from a `file://` document:
+a local SFMD file or an app installed as a local copy. SFMD opened from
+the web, and apps installed in URL-link mode, can still run HTTP actions
+but cannot run local commands. Remote content can change after an agent
+has reviewed it, so it is never allowed to become a local shell program.
+
 ---
 
 ## Headers
