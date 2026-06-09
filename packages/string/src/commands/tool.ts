@@ -146,5 +146,5 @@ export async function cmdTool(
   const contextVars = buildContextVars(session, loader, args);
 
   // 6. Execute action with context vars as extra env
-  return executeAction(action, args, session, loader, contextVars);
+  return executeAction(action, args, session, loader, contextVars, toolDoc.uri);
 }

@@ -89,6 +89,10 @@ title: Packages
 /install                                # 현재 열린 문서를 설치
 ```
 
+`--link`로 등록한 패키지는 매번 원격 URL을 다시 읽기 때문에 remote SFMD로
+취급된다. HTTP action은 실행할 수 있지만 `CLI` action은 실행할 수 없다.
+로컬 명령을 제공하는 app/tool은 로컬 복사 설치를 사용해야 한다.
+
 ### GitHub URL 설치
 
 브라우저 주소창에서 복사한 GitHub URL을 그대로 받는다. 디렉토리(`tree`)
@@ -144,7 +148,7 @@ auth token` 출력값이나 PAT 둘 다 동작 (5000 req/hr).
 |--------|------|
 | `--app` / `--tool` | frontmatter `type` 명시적 override |
 | `--as <local-name>` | 로컬 레지스트리 키 강제 지정. 같은 (ns, name) 충돌 회피용 |
-| `--link` | URL을 그대로 레지스트리에 등록, 로컬 복사 안 함. `/open app:<name>`마다 publisher 서버에서 fetch. http(s) URL 전용 |
+| `--link` | URL을 그대로 레지스트리에 등록, 로컬 복사 안 함. `/open app:<name>`마다 publisher 서버에서 fetch. http(s) URL 전용. HTTP action만 실행 가능하고 `CLI` action은 차단됨 |
 
 ### /uninstall
 

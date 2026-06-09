@@ -48,6 +48,8 @@ What changes:
   same for documents, apps, web pages, files, APIs, and shell sessions.
 - **Self-discovery.** Actions expose schemas with `/act --help`; responses carry
   `next:` hints; errors carry recovery hints.
+- **Local command boundary.** Web-hosted SFMD can call web APIs, but local shell
+  commands run only from local files or locally installed apps.
 - **Credentials stay scoped.** App secrets are set inside app topics with
   `/set $VAR = "..."`, not pasted into the agent's prompt.
 - **Portable by default.** A String surface is Markdown. It can live in a file,

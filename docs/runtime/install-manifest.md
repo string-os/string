@@ -51,7 +51,7 @@ Typical use: a marketplace surfaces "Run `/install <url>` to install this app" a
 | value | daemon behavior |
 |---|---|
 | `"local"` | Download every `files[]` entry to `packages/{name}/`. Same as `/install` of a plain markdown URL today. |
-| `"link"` | Don't download. Register the manifest URL in `config.json`. Every `/open app:{name}` re-fetches → `/open` always sees the publisher's latest. |
+| `"link"` | Don't download. Register the manifest URL in `config.json`. Every `/open app:{name}` re-fetches → `/open` always sees the publisher's latest. Linked packages are treated as remote SFMD: HTTP actions can run, `CLI` actions cannot. |
 | `"any"` | Treated as `local` by default; agent can override with `--link`. |
 | absent | Treated as `local`. |
 

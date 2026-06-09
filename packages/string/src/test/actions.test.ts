@@ -219,6 +219,178 @@ await section('CLI action execution', async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+await section('Remote SFMD cannot execute CLI actions', async () => {
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-remote-cli-deny-');
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/markdown' });
+    res.end([
+      '# Remote CLI',
+      '',
+      '```act.run',
+      'CLI echo "should-not-run"',
+      '```',
+    ].join('\n'));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+
+  const b = new Browser({ home: tmpDir });
+  const opened = await b.exec(`/open http://127.0.0.1:${port}/remote.md`);
+  assert(opened.ok, 'remote SFMD opens');
+
+  const r = await b.exec('/act.run --');
+  server.close();
+
+  assert(!r.ok, 'remote CLI action denied');
+  assert(r.code === 'FILE_NOT_ALLOWED', `remote CLI returns FILE_NOT_ALLOWED. got: ${r.code}`);
+  assert(r.content.includes('Remote SFMD can only run HTTP actions'), 'denial explains remote HTTP-only policy');
+  assert(!r.content.includes('should-not-run'), 'CLI output is not present');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Remote SFMD can execute HTTP actions', async () => {
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-remote-http-ok-');
+  const server = http.createServer((req, res) => {
+    if (req.url?.startsWith('/app.md')) {
+      res.writeHead(200, { 'Content-Type': 'text/markdown' });
+      res.end([
+        '# Remote HTTP',
+        '',
+        '```act.ping',
+        'GET /api/ping',
+        '```',
+      ].join('\n'));
+      return;
+    }
+    res.writeHead(200, { 'Content-Type': 'text/plain' });
+    res.end('pong');
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open http://127.0.0.1:${port}/app.md`);
+  const r = await b.exec('/act.ping');
+  server.close();
+
+  assert(r.ok, 'remote HTTP action ok');
+  assert(r.content.includes('pong'), 'remote HTTP response returned');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Linked remote apps cannot execute CLI actions', async () => {
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-linked-cli-deny-');
+  const appSource = [
+    '---',
+    'name: linkedcli',
+    'type: app',
+    '---',
+    '',
+    '# Linked CLI',
+    '',
+    '```act.run',
+    'CLI echo "linked-should-not-run"',
+    '```',
+  ].join('\n');
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/markdown' });
+    res.end(appSource);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+
+  const b = new Browser({ home: tmpDir });
+  const install = await b.exec(`/install --app --link http://127.0.0.1:${port}/string.md`);
+  assert(install.ok, `linked install ok. got: ${install.content}`);
+
+  const r = await b.exec('/act.run --', 'app:linkedcli');
+  server.close();
+
+  assert(!r.ok, 'linked remote app CLI action denied');
+  assert(r.code === 'FILE_NOT_ALLOWED', `linked remote CLI returns FILE_NOT_ALLOWED. got: ${r.code}`);
+  assert(!r.content.includes('linked-should-not-run'), 'linked CLI output is not present');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Linked remote tools cannot execute CLI actions', async () => {
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-linked-tool-cli-deny-');
+  const toolSource = [
+    '---',
+    'name: linkedtool',
+    'type: tool',
+    'default: run',
+    '---',
+    '',
+    '# Linked Tool',
+    '',
+    '```act.run',
+    'CLI echo "linked-tool-should-not-run"',
+    '```',
+  ].join('\n');
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/markdown' });
+    res.end(toolSource);
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+
+  const b = new Browser({ home: tmpDir });
+  const install = await b.exec(`/install --tool --link http://127.0.0.1:${port}/tool.md`);
+  assert(install.ok, `linked tool install ok. got: ${install.content}`);
+
+  const r = await b.exec('/tool:linkedtool --');
+  server.close();
+
+  assert(!r.ok, 'linked remote tool CLI action denied');
+  assert(r.code === 'FILE_NOT_ALLOWED', `linked remote tool CLI returns FILE_NOT_ALLOWED. got: ${r.code}`);
+  assert(!r.content.includes('linked-tool-should-not-run'), 'linked tool CLI output is not present');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('Remote default CLI action is skipped on open', async () => {
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-remote-default-cli-');
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/markdown' });
+    res.end([
+      '---',
+      'default: boot',
+      '---',
+      '',
+      '# Remote Default',
+      '',
+      '```act.boot',
+      'CLI echo "remote-default-ran"',
+      '```',
+    ].join('\n'));
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec(`/open http://127.0.0.1:${port}/default.md`);
+  server.close();
+
+  assert(r.ok, 'remote document with default CLI still opens');
+  assert(r.content.includes('Remote Default'), 'remote document content shown');
+  assert(!r.content.includes('remote-default-ran'), 'remote default CLI was not executed');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
 // ─── $var environment variable substitution ──────────────────────────────────
 
 await section('$var → EnvStore in action URI', async () => {

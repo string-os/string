@@ -265,18 +265,19 @@ Look for:
 
 ## Security & distribution
 
-v0.1 trust model in one paragraph: **CLI actions run unsandboxed.** An
-installed app executes with your agent's permissions, makes whatever HTTP
-calls its action templates declare, and reads/writes wherever the shell
-allows. There is no per-host allowlist and no per-command sandbox.
-Inspect `string.md` before installing — it's plain Markdown, which is
-the whole point.
+v0.1 trust model in one paragraph: **local CLI actions run
+unsandboxed, remote SFMD stays HTTP-only.** A locally installed app
+executes CLI actions with your agent's permissions and reads/writes
+wherever the shell allows. A document opened from `http(s)://`, or an app
+installed in URL-link mode, can run HTTP actions but cannot run local CLI
+commands. Inspect `string.md` before installing a local CLI app — it's
+plain Markdown, which is the whole point.
 
 `$VAR` interpolation is a real shape of trust: if an action's URL or CLI
 template includes `{user_input}`, the runtime shell-escapes (CLI) or
 URL-encodes (HTTP) but the resulting URL/command is still
-agent-influenced. Treat actions as you would treat a small CLI tool
-shipped over the wire.
+agent-influenced. Treat local apps with CLI actions as you would treat a
+small CLI tool installed on your machine.
 
 Distribute by:
 
