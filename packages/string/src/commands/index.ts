@@ -16,7 +16,7 @@ import { cmdAction } from './action.js';
 import { cmdOpen, cmdBack, cmdRefresh, cmdClose } from './open.js';
 import { cmdNav } from './nav.js';
 import { cmdInfo, cmdSource, cmdHelp, cmdLs } from './info.js';
-import { cmdWrite, cmdAppend, cmdEdit, cmdVerify, cmdUndo } from './edit.js';
+import { cmdWrite, cmdAppend, cmdReplace, cmdEdit, cmdVerify, cmdUndo } from './edit.js';
 import { cmdSet } from './set.js';
 import { cmdExec, dispatchBash } from './exec.js';
 import { cmdTool } from './tool.js';
@@ -132,6 +132,7 @@ export async function dispatch(
     case 'ls':      return cmdLs(parsed.args, session, loader, topicType);
     case 'write':   return cmdWrite(parsed.args, parsed.body, session, loader);
     case 'append':  return cmdAppend(parsed.args, parsed.body, session, loader);
+    case 'replace': return cmdReplace(parsed.args, parsed.body, session, loader);
     case 'edit':    return cmdEdit(parsed.args, parsed.body, session, loader);
     case 'verify':  return cmdVerify(parsed.args, session, loader);
     case 'undo':    return cmdUndo(session, loader);

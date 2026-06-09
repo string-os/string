@@ -42,7 +42,7 @@ it is talking to.
 | **Action invocation** | how an agent calls a capability | `/act.<name>`, action blocks, typed args, `/act.<name> --help` |
 | **State scoping** | what is remembered, where, and for how long | topics (tab, `app:`, `bash:`, hub), session vars, env scopes |
 | **Output framing** | how the agent recognizes its own results | `<𝒞=string:topic>…</𝒞>` markers around every payload |
-| **Editing semantics** | how an agent writes back to the world | `/write`, `/append`, `/edit`, `/undo`, `/verify`, block-level edits |
+| **Editing semantics** | how an agent writes back to the world | `/write`, `/append`, `/replace`, `/edit`, `/undo`, `/verify`, text/line/block edits |
 | **Trust and permissions** | what an agent is allowed to run | action allowlist, `--allow-shell`, `[!requirements]`, signed packages (v0.2) |
 | **Recovery and error hints** | how an agent knows what to do when things break | typed error codes, missing-env hints, `/info` diagnostics, `meta.warnings` |
 

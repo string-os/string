@@ -184,6 +184,12 @@ When you see that, run `string app:<name> '/open requirements.md'` to see what t
 | `/info` | Session state (current app, version, action list, history depth) |
 | `/ls [path]` | List files in a directory |
 | `/help` | All commands + current page actions |
+| `/edit <path>[#block]` | View raw source; with body, edit file or block |
+| `/write <path>[#block]` | Create or overwrite file/block |
+| `/append <path>` | Append content to a file |
+| `/replace <path \| path#block \| path:L5[-L10]>` | Replace exact text, block, line, or range |
+| `/verify <path>#block` | Verify a block exists and show content |
+| `/undo` | Revert the last String edit |
 | `/act.<name> [flags]` | Run action — positional or `--flag value` |
 | `/act.<name> --help` | Field schema for that action |
 | `/tool:<name> [args]` | Run an installed tool (default action) — POSIX CLI shape |

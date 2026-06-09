@@ -189,6 +189,13 @@ export async function cmdOpen(
     }
 
     session.open(doc, blockId);
+    if (loaded.uri.startsWith('file://')) {
+      try {
+        const resolvedPath = new URL(loaded.uri).pathname;
+        const stat = await fsPromises.stat(resolvedPath);
+        session.markFileSeen(resolvedPath, stat);
+      } catch { /* best-effort stale-write tracking */ }
+    }
     const displayPath = loaded.uri.startsWith('file://')
       ? toWorkspacePath(new URL(loaded.uri).pathname, loader.home)
       : loaded.uri;

@@ -180,6 +180,97 @@ await section('/edit — line numbers in view mode', async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+await section('/replace — exact substring replace', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-replace-test-');
+  const b = new Browser({ home: tmpDir });
+
+  await b.exec('/write test.txt\nalpha\nbeta\ngamma');
+  const r = await b.exec('/replace test.txt\nbeta\n---\nBETA');
+  assert(r.ok, 'replace ok');
+  assert(r.content.includes('Replaced 1 occurrence'), 'replace count shown');
+  assert(r.content.includes('- beta'), 'diff deleted old text');
+  assert(r.content.includes('+ BETA'), 'diff added new text');
+  const content = fs.readFileSync(path.join(tmpDir, 'test.txt'), 'utf-8');
+  assert(content === 'alpha\nBETA\ngamma', 'file content replaced');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('/replace — ambiguous substring requires --all', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-replace-test-');
+  const b = new Browser({ home: tmpDir });
+
+  await b.exec('/write test.txt\nv1\nv1\nv1');
+  const r1 = await b.exec('/replace test.txt\nv1\n---\nv2');
+  assert(!r1.ok, 'ambiguous replace rejected');
+  assert(r1.code === 'CONFLICT', 'ambiguous replace uses conflict');
+  assert(r1.content.includes('matched 3 times'), 'match count shown');
+
+  const r2 = await b.exec('/replace test.txt --all\nv1\n---\nv2');
+  assert(r2.ok, 'replace all ok');
+  assert(r2.content.includes('Replaced 3 occurrences'), 'replace all count shown');
+  const content = fs.readFileSync(path.join(tmpDir, 'test.txt'), 'utf-8');
+  assert(content === 'v2\nv2\nv2', 'all occurrences replaced');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('/replace — line and range replace', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-replace-test-');
+  const b = new Browser({ home: tmpDir });
+
+  await b.exec('/write test.txt\none\ntwo\nthree\nfour');
+  const r1 = await b.exec('/replace test.txt:L2\nTWO');
+  assert(r1.ok, 'line replace ok');
+  assert(r1.content.includes('Replaced test.txt:L2'), 'line label shown');
+
+  const r2 = await b.exec('/replace test.txt:L3-L4\nTHREE\nFOUR\nFIVE');
+  assert(r2.ok, 'range replace ok');
+  assert(r2.content.includes('Replaced test.txt:L3-L4'), 'range label shown');
+
+  const content = fs.readFileSync(path.join(tmpDir, 'test.txt'), 'utf-8');
+  assert(content === 'one\nTWO\nTHREE\nFOUR\nFIVE', 'line and range replacements applied');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('/replace — block replace delegates to document block editing', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-replace-test-');
+  const b = new Browser({ home: tmpDir });
+
+  await b.exec('/write test.md\n# Title\n\n## Status\nold\n\n## Next\nkeep');
+  const r = await b.exec('/replace test.md#status\nnew');
+  assert(r.ok, 'block replace ok');
+  assert(r.content.includes('Edited test.md#status'), 'block edit label shown');
+  const content = fs.readFileSync(path.join(tmpDir, 'test.md'), 'utf-8');
+  assert(content.includes('## Status\nnew\n\n## Next'), 'block body replaced and next section preserved');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('/write — existing whole-file overwrite requires prior read or --force', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-stale-test-');
+  fs.writeFileSync(path.join(tmpDir, 'existing.txt'), 'original', 'utf-8');
+  const b = new Browser({ home: tmpDir });
+
+  const blocked = await b.exec('/write existing.txt\nblind overwrite');
+  assert(!blocked.ok, 'blind overwrite blocked');
+  assert(blocked.code === 'CONFLICT', 'blind overwrite uses conflict');
+  assert(blocked.content.includes('not read in this topic'), 'read hint shown');
+
+  const forced = await b.exec('/write --force existing.txt\nforced overwrite');
+  assert(forced.ok, 'force overwrite ok');
+  assert(fs.readFileSync(path.join(tmpDir, 'existing.txt'), 'utf-8') === 'forced overwrite', 'force changed content');
+
+  fs.writeFileSync(path.join(tmpDir, 'existing.txt'), 'external content', 'utf-8');
+  const b2 = new Browser({ home: tmpDir });
+  await b2.exec('/edit existing.txt');
+  const safe = await b2.exec('/write existing.txt\nseen overwrite');
+  assert(safe.ok, 'overwrite after read ok');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
 await section('/set config override affects diff output', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-diff-test-');
   const b = new Browser({ home: tmpDir });

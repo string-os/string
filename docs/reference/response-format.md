@@ -56,6 +56,9 @@ Confirmation and status messages.
 | `/open` (no args) | usage error |
 | `/write path` | `Written: path (42 bytes, 3 lines)` |
 | `/append path` | `Appended to: path (now 78 bytes)` |
+| `/replace path` | `Replaced 1 occurrence in path` |
+| `/replace path --all` | `Replaced N occurrences in path` |
+| `/replace path:L5[-L10]` | `Replaced path:L5[-L10]` |
 | `/edit path` (with body) | `Edited path (2 lines, whole file)` |
 | `/edit path#block` (with body) | `Edited path#block (5 lines)` |
 | `/close` | `Closed: path` |
