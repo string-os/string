@@ -2,7 +2,7 @@
   "mcpServers": {
     "string": {
       "command": "npx",
-      "args": ["-y", "@string-os/string", "--mcp"]
+      "args": ["-y", "@string-os/string@latest", "--mcp"]
     }
   }
 }
