@@ -147,7 +147,11 @@ Topics scope state:
 | `app:<name>` | installed app session |
 | `app:<name>:<config>` | app session with config-scoped env |
 | `bash:<name>` | persistent shell session |
-| `app`, `tool`, `bash`, `system` | hub topics for runtime views |
+| `app`, `tool`, `bash`, `event`, `system` | hub topics for runtime views |
+
+Hub topics are reserved. Use `/open app`, `/open tool`, `/open bash`,
+`/open event`, or `/open system` to inspect installed apps, tools, shell
+sessions, pending events, or daemon state.
 
 Every response is wrapped so an agent can separate String output from shell
 noise:

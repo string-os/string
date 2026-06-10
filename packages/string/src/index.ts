@@ -134,11 +134,22 @@ export class Browser {
 
   closeSession(name: string): boolean {
     if (this.sessions.size <= 1) return false; // keep at least one
+    const session = this.sessions.get(name);
     const deleted = this.sessions.delete(name);
+    if (deleted) {
+      session?.close();
+    }
     if (deleted && this._activeSession === name) {
       this._activeSession = [...this.sessions.keys()][0];
     }
     return deleted;
+  }
+
+  dispose(): void {
+    for (const session of this.sessions.values()) {
+      session.close();
+    }
+    this.sessions.clear();
   }
 
   listSessions(): string[] {

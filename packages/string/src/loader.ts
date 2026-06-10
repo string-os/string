@@ -325,6 +325,12 @@ export class Loader {
    * Does NOT strip fragments — caller is responsible.
    */
   resolve(topic: string, baseUri?: string): string {
+    const homeTopic = topic === '~'
+      ? this.home
+      : topic.startsWith('~/')
+        ? path.join(this.home, topic.slice(2))
+        : null;
+
     // Already a full URI
     if (topic.startsWith('file://') || topic.startsWith('https://') || topic.startsWith('http://')) {
       return topic;
@@ -333,6 +339,10 @@ export class Loader {
     // chanflow:// scheme → https://
     if (topic.startsWith('chanflow://')) {
       return 'https://' + topic.slice('chanflow://'.length);
+    }
+
+    if (homeTopic) {
+      return pathToFileUri(homeTopic);
     }
 
     // Relative or absolute file path

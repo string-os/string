@@ -65,7 +65,7 @@ There are four shapes:
 | Tab (free-form) | bare name | `main`, `notes`, `research` |
 | App (canonical) | `app:name` | `app:gmail`, `app:weather:korea` |
 | Bash (canonical) | `bash:name` | `bash:dev`, `bash:deploy` |
-| Hub (reserved bare names) | `app`, `bash`, `tool`, `system` | `app`, `bash` |
+| Hub (reserved bare names) | `app`, `bash`, `tool`, `event`, `system` | `app`, `event` |
 
 Names match `[a-zA-Z0-9_-]+` — letters, numbers, hyphens, underscores
 only. No dots, no paths, no spaces. Session names are short
@@ -201,7 +201,7 @@ normal shell input for everything else.
 
 ### Hub
 
-Four bare names are reserved as **hub aggregators** — they route to
+Five bare names are reserved as **hub aggregators** — they route to
 managed views over their kind rather than free-form tabs:
 
 | Hub | What it manages |
@@ -209,19 +209,28 @@ managed views over their kind rather than free-form tabs:
 | `app` | Installed apps + currently open app sessions |
 | `bash` | Active bash sessions (list, spawn, kill) |
 | `tool` | Installed tools |
+| `event` | Pending and acknowledged local webhook events |
 | `system` | Daemon status, env store, runtime controls |
 
 ```
 string:app          # the app hub
 string:bash         # the bash hub
+string:event        # the event inbox hub
 ```
 
 Because they're reserved, you cannot name a free-form tab `app`,
-`bash`, `tool`, or `system`. `string app` always opens the app hub,
-not a tab called `app`.
+`bash`, `tool`, `event`, or `system`. `string app` always opens the
+app hub, not a tab called `app`.
 
-In v0.1.x each hub renders a placeholder page; concrete listings and
-management actions land in a follow-up.
+Open a hub to inspect its current state:
+
+```
+/open app
+/open tool
+/open bash
+/open event
+/open system
+```
 
 ---
 

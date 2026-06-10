@@ -226,3 +226,32 @@ await section('daemon — ensureAgent home/allowedPaths contract (clobber fix)',
     fs.rmSync(path.dirname(env.dataDir), { recursive: true, force: true });
   }
 });
+
+await section('daemon — agent home changes apply without daemon restart', async () => {
+  const env = makeEnv();
+  const daemon = await startDaemon(env);
+  const home1 = path.join(env.dataDir, 'runtime-home-1');
+  const home2 = path.join(env.dataDir, 'runtime-home-2');
+  fs.mkdirSync(home1, { recursive: true });
+  fs.mkdirSync(home2, { recursive: true });
+  fs.writeFileSync(path.join(home1, 'marker.md'), '# Old Home\n\nold-home-marker\n');
+  fs.writeFileSync(path.join(home2, 'marker.md'), '# New Home\n\nnew-home-marker\n');
+
+  try {
+    await client.ensureAgent(env.port, { id: 'runtime', home: home1 });
+
+    const oldResult = await client.exec(env.port, 'runtime', 'main', '/open ./marker.md');
+    assert(oldResult.ok, 'opens marker in initial home');
+    assert(oldResult.content.includes('old-home-marker'), 'initial runtime uses old home');
+
+    await client.ensureAgent(env.port, { id: 'runtime', home: home2 });
+
+    const newResult = await client.exec(env.port, 'runtime', 'main', '/open ./marker.md');
+    assert(newResult.ok, 'opens marker after home update');
+    assert(newResult.content.includes('new-home-marker'), 'runtime uses updated home without daemon restart');
+    assert(!newResult.content.includes('old-home-marker'), 'updated runtime no longer reads old home');
+  } finally {
+    daemon.stop();
+    fs.rmSync(path.dirname(env.dataDir), { recursive: true, force: true });
+  }
+});
