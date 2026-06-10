@@ -67,6 +67,7 @@ interface TopicState {
 interface RuntimeEntry {
   browser: Browser;
   agentId: string;
+  home: string;
   created: string;
   topics: Map<string, TopicState>;
 }
@@ -193,10 +194,17 @@ function buildSessionSummary(runtime: RuntimeEntry, topic: string, state: TopicS
 }
 
 function getOrCreateRuntime(agentId: string, home: string): RuntimeEntry {
+  const existing = runtimes.get(agentId);
+  if (existing && existing.home !== home) {
+    existing.browser.dispose();
+    runtimes.delete(agentId);
+    log.info('runtime.recreate.home_changed', { agentId, oldHome: existing.home, home });
+  }
   if (!runtimes.has(agentId)) {
     runtimes.set(agentId, {
       browser: new Browser({ home, agentId, htmlToMarkdown: createHtmlToMarkdown() }),
       agentId,
+      home,
       created: new Date().toISOString(),
       topics: new Map(),
     });

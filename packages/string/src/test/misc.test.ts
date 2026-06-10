@@ -4,10 +4,35 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { Browser, createHtmlToMarkdown } from '../index.js';
+import { Browser, Loader, createHtmlToMarkdown } from '../index.js';
 import { assert, section, mkBrowser, WIKI } from './runner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+await section('/open ~/file resolves against agent home', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-home-tilde-');
+  const nestedDir = path.join(tmpDir, 'nested');
+  fs.mkdirSync(nestedDir);
+  fs.writeFileSync(path.join(tmpDir, 'home.md'), '# Home File\n\nfrom agent home\n');
+  fs.writeFileSync(path.join(nestedDir, 'current.md'), '# Current File\n');
+
+  try {
+    const b = new Browser({ home: tmpDir });
+    const current = await b.exec('/open ./nested/current.md');
+    assert(current.ok, 'opened nested file');
+
+    const r = await b.exec('/open ~/home.md');
+    assert(r.ok, '~/ path opens successfully');
+    assert(r.content.includes('from agent home'), '~/ path reads from agent home');
+
+    const loader = new Loader({ home: tmpDir });
+    const resolvedFromHttp = loader.resolve('~/home.md', 'https://example.com/docs/index.md');
+    assert(resolvedFromHttp.startsWith('file://'), '~/ path ignores HTTP base URI');
+    assert(resolvedFromHttp.endsWith('/home.md'), '~/ path still points into agent home');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
 
 // ─── /tool command ──────────────────────────────────────────────────────────
 
