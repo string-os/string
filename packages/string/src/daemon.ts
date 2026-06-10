@@ -138,9 +138,17 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
 }
 
 function sseEvent(res: http.ServerResponse, event: string, data: unknown): void {
-  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  if (typeof (res as any).flush === 'function') {
-    (res as any).flush();
+  // Writing to a socket that the peer reset between our writableEnded check and
+  // here can throw synchronously. A failed push to one dead stream must never
+  // break the webhook/heartbeat path, so swallow it — the stream's 'close'/
+  // 'error' handler will unregister it.
+  try {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (typeof (res as any).flush === 'function') {
+      (res as any).flush();
+    }
+  } catch {
+    /* dead stream — cleanup happens via close/error handlers */
   }
 }
 
@@ -391,6 +399,12 @@ function handleEventStream(req: http.IncomingMessage, res: http.ServerResponse):
   };
   req.on('close', close);
   res.on('close', close);
+  // An abrupt client disconnect (a Claude session or `--mcp` channel exiting,
+  // a dropped connection) resets the socket. Without an 'error' listener that
+  // surfaces as an uncaught ECONNRESET that crashes the daemon. Treat it as a
+  // normal stream close.
+  req.on('error', close);
+  res.on('error', close);
 }
 
 /**

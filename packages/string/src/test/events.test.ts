@@ -83,6 +83,7 @@ function postText(urlString: string, text: string): Promise<{ status: number; bo
         status: res.statusCode ?? 0,
         body: Buffer.concat(chunks).toString('utf-8'),
       }));
+      res.on('error', reject);
     });
     req.on('error', reject);
     req.write(text);
