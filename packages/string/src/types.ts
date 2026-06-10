@@ -77,7 +77,7 @@ export interface CommandResult {
  *               Always carries the `app:` prefix.
  *   - `bash`  — canonical bash session (`bash:dev`). Always `bash:` prefix.
  *               Each bash:<name> owns its own pty.
- *   - `hub`   — reserved bare aggregator name (`app`, `bash`, `tool`,
+ *   - `hub`   — reserved bare aggregator name (`app`, `bash`, `tool`, `event`,
  *               `system`). Manages instances of its kind. Display: just
  *               the name (e.g. `app`, not `hub:app`).
  *
@@ -110,11 +110,12 @@ const CANONICAL_PREFIXES = new Set<string>(['app', 'bash']);
  *   `app`     — installed apps + currently open app sessions
  *   `bash`    — active bash sessions (list, spawn, kill)
  *   `tool`    — installed tools
+ *   `event`   — agent-local event inbox
  *   `system`  — daemon status, env-store, /set, runtime controls
  *
  * Adding a new hub later = add to this set + register a hub doc generator.
  */
-export const HUB_NAMES = new Set<string>(['app', 'bash', 'tool', 'system']);
+export const HUB_NAMES = new Set<string>(['app', 'bash', 'tool', 'event', 'system']);
 
 /** True if `name` is a reserved hub aggregator name. */
 export function isHubName(name: string): boolean {

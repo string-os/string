@@ -10,6 +10,9 @@ The MCP server is **not a separate package**. It's part of the daemon. Two trans
 - **HTTP** — `POST /mcp` on the running daemon (Streamable HTTP). Best for clients that connect by URL.
 
 Both expose the same tool, the same behavior, the same isolation guarantees.
+The stdio server also advertises Claude Code's experimental channel capability;
+when Claude Code loads it as a channel, local webhook events for the same agent
+are pushed into the session.
 
 ---
 
@@ -96,6 +99,42 @@ stable server name makes skills and prompts easier to reuse.
 For a fixed project-level or client-level agent, `string --mcp --agent <id>` is
 still supported. Prefer `STRING_AGENT_ID` when the agent varies by launched
 session.
+
+### Claude Code channels
+
+For Claude Code Remote Control, the same `string` MCP server can be loaded as a
+channel. It still exposes the `string` tool, and it also forwards local webhook
+events from `stringd` to Claude as channel messages.
+
+```json
+{
+  "mcpServers": {
+    "string": {
+      "command": "string",
+      "args": ["--mcp"]
+    }
+  }
+}
+```
+
+Run Claude Code with the String development channel. Anthropic's official
+Discord channel can be loaded at the same time:
+
+```bash
+claude \
+  --mcp-config .mcp.json \
+  --channels plugin:discord@claude-plugins-official \
+  --dangerously-load-development-channels server:string
+```
+
+Select the String agent the same way as normal MCP:
+
+```bash
+STRING_AGENT_ID=leo claude \
+  --mcp-config .mcp.json \
+  --channels plugin:discord@claude-plugins-official \
+  --dangerously-load-development-channels server:string
+```
 
 ---
 

@@ -16,7 +16,7 @@ title: stringd Protocol v0.1
 
 1. **Loopback only.** The daemon binds `127.0.0.1`. It is not a network service. Do not put it behind a reverse proxy, do not expose it in a shared container, do not publish the port. CORS is permissive for local-tooling convenience, not as a security boundary.
 2. **`X-Agent-Id` is identity, not authentication.** It selects which agent record a request operates under. Any process on the loopback interface can set any value. The trust assumption is "same host, same OS user" — processes on the same machine running as the same UID are trusted to not lie to each other.
-3. **No per-request signing or token auth.** `/health` and `/shutdown` accept any caller. A hostile local process can shut the daemon down; this is equivalent to sending `SIGTERM`, which such a process could already do.
+3. **No general per-request signing or token auth.** `/health` and `/shutdown` accept any caller. A hostile local process can shut the daemon down; this is equivalent to sending `SIGTERM`, which such a process could already do. Local webhooks are the exception: their URL contains an agent-specific random token so unrelated local posts do not accidentally land in an agent inbox.
 4. **Request body cap.** The daemon rejects bodies larger than 10 MiB to prevent trivial OOM. Clients SHOULD NOT send JSON payloads anywhere near this bound.
 5. **Shell execution is by design.** `/exec` and CLI-method actions run under `/bin/bash -c`. This is a deliberate property of the agent runtime, not a vulnerability. Embedders who need sandboxing must provide it at the OS level (containers, firejail, VMs).
 
@@ -28,7 +28,7 @@ If your deployment needs multi-tenant access, remote use, or per-request authent
 
 An **agent** is the top-level identity. Each agent has a home directory (`agent.home`) and an optional allowlist of additional accessible paths. Agents are registered via `POST /agents` and persist across daemon restarts in `${STRING_DATA_DIR}/agents.json` (default: `~/.string/daemon/agents.json`).
 
-A **topic** is the unit of session scope. A topic is either a bare name — a free-form `tab` (e.g. `main`, `docs`) — or canonical: `app:name[:config]` (e.g. `app:weather:korea`) or `bash:name` (e.g. `bash:dev`). The bare names `app`, `bash`, `tool`, `system` are reserved as `hub` aggregators. A topic belongs to an agent. The runtime maintains per-topic state (current document, variables, history, bash PTY if applicable).
+A **topic** is the unit of session scope. A topic is either a bare name — a free-form `tab` (e.g. `main`, `docs`) — or canonical: `app:name[:config]` (e.g. `app:weather:korea`) or `bash:name` (e.g. `bash:dev`). The bare names `app`, `bash`, `tool`, `event`, `system` are reserved as `hub` aggregators. A topic belongs to an agent. The runtime maintains per-topic state (current document, variables, history, bash PTY if applicable).
 
 A **command** is a single `/open`, `/act`, `/nav`, `/info`, `/set`, `/edit`, etc. invocation. Commands execute in a topic's context. A client sends one command per `POST /exec` call; the daemon responds with a Server-Sent Events (SSE) stream containing a head event, a content event, and a done event.
 
@@ -48,7 +48,7 @@ Endpoints that do not require an agent (`/agents`, `/health`, `/shutdown`) ignor
 
 CORS is permissive: the daemon sends `Access-Control-Allow-Origin: *` and `Access-Control-Allow-Headers: Content-Type, X-Agent-Id` on every response, and responds to `OPTIONS` preflight with `204 No Content`. Clients should not rely on CORS for security — `stringd` is intended for loopback only.
 
-All request bodies, where present, MUST be `Content-Type: application/json`.
+All request bodies, where present, MUST be `Content-Type: application/json`, except `POST /webhook/:token`, which accepts text.
 
 All error responses are JSON: `{ "error": "<human-readable reason>" }` with an appropriate HTTP status. Some errors include a machine-readable code field: `{ "error": "QUEUE_FULL", "message": "..." }`.
 
@@ -87,6 +87,83 @@ All error responses are JSON: `{ "error": "<human-readable reason>" }` with an a
 
 **Errors:**
 - `400 { "error": "agent_id required" }`
+
+#### `GET /agents/:id/webhook` — show or create local webhook
+
+Creates an agent-specific local webhook token if one does not already exist,
+then returns the loopback URL.
+
+**Response 200:**
+```json
+{
+  "agent_id": "default",
+  "webhook_url": "http://127.0.0.1:3923/webhook/wh_..."
+}
+```
+
+#### `POST /agents/:id/webhook` — rotate local webhook
+
+Rotates the agent's webhook token. The old URL stops working immediately.
+
+**Response 200:** same shape as `GET /agents/:id/webhook`.
+
+### Local webhook
+
+#### `POST /webhook/:token` — append event text
+
+Accepts a non-empty text body up to 64 KiB and appends it to the target agent's
+event inbox. The payload is stored as text. It is not executed.
+
+**Response 202:**
+```json
+{ "ok": true, "agent_id": "default", "event_id": "evt_..." }
+```
+
+**Errors:**
+- `401 { "error": "Unknown webhook token" }`
+- `400 { "error": "Webhook body must be non-empty text" }`
+- `413 { "error": "Webhook body exceeds 65536 bytes" }`
+
+#### `GET /events/stream` — stream live events
+
+Subscribes to newly appended events for one agent. This endpoint is used by
+SDK agents and by `string --mcp` when it forwards local webhook events to
+Claude Code as channel notifications.
+
+**Headers:**
+- `X-Agent-Id: <agent_id>` (required)
+- `Accept: text/event-stream` (recommended)
+
+**Response 200:**
+```http
+Content-Type: text/event-stream
+```
+
+Initial ready event:
+```text
+event: ready
+data: {"agent_id":"default"}
+```
+
+For each local webhook event:
+```text
+event: event
+data: {"id":"evt_...","agentId":"default","receivedAt":"...","source":"local-webhook","text":"...","status":"pending"}
+```
+
+Heartbeat:
+```text
+event: ping
+data: {"t":"..."}
+```
+
+Only events appended after the stream opens are delivered. Durable reads and
+acknowledgement still go through the `event` topic (`/events`,
+`/events.read <id>`, `/events.ack <id>`).
+
+**Errors:**
+- `400 { "error": "X-Agent-Id header required" }`
+- `401 { "error": "Unknown agent: <id>" }`
 
 #### `DELETE /agents/:agent_id` — delete an agent
 

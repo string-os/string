@@ -44,6 +44,7 @@ import { parseTopic, topicToString } from './types.js';
 import { AgentRegistry, type Agent } from './agent.js';
 import { createStringServer, type McpExecFn } from './mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
+import { EventStore, createWebhookToken, type AgentEvent } from './events.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -100,12 +101,14 @@ interface SessionMeta {
 const STRING_DATA_DIR = process.env.STRING_DATA_DIR || join(homedir(), '.string', 'daemon');
 const agents = new AgentRegistry([], join(STRING_DATA_DIR, 'agents.json'));
 const runtimes = new Map<string, RuntimeEntry>();
+const eventStreams = new Map<string, Set<http.ServerResponse>>();
 let log: Logger;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 // 10 MiB request body cap — prevents trivial OOM from an unbounded POST.
 const MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
+const MAX_WEBHOOK_TEXT_BYTES = 64 * 1024;
 
 async function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -138,6 +141,18 @@ function sseEvent(res: http.ServerResponse, event: string, data: unknown): void 
   res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
   if (typeof (res as any).flush === 'function') {
     (res as any).flush();
+  }
+}
+
+function notifyEventStreams(agentId: string, event: AgentEvent): void {
+  const streams = eventStreams.get(agentId);
+  if (!streams || streams.size === 0) return;
+  for (const stream of [...streams]) {
+    if (stream.writableEnded || stream.destroyed) {
+      streams.delete(stream);
+      continue;
+    }
+    sseEvent(stream, 'event', event);
   }
 }
 
@@ -244,13 +259,16 @@ async function handleRegisterAgent(
     home,
     allowedPaths: resolvedPaths,
     createdAt: existing ? existing.createdAt : new Date().toISOString(),
+    webhookToken: existing?.webhookToken,
   });
   log.info(existing ? 'agent.update' : 'agent.register', { agentId, home });
   sendJson(res, 200, { agent_id: agentId, home, created: !existing });
 }
 
 function handleListAgents(_req: http.IncomingMessage, res: http.ServerResponse): void {
-  sendJson(res, 200, { agents: agents.list() });
+  sendJson(res, 200, {
+    agents: agents.list().map(({ webhookToken: _webhookToken, ...agent }) => agent),
+  });
 }
 
 function handleDeleteAgent(res: http.ServerResponse, agentId: string): void {
@@ -258,6 +276,121 @@ function handleDeleteAgent(res: http.ServerResponse, agentId: string): void {
   runtimes.delete(agentId);
   log.info('agent.delete', { agentId, existed });
   sendJson(res, 200, { agent_id: agentId, deleted: existed });
+}
+
+function webhookUrl(req: http.IncomingMessage, token: string): string {
+  const host = req.headers.host || '127.0.0.1:3923';
+  return `http://${host}/webhook/${encodeURIComponent(token)}`;
+}
+
+function ensureAgentWebhook(agent: Agent): Agent {
+  if (agent.webhookToken) return agent;
+  const updated: Agent = { ...agent, webhookToken: createWebhookToken() };
+  agents.register(updated);
+  return updated;
+}
+
+function handleGetAgentWebhook(req: http.IncomingMessage, res: http.ServerResponse, agentId: string): void {
+  const agent = agents.get(agentId);
+  if (!agent) {
+    sendJson(res, 404, { error: `Unknown agent: ${agentId}` });
+    return;
+  }
+  const updated = ensureAgentWebhook(agent);
+  sendJson(res, 200, {
+    agent_id: agentId,
+    webhook_url: webhookUrl(req, updated.webhookToken!),
+  });
+}
+
+function handleRotateAgentWebhook(req: http.IncomingMessage, res: http.ServerResponse, agentId: string): void {
+  const agent = agents.get(agentId);
+  if (!agent) {
+    sendJson(res, 404, { error: `Unknown agent: ${agentId}` });
+    return;
+  }
+  const updated: Agent = { ...agent, webhookToken: createWebhookToken() };
+  agents.register(updated);
+  log.info('agent.webhook.rotate', { agentId });
+  sendJson(res, 200, {
+    agent_id: agentId,
+    webhook_url: webhookUrl(req, updated.webhookToken!),
+  });
+}
+
+async function handleWebhook(token: string, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const agent = agents.list().find(a => a.webhookToken === token);
+  if (!agent) {
+    sendJson(res, 401, { error: 'Unknown webhook token' });
+    return;
+  }
+
+  const text = await readBody(req);
+  const byteLength = Buffer.byteLength(text, 'utf-8');
+  if (byteLength === 0) {
+    sendJson(res, 400, { error: 'Webhook body must be non-empty text' });
+    return;
+  }
+  if (byteLength > MAX_WEBHOOK_TEXT_BYTES) {
+    sendJson(res, 413, { error: `Webhook body exceeds ${MAX_WEBHOOK_TEXT_BYTES} bytes` });
+    return;
+  }
+
+  const event = await new EventStore(agent.home).append(agent.id, text, 'local-webhook');
+  notifyEventStreams(agent.id, event);
+  log.info('webhook.event', { agentId: agent.id, eventId: event.id, bytes: byteLength });
+  sendJson(res, 202, {
+    ok: true,
+    agent_id: agent.id,
+    event_id: event.id,
+  });
+}
+
+function handleEventStream(req: http.IncomingMessage, res: http.ServerResponse): void {
+  const agentId = (req.headers['x-agent-id'] as string | undefined)?.trim();
+  if (!agentId) {
+    sendJson(res, 400, { error: 'X-Agent-Id header required' });
+    return;
+  }
+  if (!agents.has(agentId)) {
+    sendJson(res, 401, { error: `Unknown agent: ${agentId}` });
+    return;
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  if (typeof (res as any).flushHeaders === 'function') {
+    (res as any).flushHeaders();
+  }
+
+  let streams = eventStreams.get(agentId);
+  if (!streams) {
+    streams = new Set();
+    eventStreams.set(agentId, streams);
+  }
+  streams.add(res);
+  log.info('events.stream.open', { agentId, count: streams.size });
+  sseEvent(res, 'ready', { agent_id: agentId });
+
+  const heartbeat = setInterval(() => {
+    if (!res.writableEnded && !res.destroyed) sseEvent(res, 'ping', { t: new Date().toISOString() });
+  }, 30_000);
+
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    clearInterval(heartbeat);
+    streams!.delete(res);
+    if (streams!.size === 0) eventStreams.delete(agentId);
+    log.info('events.stream.close', { agentId });
+  };
+  req.on('close', close);
+  res.on('close', close);
 }
 
 /**
@@ -669,9 +802,22 @@ function createServer(): http.Server {
         handleListAgents(req, res);
       } else if (method === 'POST' && pathname === '/agents') {
         await handleRegisterAgent(req, res);
+      } else if ((method === 'GET' || method === 'POST') && pathname.startsWith('/agents/') && pathname.endsWith('/webhook')) {
+        const id = decodeURIComponent(pathname.slice('/agents/'.length, -'/webhook'.length));
+        if (method === 'GET') handleGetAgentWebhook(req, res, id);
+        else handleRotateAgentWebhook(req, res, id);
       } else if (method === 'DELETE' && pathname.startsWith('/agents/')) {
         const id = decodeURIComponent(pathname.slice('/agents/'.length));
         handleDeleteAgent(res, id);
+
+      // ── Local webhook ──
+      } else if (method === 'POST' && pathname.startsWith('/webhook/')) {
+        const token = decodeURIComponent(pathname.slice('/webhook/'.length));
+        await handleWebhook(token, req, res);
+
+      // ── Agent event stream ──
+      } else if (method === 'GET' && pathname === '/events/stream') {
+        handleEventStream(req, res);
 
       // ── Session routes ──
       } else if (method === 'GET' && pathname === '/sessions') {
@@ -764,7 +910,7 @@ export function startDaemon(port = 3923, opts?: { log?: boolean }): void {
   // explicit `--bind` + auth layer, planned for a later milestone.
   server.listen(port, '127.0.0.1', () => {
     console.log(`stringd listening on http://127.0.0.1:${port}`);
-    console.log('Endpoints: POST/GET/DELETE /agents  GET/POST/DELETE /sessions  POST /exec  /mcp');
+    console.log('Endpoints: POST/GET/DELETE /agents  GET/POST /agents/:id/webhook  POST /webhook/:token  GET /events/stream  GET/POST/DELETE /sessions  POST /exec  /mcp');
     log.info('server.start', { port, dataDir: STRING_DATA_DIR, logEnabled });
   });
 

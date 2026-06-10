@@ -224,11 +224,58 @@ async function cmdMcp(agentId: string): Promise<void> {
       content: result.content,
       topic,
     };
-  });
+  }, { claudeChannel: true });
+
+  let watcher: client.EventWatcher | null = null;
+  const stopWatcher = () => {
+    watcher?.close();
+    watcher = null;
+  };
+  const startWatcher = () => {
+    if (watcher) return;
+    watcher = client.watchAgentEvents(
+      port,
+      agentId,
+      (event) => {
+        void server.server.notification({
+          method: 'notifications/claude/channel',
+          params: {
+            content: event.text,
+            meta: {
+              source: 'string',
+              agent_id: event.agentId,
+              event_id: event.id,
+              received_at: event.receivedAt,
+              event: event.source,
+            },
+          },
+        } as any).catch(e => {
+          process.stderr.write(`string mcp: channel notification failed: ${String(e)}\n`);
+        });
+      },
+      (error) => {
+        process.stderr.write(`string mcp: event stream error: ${error.message}\n`);
+      },
+    );
+  };
+  server.server.oninitialized = startWatcher;
 
   const transport = new StdioServerTransport();
+  process.on('SIGINT', stopWatcher);
+  process.on('SIGTERM', stopWatcher);
   await server.connect(transport);
+  startWatcher();
   // Server runs until stdio closes (client process exits).
+}
+
+// ─── Claude Code channel compatibility alias ────────────────────────────────
+//
+// `string --mcp` now provides both the `string` MCP tool and the Claude Code
+// channel capability. Keep the old flag as a compatibility alias so existing
+// local test configs do not break.
+
+async function cmdClaudeChannel(agentId: string): Promise<void> {
+  await cmdMcp(agentId);
 }
 
 // ─── Daemon management ───────────────────────────────────────────────────────
@@ -403,6 +450,38 @@ async function cmdAgent(args: string[]): Promise<void> {
   }
 }
 
+async function cmdWebhook(args: string[], agentFlag: string | null): Promise<void> {
+  const port = Number(process.env.STRING_PORT) || 3923;
+  const sub = args[0] || 'show';
+  const agentId = resolveAgentId(agentFlag);
+
+  await ensureDaemonUp(port);
+  await ensureAgentTerse(port, agentId);
+
+  switch (sub) {
+    case 'show':
+    case 'create': {
+      const info = await client.getAgentWebhook(port, agentId);
+      console.log(`Local webhook for agent '${agentId}':`);
+      console.log(info.webhook_url);
+      console.log('');
+      console.log('Send text with:');
+      console.log(`  curl -X POST --data-binary @message.txt ${info.webhook_url}`);
+      break;
+    }
+    case 'rotate': {
+      const info = await client.rotateAgentWebhook(port, agentId);
+      console.log(`Rotated local webhook for agent '${agentId}':`);
+      console.log(info.webhook_url);
+      break;
+    }
+    default:
+      process.stderr.write(`string: unknown webhook command: ${sub}\n`);
+      process.stderr.write('Usage: string webhook [show|create|rotate]\n');
+      process.exit(1);
+  }
+}
+
 // ─── Usage ───────────────────────────────────────────────────────────────────
 
 function printUsage(): void {
@@ -414,9 +493,10 @@ Usage:
   string <topic>                       Interactive REPL
   string '<body>'                      Command without topic (uses 'main', or
                                        derives topic from /open app:X targets)
-  string --mcp [--agent <id>]          MCP stdio server (for Claude/Codex/Cursor)
+  string --mcp [--agent <id>]          MCP stdio server + Claude Code channel
   string --daemon [start|stop|status]  Daemon management
   string agent <subcommand>            Manage agents / current agent (see below)
+  string webhook [show|rotate]         Show or rotate current agent local webhook
   string --help                        This help
 
 Agent management:
@@ -431,6 +511,13 @@ Agent management:
   string agent set-home <id> <path>     Change an agent's home
   string agent rm <id>                  Remove an agent (clears current if it was)
 
+Local webhooks:
+  string webhook show                   Print the current agent's local webhook URL
+  string webhook rotate                 Rotate the current agent's webhook token
+  POST text to the URL, then read it with \`string event /events\`.
+  In Claude Code, \`string --mcp\` also pushes webhook events through the
+  String channel when loaded as a Claude Code channel.
+
 Agent resolution (highest precedence first):
   --agent <id>  >  STRING_AGENT_ID  >  local config  >  global config  >  "default"
   Set the home at add-time or via \`agent set-home\`. Terse calls never reset a
@@ -441,6 +528,7 @@ Topics:
   app:<pkg>[:<config>]    Installed app session (e.g. 'app:moltbook')
   bash:<name>             Persistent bash shell (e.g. 'bash:dev')
   app | bash | tool       Hub topics — manage installed/active instances
+  event                   Agent event inbox
   system                  Daemon controls (env, status, restart)
 
 Examples:
@@ -473,6 +561,7 @@ const argv = process.argv.slice(2);
 let json = false;
 let daemon = false;
 let mcp = false;
+let claudeChannel = false;
 let help = false;
 let agentFlag: string | null = null;
 const positional: string[] = [];
@@ -482,6 +571,7 @@ for (let i = 0; i < argv.length; i++) {
   if (arg === '--json') json = true;
   else if (arg === '--daemon') daemon = true;
   else if (arg === '--mcp') mcp = true;
+  else if (arg === '--claude-channel') claudeChannel = true;
   else if (arg === '--help' || arg === '-h') help = true;
   else if (arg === '--agent') {
     agentFlag = argv[++i] ?? null;
@@ -497,7 +587,13 @@ if (help) {
   process.exit(0);
 }
 
-if (mcp) {
+if (claudeChannel) {
+  const agentId = resolveAgentId(agentFlag);
+  cmdClaudeChannel(agentId).catch(e => {
+    process.stderr.write(`string: ${e.message}\n`);
+    process.exit(1);
+  });
+} else if (mcp) {
   const agentId = resolveAgentId(agentFlag);
   cmdMcp(agentId).catch(e => {
     process.stderr.write(`string: ${e.message}\n`);
@@ -515,6 +611,11 @@ if (mcp) {
     process.stderr.write(`string: ${e.message}\n`);
     process.exit(1);
   });
+} else if (positional[0] === 'webhook') {
+  cmdWebhook(positional.slice(1), agentFlag).catch(e => {
+    process.stderr.write(`string: ${e.message}\n`);
+    process.exit(1);
+  });
 } else if (positional.length === 0) {
   printUsage();
 } else {
@@ -525,12 +626,12 @@ if (mcp) {
   // call was routed:
   //   - `/open app:X`  → app:X       (canonical app session)
   //   - `/open bash:X` → bash:X      (canonical bash session)
-  //   - `/open <hub>`  → <hub>       (hub: app, bash, tool, system)
+  //   - `/open <hub>`  → <hub>       (hub: app, bash, tool, event, system)
   //
   // Free-form `/open ./file.md` or `/open https://...` keeps the caller's
   // topic. This keeps app/bash/hub sessions clean of unrelated content
   // while letting `main`, `notes`, etc. accumulate any kind of doc.
-  const CANONICAL_OPEN_RE = /^\/open\s+(app:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)*|bash:[a-zA-Z0-9_-]+|app|bash|tool|system)\b/;
+  const CANONICAL_OPEN_RE = /^\/open\s+(app:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)*|bash:[a-zA-Z0-9_-]+|app|bash|tool|event|system)\b/;
 
   let topic: string;
   let body: string;

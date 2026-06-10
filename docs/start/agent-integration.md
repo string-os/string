@@ -65,6 +65,10 @@ This exposes one MCP tool:
 { "topic": "main", "cmd": "/info" }
 ```
 
+For Claude Code, the same `string --mcp` server can also be loaded as a Remote
+Control channel. Then local webhook events for the selected String agent are
+pushed into that Claude Code session while the `string` tool remains available.
+
 Advanced isolation:
 
 Keep the MCP server name as `string` so the tool id stays stable, then select

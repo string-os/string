@@ -71,12 +71,13 @@ agent work* — see [string-os.org](https://string-os.org).
 | 7 | [Navigation](./navigation.md) | /open, /nav, menus, shortcuts, history |
 | 8 | [Authoring](./authoring.md) | How to write SFMD documents |
 | 9 | [Editing](./editing.md) | Creating and modifying documents through String |
-| 10 | [Errors](./errors.md) | Error codes, format, and handling |
-| 11 | [Transport](../reference/transport.md) | ChanFlow channel tags, AI ↔ String communication |
-| 12 | [Response Format](../reference/response-format.md) | Response structure and formatting |
-| 13 | [Tools](./tools.md) | /tool invocation, cmd blocks, tool vs app |
-| 14 | [Packages](./packages.md) | `/install`, `/uninstall`, registry, multi-file apps, namespace identity |
-| 15 | [Install Manifest](./install-manifest.md) | JSON contract for HTTP-source installs |
+| 10 | [Events](./events.md) | Local webhooks and the agent event inbox |
+| 11 | [Errors](./errors.md) | Error codes, format, and handling |
+| 12 | [Transport](../reference/transport.md) | ChanFlow channel tags, AI ↔ String communication |
+| 13 | [Response Format](../reference/response-format.md) | Response structure and formatting |
+| 14 | [Tools](./tools.md) | /tool invocation, cmd blocks, tool vs app |
+| 15 | [Packages](./packages.md) | `/install`, `/uninstall`, registry, multi-file apps, namespace identity |
+| 16 | [Install Manifest](./install-manifest.md) | JSON contract for HTTP-source installs |
 
 ---
 
