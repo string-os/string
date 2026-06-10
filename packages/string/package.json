@@ -1,6 +1,6 @@
 {
   "name": "@string-os/string",
-  "version": "0.1.9",
+  "version": "0.1.10",
   "description": "String runtime — an OS for AI agents, built on SFMD",
   "type": "module",
   "exports": {
@@ -24,9 +24,9 @@
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.29.0",
-    "@string-os/client": "workspace:*",
-    "@string-os/compiler": "workspace:*",
-    "@string-os/core": "workspace:*",
+    "@string-os/client": "^0.1.2",
+    "@string-os/compiler": "^0.1.1",
+    "@string-os/core": "^0.1.2",
     "diff": "^8.0.3",
     "turndown": "^7.2.0",
     "zod": "^3.23.8"
