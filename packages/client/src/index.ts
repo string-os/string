@@ -22,6 +22,25 @@ export interface AgentInfo {
   createdAt: string;
 }
 
+export interface AgentWebhookInfo {
+  agent_id: string;
+  webhook_url: string;
+}
+
+export interface AgentEvent {
+  id: string;
+  agentId: string;
+  receivedAt: string;
+  source: 'local-webhook';
+  text: string;
+  status: 'pending' | 'ack';
+  ackedAt?: string;
+}
+
+export interface EventWatcher {
+  close(): void;
+}
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function request(
@@ -87,6 +106,29 @@ export function parseSSE(raw: string): Array<{ event: string; data: string }> {
     }
   }
   return events;
+}
+
+function parseSSEChunk(
+  chunk: string,
+  state: { event: string; data: string; buffer: string },
+  emit: (event: string, data: string) => void,
+): void {
+  state.buffer += chunk;
+  const lines = state.buffer.split('\n');
+  state.buffer = lines.pop() ?? '';
+
+  for (const line of lines) {
+    const trimmed = line.endsWith('\r') ? line.slice(0, -1) : line;
+    if (trimmed.startsWith('event: ')) {
+      state.event = trimmed.slice(7);
+    } else if (trimmed.startsWith('data: ')) {
+      state.data += state.data ? `\n${trimmed.slice(6)}` : trimmed.slice(6);
+    } else if (trimmed === '') {
+      if (state.event) emit(state.event, state.data);
+      state.event = '';
+      state.data = '';
+    }
+  }
 }
 
 /**
@@ -174,6 +216,85 @@ export async function deleteAgent(port: number, id: string): Promise<boolean> {
   }
   const data = JSON.parse(res.body) as { deleted?: boolean };
   return data.deleted ?? false;
+}
+
+/** GET /agents/:id/webhook — show or create an agent's local webhook URL. */
+export async function getAgentWebhook(port: number, id: string): Promise<AgentWebhookInfo> {
+  const res = await request(port, 'GET', `/agents/${encodeURIComponent(id)}/webhook`);
+  if (res.status !== 200) {
+    throw new Error(`getAgentWebhook failed (${res.status}): ${res.body}`);
+  }
+  return JSON.parse(res.body) as AgentWebhookInfo;
+}
+
+/** POST /agents/:id/webhook — rotate an agent's local webhook token. */
+export async function rotateAgentWebhook(port: number, id: string): Promise<AgentWebhookInfo> {
+  const res = await request(port, 'POST', `/agents/${encodeURIComponent(id)}/webhook`, '');
+  if (res.status !== 200) {
+    throw new Error(`rotateAgentWebhook failed (${res.status}): ${res.body}`);
+  }
+  return JSON.parse(res.body) as AgentWebhookInfo;
+}
+
+/** GET /events/stream — subscribe to live agent-local events. */
+export function watchAgentEvents(
+  port: number,
+  agentId: string,
+  onEvent: (event: AgentEvent) => void,
+  onError?: (error: Error) => void,
+): EventWatcher {
+  let closed = false;
+  const state = { event: '', data: '', buffer: '' };
+
+  const req = http.request(
+    {
+      hostname: '127.0.0.1',
+      port,
+      method: 'GET',
+      path: '/events/stream',
+      headers: { 'X-Agent-Id': agentId },
+    },
+    (res) => {
+      if ((res.statusCode ?? 0) !== 200) {
+        const chunks: Buffer[] = [];
+        res.on('data', c => chunks.push(c));
+        res.on('end', () => {
+          if (!closed) {
+            const body = Buffer.concat(chunks).toString('utf-8');
+            onError?.(new Error(`event stream failed (${res.statusCode ?? 0}): ${body}`));
+          }
+        });
+        return;
+      }
+
+      res.setEncoding('utf-8');
+      res.on('data', (chunk: string) => {
+        parseSSEChunk(chunk, state, (eventName, data) => {
+          if (eventName !== 'event') return;
+          try {
+            onEvent(JSON.parse(data) as AgentEvent);
+          } catch (e) {
+            onError?.(e instanceof Error ? e : new Error(String(e)));
+          }
+        });
+      });
+      res.on('error', e => {
+        if (!closed) onError?.(e);
+      });
+    },
+  );
+
+  req.on('error', e => {
+    if (!closed) onError?.(e);
+  });
+  req.end();
+
+  return {
+    close() {
+      closed = true;
+      req.destroy();
+    },
+  };
 }
 
 /** POST /exec — execute a command, parse SSE response into ExecResult. */

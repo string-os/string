@@ -35,8 +35,8 @@ export { EnvStore, deriveEnvScope } from './env-store.js';
 export type { EnvScope } from './env-store.js';
 export { installPackage } from './installer.js';
 export type { InstallResult } from './installer.js';
-export { ping, ensureAgent, exec, listAgents, deleteAgent } from '@string-os/client';
-export type { ExecResult, AgentInfo } from '@string-os/client';
+export { ping, ensureAgent, exec, listAgents, deleteAgent, getAgentWebhook, rotateAgentWebhook } from '@string-os/client';
+export type { ExecResult, AgentInfo, AgentWebhookInfo } from '@string-os/client';
 
 export interface BrowserOptions extends LoaderOptions {
   agentId?: string;

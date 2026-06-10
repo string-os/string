@@ -240,6 +240,11 @@ export function cmdHelp(session: Session, mode?: 'bash'): CommandResult {
   lines.push('/tool:<name>.<act>            Run specific tool action');
   lines.push('/tool:<name> --flag value     Pass flags to tool');
   lines.push('');
+  lines.push('### Events');
+  lines.push('/events                       List pending agent events');
+  lines.push('/events.read <id>             Read full event text');
+  lines.push('/events.ack <id>              Mark an event handled');
+  lines.push('');
   lines.push('### Shell');
   lines.push('/exec <command>               Run shell command (stateless)');
   lines.push('');

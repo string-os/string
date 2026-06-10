@@ -21,6 +21,7 @@ import { cmdSet } from './set.js';
 import { cmdExec, dispatchBash } from './exec.js';
 import { cmdTool } from './tool.js';
 import { cmdInstall, cmdUninstall } from './packages.js';
+import { cmdEvents } from './events.js';
 
 // ─── Command Parser ──────────────────────────────────────────────────────────
 
@@ -140,6 +141,12 @@ export async function dispatch(
     case 'exec':    return cmdExec(parsed.args, session, loader);
     case 'install':   return cmdInstall(parsed.args, session, loader);
     case 'uninstall': return cmdUninstall(parsed.args, session, loader);
+    case 'events':  return cmdEvents(actionArgs, loader);
+    case 'read':
+    case 'ack':
+    case 'clear':
+      if (session.name === 'event') return cmdEvents(`${cmd} ${actionArgs}`.trim(), loader);
+      return err(`Unknown command: /${parsed.cmd}\nUse /info to see available commands.`, 'COMMAND_UNSUPPORTED');
     default: {
       // Dot-notation routing: /act.search_city --name "Seoul" → cmdAction("search_city --name Seoul")
       const dotMatch = cmd.match(/^act\.([a-zA-Z0-9_-]+)$/);
@@ -154,6 +161,10 @@ export async function dispatch(
         const toolName = toolMatch[1];
         const subAction = toolMatch[2];
         return cmdTool(toolName, subAction, actionArgs, session, loader);
+      }
+      const eventsMatch = cmd.match(/^events\.(read|ack|clear)$/);
+      if (eventsMatch) {
+        return cmdEvents(`${eventsMatch[1]} ${actionArgs}`.trim(), loader);
       }
       return err(`Unknown command: /${parsed.cmd}\nUse /info to see available commands.`, 'COMMAND_UNSUPPORTED');
     }

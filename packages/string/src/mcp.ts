@@ -27,9 +27,13 @@ export interface McpExecResult {
 /** Function that runs one command in a topic and returns the result. */
 export type McpExecFn = (topic: string, cmd: string) => Promise<McpExecResult>;
 
+export interface StringServerOptions {
+  claudeChannel?: boolean;
+}
+
 const TOOL_DESCRIPTION = [
   'Run a String command in a topic. Topic is `main`, `app:NAME`, ',
-  '`app:NAME:CONFIG`, or `bash:NAME`. `cmd` must start with `/`. ',
+  '`app:NAME:CONFIG`, `bash:NAME`, or hub `event`. `cmd` must start with `/`. ',
   'Examples: `/open ./doc.md`, `/act.search --q "..."`, `/exec "ls -la"`. ',
   'To discover what is available, run `/help`, `/info`, or `/act --help`.',
 ].join('');
@@ -38,7 +42,7 @@ const inputSchema = {
   topic: z
     .string()
     .min(1)
-    .describe('Topic: `main` (tab), `app:NAME[:CONFIG]`, or `bash:NAME`.'),
+    .describe('Topic: `main` (tab), `app:NAME[:CONFIG]`, `bash:NAME`, or hub `event`.'),
   cmd: z
     .string()
     .min(1)
@@ -51,8 +55,22 @@ const inputSchema = {
  * A new server is created per HTTP request (stateless mode) so concurrent
  * callers don't share transport state. Stdio shims call this once at startup.
  */
-export function createStringServer(execFn: McpExecFn): McpServer {
-  const server = new McpServer({ name: 'string', version: '0.1.0' });
+export function createStringServer(execFn: McpExecFn, opts: StringServerOptions = {}): McpServer {
+  const serverOptions = opts.claudeChannel
+    ? {
+      capabilities: {
+        experimental: {
+          'claude/channel': {},
+        },
+      },
+      instructions: [
+        'String provides one `string` tool for apps, web pages, documents, shell sessions, and event inboxes.',
+        'When used by Claude Code as a channel, local String webhook events may arrive as channel messages.',
+      ].join(' '),
+    }
+    : undefined;
+
+  const server = new McpServer({ name: 'string', version: '0.1.0' }, serverOptions);
 
   server.registerTool(
     'string',

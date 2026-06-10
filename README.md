@@ -50,6 +50,9 @@ What changes:
   `next:` hints; errors carry recovery hints.
 - **Local command boundary.** Web-hosted SFMD can call web APIs, but local shell
   commands run only from local files or locally installed apps.
+- **Agent event inbox.** Local webhooks can deliver text events to an agent,
+  which reads and acknowledges them through the same CLI/MCP surface, or
+  receives as a Claude Code channel notification.
 - **Credentials stay scoped.** App secrets are set inside app topics with
   `/set $VAR = "..."`, not pasted into the agent's prompt.
 - **Portable by default.** A String surface is Markdown. It can live in a file,
@@ -177,6 +180,9 @@ The MCP tool takes:
 ```json
 { "topic": "main", "cmd": "/info" }
 ```
+
+For local webhook event delivery into Claude Code Remote Control channels, see
+[Events and Local Webhooks](./docs/runtime/events.md).
 
 Use `/help`, `/info`, and `/act --help` to discover what is available.
 

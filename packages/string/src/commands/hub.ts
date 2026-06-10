@@ -1,7 +1,7 @@
 /**
  * Hub topics — aggregator views over canonical session kinds.
  *
- * A hub is a reserved bare topic name (`app`, `bash`, `tool`, `system`)
+ * A hub is a reserved bare topic name (`app`, `bash`, `tool`, `event`, `system`)
  * that lists / manages instances of its kind. Listings render from the
  * Loader's registry (installed packages) and SessionLister (active sessions);
  * management actions are existing commands surfaced as one-liners on each
@@ -24,14 +24,40 @@ export function renderHub(hubName: string, loader: Loader): string {
       return renderBashHub(loader);
     case 'tool':
       return renderToolHub(loader);
+    case 'event':
+      return renderEventHub(loader);
     case 'system':
       return renderSystemHub(loader);
     default:
-      // Defensive: parseTopic only returns hub for the four reserved names,
+      // Defensive: parseTopic only returns hub for reserved names,
       // so reaching this branch means a runtime bug or extension. Surface
       // it rather than silently returning something benign.
-      return `Unknown hub: ${hubName}\nValid hubs: app, bash, tool, system`;
+      return `Unknown hub: ${hubName}\nValid hubs: app, bash, tool, event, system`;
   }
+}
+
+// ─── event hub ────────────────────────────────────────────────────────────
+
+function renderEventHub(loader: Loader): string {
+  return [
+    '# event hub',
+    '',
+    'Agent-local event inbox. Local webhooks append text events here; agents read and ack them explicitly.',
+    '',
+    '## Commands',
+    '',
+    '  /events                         — list pending events',
+    '  /events list --all              — list pending and acked events',
+    '  /events.read <id>               — read full event text',
+    '  /events.ack <id>                — mark an event handled',
+    '  /events.clear                   — delete acked events',
+    '  /events.clear --all             — delete all events',
+    '',
+    '## Webhook',
+    '',
+    `  Agent home: ${loader.home}`,
+    '  Run `string webhook show` to print this agent\'s local webhook URL.',
+  ].join('\n');
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────

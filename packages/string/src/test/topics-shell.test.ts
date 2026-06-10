@@ -19,7 +19,7 @@ await section('parseTopic — valid formats', async () => {
   assert(bare !== null && bare.type === 'tab' && bare.namespace === 'docs', '"docs" → tab:docs');
 
   // Reserved bare names → hub
-  for (const hub of ['app', 'bash', 'tool', 'system']) {
+  for (const hub of ['app', 'bash', 'tool', 'event', 'system']) {
     const parsed = parseTopic(hub);
     assert(parsed !== null && parsed.type === 'hub' && parsed.namespace === hub, `${hub} → hub:${hub}`);
   }
@@ -71,6 +71,7 @@ await section('topicToString roundtrip', async () => {
     ['notes', 'notes'],
     ['app', 'app'],
     ['bash', 'bash'],
+    ['event', 'event'],
     ['system', 'system'],
     ['app:weather:korea', 'app:weather:korea'],
     ['bash:dev', 'bash:dev'],

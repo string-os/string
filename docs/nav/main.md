@@ -4,4 +4,5 @@
 [@cookbook Cookbook](https://github.com/string-os/cookbook)
 [@sfmd SFMD Spec](../sfmd/overview.md)
 [@runtime Runtime](../runtime/overview.md)
+[@events Events](../runtime/events.md)
 [@reference Reference](../reference/protocol.md)

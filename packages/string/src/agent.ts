@@ -6,6 +6,7 @@ export interface Agent {
   home: string;
   allowedPaths: string[];
   createdAt: string;
+  webhookToken?: string;
 }
 
 export class AgentRegistry {
@@ -38,6 +39,7 @@ export class AgentRegistry {
       ...agent,
       id,
       allowedPaths: [...agent.allowedPaths],
+      webhookToken: agent.webhookToken,
     };
 
     this.agents.set(id, normalized);
