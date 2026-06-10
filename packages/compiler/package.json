@@ -1,6 +1,6 @@
 {
   "name": "@string-os/compiler",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Compiler and validator for SFMD documents",
   "type": "module",
   "exports": {
@@ -22,7 +22,7 @@
     "dev": "tsx src/cli.ts"
   },
   "dependencies": {
-    "@string-os/core": "workspace:*"
+    "@string-os/core": "^0.1.2"
   },
   "devDependencies": {
     "@types/node": "^22.0.0",

@@ -60,7 +60,7 @@ importers:
   packages/compiler:
     dependencies:
       '@string-os/core':
-        specifier: workspace:*
+        specifier: ^0.1.2
         version: link:../core
     devDependencies:
       '@types/node':
@@ -85,13 +85,13 @@ importers:
         specifier: ^1.29.0
         version: 1.29.0(zod@3.25.76)
       '@string-os/client':
-        specifier: workspace:*
+        specifier: ^0.1.2
         version: link:../client
       '@string-os/compiler':
-        specifier: workspace:*
+        specifier: ^0.1.1
         version: link:../compiler
       '@string-os/core':
-        specifier: workspace:*
+        specifier: ^0.1.2
         version: link:../core
       diff:
         specifier: ^8.0.3
