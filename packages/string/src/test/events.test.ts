@@ -72,6 +72,7 @@ function postText(urlString: string, text: string): Promise<{ status: number; bo
       port: url.port,
       path: url.pathname,
       method: 'POST',
+      agent: false, // no keep-alive: avoid orphan pooled-socket resets (see client request helper)
       headers: {
         'Content-Type': 'text/plain; charset=utf-8',
         'Content-Length': Buffer.byteLength(text),

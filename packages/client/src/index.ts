@@ -52,7 +52,12 @@ function request(
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const req = http.request(
-      { hostname: '127.0.0.1', port, method, path, headers: { ...headers } },
+      // agent: false disables keep-alive. Node 19+ pools sockets on the global
+      // agent by default; a pooled idle socket the daemon later resets emits an
+      // 'error' outside any request's req/res handlers, which is uncaught and
+      // crashes the process. These are short local IPC calls, so a fresh socket
+      // per request is cheap and removes that orphan-socket failure class.
+      { hostname: '127.0.0.1', port, method, path, headers: { ...headers }, agent: false },
       (res) => {
         const chunks: Buffer[] = [];
         res.on('data', (c) => chunks.push(c));

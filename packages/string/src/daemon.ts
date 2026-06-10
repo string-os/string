@@ -329,6 +329,11 @@ function handleRotateAgentWebhook(req: http.IncomingMessage, res: http.ServerRes
 async function handleWebhook(token: string, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const agent = agents.list().find(a => a.webhookToken === token);
   if (!agent) {
+    // Drain the request body before responding. Replying while a POST body is
+    // still inbound makes the server reset the connection, which surfaces as a
+    // client-side ECONNRESET. Discarding the stream lets the socket close
+    // cleanly so the sender just sees the 401.
+    req.resume();
     sendJson(res, 401, { error: 'Unknown webhook token' });
     return;
   }
