@@ -138,9 +138,17 @@ function sendJson(res: http.ServerResponse, status: number, body: unknown): void
 }
 
 function sseEvent(res: http.ServerResponse, event: string, data: unknown): void {
-  res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
-  if (typeof (res as any).flush === 'function') {
-    (res as any).flush();
+  // Writing to a socket that the peer reset between our writableEnded check and
+  // here can throw synchronously. A failed push to one dead stream must never
+  // break the webhook/heartbeat path, so swallow it — the stream's 'close'/
+  // 'error' handler will unregister it.
+  try {
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    if (typeof (res as any).flush === 'function') {
+      (res as any).flush();
+    }
+  } catch {
+    /* dead stream — cleanup happens via close/error handlers */
   }
 }
 
@@ -321,6 +329,11 @@ function handleRotateAgentWebhook(req: http.IncomingMessage, res: http.ServerRes
 async function handleWebhook(token: string, req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
   const agent = agents.list().find(a => a.webhookToken === token);
   if (!agent) {
+    // Drain the request body before responding. Replying while a POST body is
+    // still inbound makes the server reset the connection, which surfaces as a
+    // client-side ECONNRESET. Discarding the stream lets the socket close
+    // cleanly so the sender just sees the 401.
+    req.resume();
     sendJson(res, 401, { error: 'Unknown webhook token' });
     return;
   }
@@ -391,6 +404,12 @@ function handleEventStream(req: http.IncomingMessage, res: http.ServerResponse):
   };
   req.on('close', close);
   res.on('close', close);
+  // An abrupt client disconnect (a Claude session or `--mcp` channel exiting,
+  // a dropped connection) resets the socket. Without an 'error' listener that
+  // surfaces as an uncaught ECONNRESET that crashes the daemon. Treat it as a
+  // normal stream close.
+  req.on('error', close);
+  res.on('error', close);
 }
 
 /**
