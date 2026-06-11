@@ -237,18 +237,19 @@ being parsed as an unknown long flag.
 
 ### Action verb
 
-`/act` and `/action` are interchangeable; dot-notation and
-space-separated forms are both valid:
+`/act.name` is the canonical form. Inside a topic whose current document
+defines that action, String also accepts `/name` as shorthand when `name`
+does not collide with a global built-in command. Dot-notation and
+space-separated `/act` forms are both valid:
 
 ```
+/search_city --name "Seoul"
 /act.search_city --name "Seoul"
 /act search_city --name "Seoul"
-/action.search_city --name "Seoul"
-/action search_city --name "Seoul"
 ```
 
-Dot-notation is preferred in documentation and action hints for
-readability.
+If an action id collides with a global command such as `open`, call it
+with the canonical form: `/act.open`.
 
 ---
 
@@ -488,12 +489,12 @@ only. The AI decides what to do next.
 
 | Concept | How |
 |---------|-----|
-| **Invocation** | `/act.name --flag value` — also `--flag=value`, short `-f`, positional in declaration order, `--` to end options |
+| **Invocation** | `/name --flag value` in topic, canonical `/act.name --flag value` always works — also `--flag=value`, short `-f`, positional in declaration order, `--` to end options |
 | **Definition** | ```` ```act.name ```` code block (parsed by String, hidden from AI) |
 | **Types** | `GET`, `POST`, `PUT`, `PATCH`, `DELETE`, `CLI` — first line of definition |
 | **Headers** | `-H "Key: Value"` on first line — curl syntax, supports `{var}` and `$var` |
 | **Response template** | ```` ```act.name.response ```` — optional formatting |
 | **Assignment** | `{var} = {Response.body.field}` — session variable |
 | **Output** | All non-assignment lines — rendered as Markdown |
-| **Help** | `/act.name --help` — on-demand schema |
+| **Help** | `/name --help` or `/act.name --help` — on-demand schema |
 | **Default action** | `default: name` in frontmatter — runs on `/open`, `/refresh`, and `/back` |

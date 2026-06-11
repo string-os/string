@@ -23,6 +23,7 @@ import { cmdTool } from './tool.js';
 import { cmdInstall, cmdUninstall } from './packages.js';
 import { cmdEvents } from './events.js';
 import { cmdAgentHub, cmdEventWebhook, cmdSystemHub } from './management.js';
+import { GLOBAL_COMMANDS, actionCommand } from './builtins.js';
 
 // ─── Command Parser ──────────────────────────────────────────────────────────
 
@@ -163,11 +164,6 @@ export async function dispatch(
     case 'install':   return cmdInstall(parsed.args, session, loader);
     case 'uninstall': return cmdUninstall(parsed.args, session, loader);
     case 'events':  return cmdEvents(actionArgs, loader);
-    case 'read':
-    case 'ack':
-    case 'clear':
-      if (session.name === 'event') return cmdEvents(`${cmd} ${actionArgs}`.trim(), loader);
-      return err(`Unknown command: /${parsed.cmd}\nUse /info to see available commands.`, 'COMMAND_UNSUPPORTED');
     default: {
       // Dot-notation routing: /act.search_city --name "Seoul" → cmdAction("search_city --name Seoul")
       const dotMatch = cmd.match(/^act\.([a-zA-Z0-9_-]+)$/);
@@ -186,6 +182,18 @@ export async function dispatch(
       const eventsMatch = cmd.match(/^events\.(read|ack|clear)$/);
       if (eventsMatch) {
         return cmdEvents(`${eventsMatch[1]} ${actionArgs}`.trim(), loader);
+      }
+      if (!GLOBAL_COMMANDS.has(cmd) && session.currentDoc?.actions.some(a => a.id.toLowerCase() === cmd)) {
+        const action = session.currentDoc.actions.find(a => a.id.toLowerCase() === cmd)!;
+        const shorthandArgs = actionArgs ? `${action.id} ${actionArgs}` : action.id;
+        return cmdAction(shorthandArgs, session, loader);
+      }
+      if (session.currentDoc?.actions.length) {
+        const actions = session.currentDoc.actions.map(a => actionCommand(a.id));
+        return err(
+          `Unknown command: /${parsed.cmd}\nActions here: ${actions.join(', ')}\nUse /info to see available commands.`,
+          'COMMAND_UNSUPPORTED'
+        );
       }
       return err(`Unknown command: /${parsed.cmd}\nUse /info to see available commands.`, 'COMMAND_UNSUPPORTED');
     }
