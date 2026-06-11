@@ -84,13 +84,15 @@ string 'app:weather:usa'   '/set $WEATHER_API_KEY = "..."'
 
 ```bash
 string main /topics       # every active session, with the current doc
-string app /open          # installed apps + active app sessions
-string system /open       # daemon stats, sessions count, env-store hints
+string app                # installed apps + active app sessions
+string event              # event inbox + local webhook URL
+string system status      # daemon health + port
+string agent list         # registered agents
 ```
 
-The four hub topics — `app`, `bash`, `tool`, `system` — aggregate over their
-kind. Use them when you're not sure what's installed or which session is
-where.
+The hub topics — `app`, `bash`, `tool`, `event`, `system`, and `agent` —
+aggregate over their kind. Use them when you're not sure what's installed,
+which session is where, or which local agent identity is active.
 
 ## Where to go next
 

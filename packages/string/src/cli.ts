@@ -5,34 +5,17 @@
  * Usage:
  *   string <topic> '<body>'              One-shot execution
  *   string <topic>                       Interactive REPL
- *   string --daemon [start|stop|status]   Daemon management
+ *   string --daemon [start|stop|foreground] Daemon process lifecycle
  *   string --help                         Usage
  */
 
 import readline from 'readline';
-import fs from 'fs';
-import os from 'os';
-import path from 'path';
 import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import * as client from '@string-os/client';
 import { parseTopic, topicToString } from './types.js';
-import {
-  resolveAgentId,
-  getCurrentAgent,
-  setCurrentAgent,
-  clearCurrentAgent,
-  configPath,
-  globalConfigPath,
-  projectConfigPathForWrite,
-} from './config.js';
-
-/** Derive agent home directory: ~/.string/agents/{agentId}/ */
-function deriveHome(agentId: string): string {
-  const dir = path.join(os.homedir(), '.string', 'agents', agentId);
-  fs.mkdirSync(dir, { recursive: true });
-  return dir;
-}
+import { resolveAgentId } from './config.js';
+import { agentHelp, eventHelp, systemHelp } from './commands/management.js';
 
 /**
  * Terse-path agent provisioning: ensure the agent exists WITHOUT clobbering a
@@ -63,6 +46,16 @@ function formatOutput(
     });
   }
   return wrapEnvelope(topic, result.content);
+}
+
+function quotePosix(value: string): string {
+  return `'${value.replace(/'/g, `'\\''`)}'`;
+}
+
+function invocationProjectDir(): string {
+  return process.env.STRING_PROJECT_DIR?.trim()
+    || process.env.CLAUDE_PROJECT_DIR?.trim()
+    || process.cwd();
 }
 
 // ─── Daemon auto-start ───────────────────────────────────────────────────────
@@ -268,16 +261,6 @@ async function cmdMcp(agentId: string): Promise<void> {
   // Server runs until stdio closes (client process exits).
 }
 
-// ─── Claude Code channel compatibility alias ────────────────────────────────
-//
-// `string --mcp` now provides both the `string` MCP tool and the Claude Code
-// channel capability. Keep the old flag as a compatibility alias so existing
-// local test configs do not break.
-
-async function cmdClaudeChannel(agentId: string): Promise<void> {
-  await cmdMcp(agentId);
-}
-
 // ─── Daemon management ───────────────────────────────────────────────────────
 
 async function cmdDaemon(args: string[]): Promise<void> {
@@ -303,15 +286,6 @@ async function cmdDaemon(args: string[]): Promise<void> {
       console.log('stringd stopped');
       break;
     }
-    case 'status': {
-      if (!await client.ping(port)) {
-        console.log('stringd is not running');
-        process.exit(1);
-      }
-      const info = await client.health(port);
-      console.log(`stringd running on port ${port} — ${info.agents} agent(s), ${info.sessions} session(s)`);
-      break;
-    }
     case 'foreground': {
       // Internal: run daemon in foreground (used by autoStartDaemon)
       const hasLog = args.includes('--log');
@@ -322,162 +296,8 @@ async function cmdDaemon(args: string[]): Promise<void> {
     }
     default:
       process.stderr.write(`string: unknown daemon command: ${sub}\n`);
-      process.stderr.write('Usage: string --daemon [start|stop|status]\n');
-      process.exit(1);
-  }
-}
-
-// ─── Agent management ───────────────────────────────────────────────────────────
-//
-// `string agent` manages the persistent agent registry and the configured
-// "current agent" (selected .string/config.json). Adding an agent sets its home; the
-// current agent is what terse `string <topic> '<cmd>'` calls resolve to when no
-// --agent flag or STRING_AGENT_ID is present.
-
-/** Parse `--home <path>` and `--allow <p1,p2>` from `string agent` args. */
-function parseAgentOpts(args: string[]): { home?: string; allow?: string[]; local?: boolean } {
-  const opts: { home?: string; allow?: string[]; local?: boolean } = {};
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === '--home') opts.home = args[++i];
-    else if (a.startsWith('--home=')) opts.home = a.slice('--home='.length);
-    else if (a === '--allow') opts.allow = splitAllow(args[++i]);
-    else if (a.startsWith('--allow=')) opts.allow = splitAllow(a.slice('--allow='.length));
-    else if (a === '--local') opts.local = true;
-  }
-  return opts;
-}
-
-function splitAllow(val?: string): string[] {
-  if (!val) return [];
-  return val.split(',').map(s => s.trim()).filter(Boolean);
-}
-
-async function ensureDaemonUp(port: number): Promise<void> {
-  if (!await client.ping(port)) {
-    await autoStartDaemon(port);
-  }
-}
-
-async function cmdAgent(args: string[]): Promise<void> {
-  const port = Number(process.env.STRING_PORT) || 3923;
-  const sub = args[0];
-  const rest = args.slice(1);
-
-  switch (sub) {
-    case 'add': {
-      const id = rest[0];
-      if (!id) {
-        process.stderr.write('Usage: string agent add <id> [--home <path>] [--allow <p1,p2,...>]\n');
-        process.exit(1);
-      }
-      const opts = parseAgentOpts(rest.slice(1));
-      const home = opts.home ?? deriveHome(id);
-      await ensureDaemonUp(port);
-      await client.ensureAgent(port, { id, home, allowedPaths: opts.allow ?? [] });
-      console.log(`Added agent '${id}' (home: ${home})`);
-      if (opts.allow?.length) console.log(`  allowedPaths: ${opts.allow.join(', ')}`);
-      console.log(`Run \`string agent use ${id}\` to make it the current agent.`);
-      break;
-    }
-    case 'use': {
-      const id = rest[0];
-      if (!id) {
-        process.stderr.write('Usage: string agent use <id> [--local]\n');
-        process.exit(1);
-      }
-      const opts = parseAgentOpts(rest.slice(1));
-      await ensureDaemonUp(port);
-      const exists = (await client.listAgents(port)).some(u => u.id === id);
-      setCurrentAgent(id, opts.local ? 'project' : 'global');
-      const file = opts.local ? projectConfigPathForWrite() : globalConfigPath();
-      console.log(`Current agent set to '${id}' (${opts.local ? 'local' : 'global'}: ${file}).`);
-      if (!exists) {
-        console.log(`Note: agent '${id}' is not registered yet — run \`string agent add ${id}\` to set its home.`);
-      }
-      break;
-    }
-    case 'current': {
-      const current = getCurrentAgent() ?? 'default';
-      await ensureDaemonUp(port);
-      const agent = (await client.listAgents(port)).find(u => u.id === current);
-      const home = agent ? agent.home : '(not registered)';
-      console.log(`${current}\t${home}\tconfig: ${configPath()}`);
-      break;
-    }
-    case 'list': {
-      await ensureDaemonUp(port);
-      const current = getCurrentAgent();
-      const list = await client.listAgents(port);
-      if (list.length === 0) {
-        console.log('No agents registered.');
-        break;
-      }
-      for (const u of list) {
-        const marker = u.id === current ? '* ' : '  ';
-        console.log(`${marker}${u.id}\t${u.home}`);
-      }
-      break;
-    }
-    case 'set-home': {
-      const id = rest[0];
-      const home = rest[1];
-      if (!id || !home) {
-        process.stderr.write('Usage: string agent set-home <id> <path>\n');
-        process.exit(1);
-      }
-      await ensureDaemonUp(port);
-      await client.ensureAgent(port, { id, home });
-      console.log(`Set home for '${id}' → ${home}`);
-      break;
-    }
-    case 'rm': {
-      const id = rest[0];
-      if (!id) {
-        process.stderr.write('Usage: string agent rm <id>\n');
-        process.exit(1);
-      }
-      await ensureDaemonUp(port);
-      const deleted = await client.deleteAgent(port, id);
-      if (getCurrentAgent() === id) clearCurrentAgent();
-      console.log(deleted ? `Removed agent '${id}'.` : `Agent '${id}' did not exist.`);
-      break;
-    }
-    default:
-      process.stderr.write(`string: unknown agent command: ${sub ?? ''}\n`);
-      process.stderr.write('Usage: string agent <add|use|current|list|set-home|rm> ...\n');
-      process.exit(1);
-  }
-}
-
-async function cmdWebhook(args: string[], agentFlag: string | null): Promise<void> {
-  const port = Number(process.env.STRING_PORT) || 3923;
-  const sub = args[0] || 'show';
-  const agentId = resolveAgentId(agentFlag);
-
-  await ensureDaemonUp(port);
-  await ensureAgentTerse(port, agentId);
-
-  switch (sub) {
-    case 'show':
-    case 'create': {
-      const info = await client.getAgentWebhook(port, agentId);
-      console.log(`Local webhook for agent '${agentId}':`);
-      console.log(info.webhook_url);
-      console.log('');
-      console.log('Send text with:');
-      console.log(`  curl -X POST --data-binary @message.txt ${info.webhook_url}`);
-      break;
-    }
-    case 'rotate': {
-      const info = await client.rotateAgentWebhook(port, agentId);
-      console.log(`Rotated local webhook for agent '${agentId}':`);
-      console.log(info.webhook_url);
-      break;
-    }
-    default:
-      process.stderr.write(`string: unknown webhook command: ${sub}\n`);
-      process.stderr.write('Usage: string webhook [show|create|rotate]\n');
+      process.stderr.write('Usage: string --daemon [start|stop|foreground]\n');
+      process.stderr.write("For daemon status, use `string system status`.\n");
       process.exit(1);
   }
 }
@@ -494,9 +314,10 @@ Usage:
   string '<body>'                      Command without topic (uses 'main', or
                                        derives topic from /open app:X targets)
   string --mcp [--agent <id>]          MCP stdio server + Claude Code channel
-  string --daemon [start|stop|status]  Daemon management
-  string agent <subcommand>            Manage agents / current agent (see below)
-  string webhook [show|rotate]         Show or rotate current agent local webhook
+  string --daemon [start|stop|foreground] Process lifecycle
+  string agent <cmd> [args]            Manage agents / current agent
+  string event <cmd> [args]            Event inbox + local webhook
+  string system <cmd>                  Daemon state
   string --help                        This help
 
 Agent management:
@@ -504,19 +325,23 @@ Agent management:
                                        Register an agent with a home (and optional
                                        allowed paths). Home defaults to
                                        ~/.string/agents/<id> when omitted.
-  string agent use <id> [--local]       Set the current agent globally, or in
+  string agent use <id> [--local]      Set the current agent globally, or in
                                        the current workspace with --local
-  string agent current                  Show the current agent + its home
-  string agent list                     List all agents (* marks the current one)
-  string agent set-home <id> <path>     Change an agent's home
-  string agent rm <id>                  Remove an agent (clears current if it was)
+  string agent current                 Show the current agent + its home
+  string agent list                    List all agents (* marks the current one)
+  string agent set-home <id> <path>    Change an agent's home
+  string agent rm <id>                 Remove an agent (clears current if it was)
 
 Local webhooks:
-  string webhook show                   Print the current agent's local webhook URL
-  string webhook rotate                 Rotate the current agent's webhook token
-  POST text to the URL, then read it with \`string event /events\`.
+  string event webhook show            Print the current agent's local webhook URL
+  string event webhook rotate          Rotate the current agent's webhook token
+  POST text to the URL, then read it with \`string event list\`.
   In Claude Code, \`string --mcp\` also pushes webhook events through the
   String channel when loaded as a Claude Code channel.
+
+System management:
+  string system status                 Daemon health + port
+  string system stop                   Stop the daemon
 
 Agent resolution (highest precedence first):
   --agent <id>  >  STRING_AGENT_ID  >  local config  >  global config  >  "default"
@@ -527,9 +352,9 @@ Topics:
   <name>                  Free-form session (e.g. 'main', 'notes', 'research')
   app:<pkg>[:<config>]    Installed app session (e.g. 'app:moltbook')
   bash:<name>             Persistent bash shell (e.g. 'bash:dev')
-  app | bash | tool       Hub topics — manage installed/active instances
-  event                   Agent event inbox
-  system                  Daemon controls (env, status, restart)
+  app | bash | tool | event | system | agent
+                          Hub topics — manage installed/active instances,
+                          events, daemon state, and agent identity
 
 Examples:
   string main '/open ./doc.md'
@@ -539,6 +364,9 @@ Examples:
   string '/open app:moltbook'           # topic derived → app:moltbook
   string '/install --app ./foo.md'      # default topic → main
   string app                            # app hub: list installed apps
+  string system status                  # daemon status
+  string agent list                     # registered agents
+  string event webhook show             # local webhook URL
 
 Flags:
   --json      JSON envelope output (suppresses ChanFlow)
@@ -561,22 +389,36 @@ const argv = process.argv.slice(2);
 let json = false;
 let daemon = false;
 let mcp = false;
-let claudeChannel = false;
 let help = false;
 let agentFlag: string | null = null;
 const positional: string[] = [];
 
+function dieUnknownFlag(arg: string): never {
+  const suggestion = arg === '--deamon' ? ' Did you mean --daemon?' : '';
+  process.stderr.write(`string: unknown flag '${arg}'.${suggestion}\n`);
+  process.stderr.write('Run `string --help` for usage.\n');
+  process.exit(1);
+}
+
 for (let i = 0; i < argv.length; i++) {
   const arg = argv[i];
-  if (arg === '--json') json = true;
+  if (positional.length > 0) {
+    positional.push(arg);
+  } else if (arg === '--json') json = true;
   else if (arg === '--daemon') daemon = true;
   else if (arg === '--mcp') mcp = true;
-  else if (arg === '--claude-channel') claudeChannel = true;
   else if (arg === '--help' || arg === '-h') help = true;
   else if (arg === '--agent') {
-    agentFlag = argv[++i] ?? null;
+    const value = argv[++i];
+    if (!value || value.startsWith('-')) {
+      process.stderr.write('string: --agent requires an agent id\n');
+      process.exit(1);
+    }
+    agentFlag = value;
   } else if (arg.startsWith('--agent=')) {
     agentFlag = arg.slice('--agent='.length);
+  } else if (arg.startsWith('-')) {
+    dieUnknownFlag(arg);
   } else {
     positional.push(arg);
   }
@@ -587,13 +429,17 @@ if (help) {
   process.exit(0);
 }
 
-if (claudeChannel) {
-  const agentId = resolveAgentId(agentFlag);
-  cmdClaudeChannel(agentId).catch(e => {
-    process.stderr.write(`string: ${e.message}\n`);
-    process.exit(1);
-  });
-} else if (mcp) {
+function printHubCliHelp(name: string): boolean {
+  const wantsHelp = positional.length === 2 && (positional[1] === '--help' || positional[1] === 'help');
+  if (!wantsHelp) return false;
+  if (name === 'agent') console.log(agentHelp('cli'));
+  else if (name === 'event') console.log(eventHelp('cli'));
+  else if (name === 'system') console.log(systemHelp('cli'));
+  else return false;
+  return true;
+}
+
+if (mcp) {
   const agentId = resolveAgentId(agentFlag);
   cmdMcp(agentId).catch(e => {
     process.stderr.write(`string: ${e.message}\n`);
@@ -604,20 +450,13 @@ if (claudeChannel) {
     process.stderr.write(`string: ${e.message}\n`);
     process.exit(1);
   });
-} else if (positional[0] === 'agent') {
-  // `string agent <add|use|current|list|set-home|rm> ...` — agent management.
-  // Intercepted before topic dispatch.
-  cmdAgent(positional.slice(1)).catch(e => {
-    process.stderr.write(`string: ${e.message}\n`);
-    process.exit(1);
-  });
-} else if (positional[0] === 'webhook') {
-  cmdWebhook(positional.slice(1), agentFlag).catch(e => {
-    process.stderr.write(`string: ${e.message}\n`);
-    process.exit(1);
-  });
 } else if (positional.length === 0) {
   printUsage();
+} else if (printHubCliHelp(positional[0])) {
+  process.exit(0);
+} else if (positional[0] === 'webhook') {
+  process.stderr.write("string: 'webhook' is no longer a top-level command. Use `string event webhook show`.\n");
+  process.exit(1);
 } else {
   // If the first positional starts with '/', treat the whole thing as a
   // command body. Default topic is `main` (free-form tab).
@@ -631,7 +470,7 @@ if (claudeChannel) {
   // Free-form `/open ./file.md` or `/open https://...` keeps the caller's
   // topic. This keeps app/bash/hub sessions clean of unrelated content
   // while letting `main`, `notes`, etc. accumulate any kind of doc.
-  const CANONICAL_OPEN_RE = /^\/open\s+(app:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)*|bash:[a-zA-Z0-9_-]+|app|bash|tool|event|system)\b/;
+  const CANONICAL_OPEN_RE = /^\/open\s+(app:[a-zA-Z0-9_-]+(?::[a-zA-Z0-9_-]+)*|bash:[a-zA-Z0-9_-]+|app|bash|tool|event|system|agent)\b/;
 
   let topic: string;
   let body: string;
@@ -650,6 +489,26 @@ if (claudeChannel) {
     }
     topic = topicToString(parsed);
     body = positional.slice(1).join(' ');
+    if (!body && parsed.type === 'hub') {
+      body = '/open';
+    } else if (parsed.type === 'hub' && body === '--help') {
+      body = '/help';
+    } else if (parsed.type === 'hub' && body && !body.trimStart().startsWith('/')) {
+      body = '/' + body;
+    }
+    if (
+      parsed.type === 'hub'
+      && topic === 'agent'
+      && /^\/use(?:\s|$)/.test(body)
+      && /\s--local(?:\s|$)/.test(` ${body} `)
+    ) {
+      if (!/\s--project-dir(?:=|\s|$)/.test(` ${body} `)) {
+        body += ` --project-dir ${quotePosix(invocationProjectDir())}`;
+      }
+      if (process.env.STRING_CONFIG && !/\s--config-override(?:=|\s|$)/.test(` ${body} `)) {
+        body += ` --config-override ${quotePosix(process.env.STRING_CONFIG)}`;
+      }
+    }
 
     // Body overrides topic when it opens a canonical or hub target — those
     // URIs are bound to their own topic regardless of how the call was routed.

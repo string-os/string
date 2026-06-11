@@ -1,7 +1,7 @@
 /**
  * Hub topics — aggregator views over canonical session kinds.
  *
- * A hub is a reserved bare topic name (`app`, `bash`, `tool`, `event`, `system`)
+ * A hub is a reserved bare topic name (`app`, `bash`, `tool`, `event`, `system`, `agent`)
  * that lists / manages instances of its kind. Listings render from the
  * Loader's registry (installed packages) and SessionLister (active sessions);
  * management actions are existing commands surfaced as one-liners on each
@@ -9,6 +9,7 @@
  */
 
 import type { Loader, SessionInfo } from '../loader.js';
+import { renderEventWebhook } from './management.js';
 
 /**
  * Render a hub page. The page lists what's installed / what's open and tells
@@ -16,7 +17,7 @@ import type { Loader, SessionInfo } from '../loader.js';
  * a `sessionLister` get a degraded page: the registry listing still works,
  * the active-sessions listing is omitted with a one-line note.
  */
-export function renderHub(hubName: string, loader: Loader): string {
+export async function renderHub(hubName: string, loader: Loader): Promise<string> {
   switch (hubName) {
     case 'app':
       return renderAppHub(loader);
@@ -28,17 +29,19 @@ export function renderHub(hubName: string, loader: Loader): string {
       return renderEventHub(loader);
     case 'system':
       return renderSystemHub(loader);
+    case 'agent':
+      return renderAgentHub(loader);
     default:
       // Defensive: parseTopic only returns hub for reserved names,
       // so reaching this branch means a runtime bug or extension. Surface
       // it rather than silently returning something benign.
-      return `Unknown hub: ${hubName}\nValid hubs: app, bash, tool, event, system`;
+      return `Unknown hub: ${hubName}\nValid hubs: app, bash, tool, event, system, agent`;
   }
 }
 
 // ─── event hub ────────────────────────────────────────────────────────────
 
-function renderEventHub(loader: Loader): string {
+async function renderEventHub(loader: Loader): Promise<string> {
   return [
     '# event hub',
     '',
@@ -46,6 +49,15 @@ function renderEventHub(loader: Loader): string {
     '',
     '## Commands',
     '',
+    'CLI:',
+    '  string event list                 — list pending events',
+    '  string event list --all           — list pending and acked events',
+    '  string event read <id>            — read full event text',
+    '  string event ack <id>             — mark an event handled',
+    '  string event clear                — delete acked events',
+    '  string event clear --all          — delete all events',
+    '',
+    'MCP/slash:',
     '  /events                         — list pending events',
     '  /events list --all              — list pending and acked events',
     '  /events.read <id>               — read full event text',
@@ -56,7 +68,38 @@ function renderEventHub(loader: Loader): string {
     '## Webhook',
     '',
     `  Agent home: ${loader.home}`,
-    '  Run `string webhook show` to print this agent\'s local webhook URL.',
+    '',
+    await renderEventWebhook(loader),
+  ].join('\n');
+}
+
+// ─── agent hub ────────────────────────────────────────────────────────────
+
+function renderAgentHub(loader: Loader): string {
+  return [
+    '# agent hub',
+    '',
+    'Manage registered String agents and current-agent config.',
+    '',
+    '## Commands',
+    '',
+    'CLI:',
+    '  string agent list                       — list registered agents',
+    '  string agent current                    — show current agent + home',
+    '  string agent add <id> [--home <path>]   — register an agent',
+    '  string agent use <id> [--local]         — set current agent',
+    '  string agent set-home <id> <path>       — change an agent home',
+    '  string agent rm <id>                    — remove an agent',
+    '',
+    'MCP/slash:',
+    '  /list                                  — list registered agents',
+    '  /current                               — show current agent + home',
+    '  /add <id> [--home <path>]              — register an agent',
+    '  /use <id> [--local]                    — set current agent',
+    '  /set-home <id> <path>                  — change an agent home',
+    '  /rm <id>                               — remove an agent',
+    '',
+    `Current MCP/runtime agent: ${loader.agentId ?? '(unknown)'}`,
   ].join('\n');
 }
 
@@ -224,8 +267,14 @@ function renderSystemHub(loader: Loader): string {
     '',
     '## Controls',
     '',
-    '  string --daemon status                 — daemon health + port',
-    '  string --daemon stop                   — stop the daemon',
+    'CLI:',
+    '  string system status                    — daemon health + port',
+    '  string system stop                      — stop the daemon',
+    '',
+    'MCP/slash:',
+    '  /status                                — daemon health + port',
+    '  /stop                                  — stop the daemon',
+    '  /restart                               — restart hint',
     '  /topics [tab|app|bash|hub]             — list active sessions, optionally filtered',
     '  /session close <name>                  — close one session',
     '',

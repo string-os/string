@@ -22,6 +22,7 @@ import { cmdExec, dispatchBash } from './exec.js';
 import { cmdTool } from './tool.js';
 import { cmdInstall, cmdUninstall } from './packages.js';
 import { cmdEvents } from './events.js';
+import { cmdAgentHub, cmdEventWebhook, cmdSystemHub } from './management.js';
 
 // ─── Command Parser ──────────────────────────────────────────────────────────
 
@@ -92,7 +93,7 @@ export async function dispatch(
   // plus a short management cheat-sheet.
   if (topicType === 'hub' && !input.trim()) {
     const hubName = session.name;
-    return ok(renderHub(hubName, loader));
+    return ok(await renderHub(hubName, loader));
   }
 
   // // prefix → strip one /, treat as normal command (consistent with bash convention)
@@ -111,7 +112,6 @@ export async function dispatch(
   }
 
   const cmd = parsed.cmd.toLowerCase();
-
   // parseCommand splits a command into a first-line header and a multiline body
   // (designed for /write etc.). For actions/tools, a quoted value can legitimately
   // span newlines (e.g. /act.post -c "line1\nline2"), so re-attach the body to the
@@ -119,6 +119,27 @@ export async function dispatch(
   const actionArgs = parsed.body !== undefined
     ? `${parsed.args}\n${parsed.body}`
     : parsed.args;
+
+  if (topicType === 'hub') {
+    if (session.name === 'agent' && ['help', 'list', 'add', 'use', 'current', 'set-home', 'rm', 'remove'].includes(cmd)) {
+      return cmdAgentHub(`${cmd} ${actionArgs}`.trim(), loader);
+    }
+    if (session.name === 'system' && ['help', 'status', 'stop', 'restart'].includes(cmd)) {
+      return cmdSystemHub(`${cmd} ${actionArgs}`.trim(), loader);
+    }
+    if (session.name === 'event' && cmd === 'help') {
+      return cmdEventWebhook('help', loader);
+    }
+    if (session.name === 'event' && ['list', 'read', 'ack', 'clear'].includes(cmd)) {
+      const eventArgs = cmd === 'list'
+        ? `list ${actionArgs}`.trim()
+        : `${cmd} ${actionArgs}`.trim();
+      return cmdEvents(eventArgs, loader);
+    }
+    if (session.name === 'event' && cmd === 'webhook') {
+      return cmdEventWebhook(actionArgs, loader);
+    }
+  }
 
   switch (cmd) {
     case 'help':    return cmdHelp(session);

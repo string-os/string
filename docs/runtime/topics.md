@@ -65,7 +65,7 @@ There are four shapes:
 | Tab (free-form) | bare name | `main`, `notes`, `research` |
 | App (canonical) | `app:name` | `app:gmail`, `app:weather:korea` |
 | Bash (canonical) | `bash:name` | `bash:dev`, `bash:deploy` |
-| Hub (reserved bare names) | `app`, `bash`, `tool`, `event`, `system` | `app`, `event` |
+| Hub (reserved bare names) | `app`, `bash`, `tool`, `event`, `system`, `agent` | `app`, `event` |
 
 Names match `[a-zA-Z0-9_-]+` — letters, numbers, hyphens, underscores
 only. No dots, no paths, no spaces. Session names are short
@@ -201,7 +201,7 @@ normal shell input for everything else.
 
 ### Hub
 
-Five bare names are reserved as **hub aggregators** — they route to
+Six bare names are reserved as **hub aggregators** — they route to
 managed views over their kind rather than free-form tabs:
 
 | Hub | What it manages |
@@ -209,27 +209,31 @@ managed views over their kind rather than free-form tabs:
 | `app` | Installed apps + currently open app sessions |
 | `bash` | Active bash sessions (list, spawn, kill) |
 | `tool` | Installed tools |
-| `event` | Pending and acknowledged local webhook events |
+| `event` | Agent-local event inbox and local webhook URL |
 | `system` | Daemon status, env store, runtime controls |
+| `agent` | Registered agents and current-agent config |
 
 ```
 string:app          # the app hub
 string:bash         # the bash hub
 string:event        # the event inbox hub
+string:agent        # the agent management hub
 ```
 
 Because they're reserved, you cannot name a free-form tab `app`,
-`bash`, `tool`, `event`, or `system`. `string app` always opens the
-app hub, not a tab called `app`.
+`bash`, `tool`, `event`, `system`, or `agent`. `string app` always
+opens the app hub, not a tab called `app`.
 
-Open a hub to inspect its current state:
+Open a hub to inspect its current state, or send a management command
+through its hub:
 
 ```
-/open app
-/open tool
-/open bash
-/open event
-/open system
+string app
+string event
+string system status
+string agent list
+string agent use codex
+string event webhook rotate
 ```
 
 ---
@@ -488,7 +492,7 @@ variables, shell history all maintained.
 | **Tab** | Bare name — free-form session, holds any document |
 | **App topic** | `app:name[:config]` — canonical app instance |
 | **Bash topic** | `bash:name` — stateful shell session, like a real terminal |
-| **Hub** | `app`, `bash`, `tool`, `system` — reserved aggregator views |
+| **Hub** | `app`, `bash`, `tool`, `event`, `system`, `agent` — reserved aggregator views |
 | **Home** | `~` or bare path → agent's home directory (for commands, not topics) |
 | **Document paths** | Relative to the document's own location |
 | **State** | History, location, auth — all per topic |

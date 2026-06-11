@@ -28,7 +28,7 @@ If your deployment needs multi-tenant access, remote use, or per-request authent
 
 An **agent** is the top-level identity. Each agent has a home directory (`agent.home`) and an optional allowlist of additional accessible paths. Agents are registered via `POST /agents` and persist across daemon restarts in `${STRING_DATA_DIR}/agents.json` (default: `~/.string/daemon/agents.json`).
 
-A **topic** is the unit of session scope. A topic is either a bare name — a free-form `tab` (e.g. `main`, `docs`) — or canonical: `app:name[:config]` (e.g. `app:weather:korea`) or `bash:name` (e.g. `bash:dev`). The bare names `app`, `bash`, `tool`, `event`, `system` are reserved as `hub` aggregators. A topic belongs to an agent. The runtime maintains per-topic state (current document, variables, history, bash PTY if applicable).
+A **topic** is the unit of session scope. A topic is either a bare name — a free-form `tab` (e.g. `main`, `docs`) — or canonical: `app:name[:config]` (e.g. `app:weather:korea`) or `bash:name` (e.g. `bash:dev`). The bare names `app`, `bash`, `tool`, `event`, `system`, and `agent` are reserved as `hub` aggregators. A topic belongs to an agent. The runtime maintains per-topic state (current document, variables, history, bash PTY if applicable).
 
 A **command** is a single `/open`, `/act`, `/nav`, `/info`, `/set`, `/edit`, etc. invocation. Commands execute in a topic's context. A client sends one command per `POST /exec` call; the daemon responds with a Server-Sent Events (SSE) stream containing a head event, a content event, and a done event.
 

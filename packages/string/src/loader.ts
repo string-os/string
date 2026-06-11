@@ -59,6 +59,8 @@ export type HtmlToMarkdown = (html: string, url: string) => string;
 export interface LoaderOptions {
   /** AI home directory — base for path resolution when no document is open (default: process.cwd()) */
   home?: string;
+  /** Current String agent id, when known. */
+  agentId?: string;
   /** Allow HTTP/HTTPS fetching (default: true) */
   allowHttp?: boolean;
   /** File access mode (default: 'full') */
@@ -100,6 +102,7 @@ export type SessionLister = () => SessionInfo[];
 
 export class Loader {
   readonly home: string;
+  readonly agentId: string | undefined;
   readonly accessMode: AccessMode;
   readonly envStore: EnvStore;
   /** Set by Browser at construction. Optional — non-Browser embeddings skip. */
@@ -119,6 +122,7 @@ export class Loader {
 
   constructor(options: LoaderOptions = {}) {
     this.home = options.home ?? process.cwd();
+    this.agentId = options.agentId;
     this.allowHttp = options.allowHttp ?? true;
     this.accessMode = options.accessMode ?? 'full';
     this.envStore = new EnvStore(this.home);

@@ -33,7 +33,7 @@ export interface StringServerOptions {
 
 const TOOL_DESCRIPTION = [
   'Run a String command in a topic. Topic is `main`, `app:NAME`, ',
-  '`app:NAME:CONFIG`, `bash:NAME`, or hub `event`. `cmd` must start with `/`. ',
+  '`app:NAME:CONFIG`, `bash:NAME`, or hubs `app`, `tool`, `bash`, `event`, `system`, `agent`. `cmd` must start with `/`. ',
   'Examples: `/open ./doc.md`, `/act.search --q "..."`, `/exec "ls -la"`. ',
   'To discover what is available, run `/help`, `/info`, or `/act --help`.',
 ].join('');
@@ -42,7 +42,7 @@ const inputSchema = {
   topic: z
     .string()
     .min(1)
-    .describe('Topic: `main` (tab), `app:NAME[:CONFIG]`, `bash:NAME`, or hub `event`.'),
+    .describe('Topic: `main` (tab), `app:NAME[:CONFIG]`, `bash:NAME`, or hub `app`, `tool`, `bash`, `event`, `system`, `agent`.'),
   cmd: z
     .string()
     .min(1)

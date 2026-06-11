@@ -234,6 +234,7 @@ export function cmdHelp(session: Session, mode?: 'bash'): CommandResult {
   lines.push('/topics <type>               Filter by type: tab, app, bash, hub');
   lines.push('/sessions                    Alias of /topics');
   lines.push('/session close [name]        Close a session by name');
+  lines.push('Reserved hubs: app, bash, tool, event, system, agent');
   lines.push('');
   lines.push('### Tools');
   lines.push('/tool:<name>                  Run tool (default action)');
@@ -244,6 +245,12 @@ export function cmdHelp(session: Session, mode?: 'bash'): CommandResult {
   lines.push('/events                       List pending agent events');
   lines.push('/events.read <id>             Read full event text');
   lines.push('/events.ack <id>              Mark an event handled');
+  lines.push('/webhook show|rotate          In event hub: local webhook URL/token');
+  lines.push('');
+  lines.push('### Agent/System Hubs');
+  lines.push('agent hub: /list              List registered agents');
+  lines.push('agent hub: /add|/use|/current Manage current agent');
+  lines.push('system hub: /status           Daemon health + port');
   lines.push('');
   lines.push('### Shell');
   lines.push('/exec <command>               Run shell command (stateless)');
