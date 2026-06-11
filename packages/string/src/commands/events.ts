@@ -50,6 +50,15 @@ export async function renderEvents(loader: Loader, opts: { includeAck?: boolean 
     '',
     '## Commands',
     '',
+    'CLI:',
+    '  string event list                 — list pending events',
+    '  string event list --all           — list pending and acked events',
+    '  string event read <id>            — read full event text',
+    '  string event ack <id>             — mark an event handled',
+    '  string event clear                — delete acked events',
+    '  string event clear --all          — delete all events',
+    '',
+    'MCP/slash:',
     '  /events                         — list pending events',
     '  /events list --all              — list pending and acked events',
     '  /events.read <id>               — read full event text',
@@ -73,7 +82,8 @@ async function readEvent(loader: Loader, id?: string): Promise<CommandResult> {
     '',
     event.text,
     '',
-    `next: /events.ack ${event.id}`,
+    `next: string event ack ${event.id}`,
+    `MCP/slash: /events.ack ${event.id}`,
   ].join('\n'));
 }
 
@@ -90,6 +100,15 @@ async function clearEvents(loader: Loader, opts: { all?: boolean }): Promise<Com
 }
 
 const EVENTS_HELP = [
+  'CLI:',
+  '  string event list                 — list pending events',
+  '  string event list --all           — list pending and acked events',
+  '  string event read <id>            — read full event text',
+  '  string event ack <id>             — mark an event handled',
+  '  string event clear                — delete acked events',
+  '  string event clear --all          — delete all events',
+  '',
+  'MCP/slash:',
   '/events                         — list pending events',
   '/events list --all              — list pending and acked events',
   '/events.read <id>               — read full event text',

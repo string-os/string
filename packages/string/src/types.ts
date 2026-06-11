@@ -78,7 +78,7 @@ export interface CommandResult {
  *   - `bash`  — canonical bash session (`bash:dev`). Always `bash:` prefix.
  *               Each bash:<name> owns its own pty.
  *   - `hub`   — reserved bare aggregator name (`app`, `bash`, `tool`, `event`,
- *               `system`). Manages instances of its kind. Display: just
+ *               `system`, `agent`). Manages instances of its kind. Display: just
  *               the name (e.g. `app`, not `hub:app`).
  *
  * Hub names are reserved — they cannot be used as free-form `tab` names.
@@ -112,10 +112,11 @@ const CANONICAL_PREFIXES = new Set<string>(['app', 'bash']);
  *   `tool`    — installed tools
  *   `event`   — agent-local event inbox
  *   `system`  — daemon status, env-store, /set, runtime controls
+ *   `agent`   — registered agents and current-agent config
  *
  * Adding a new hub later = add to this set + register a hub doc generator.
  */
-export const HUB_NAMES = new Set<string>(['app', 'bash', 'tool', 'event', 'system']);
+export const HUB_NAMES = new Set<string>(['app', 'bash', 'tool', 'event', 'system', 'agent']);
 
 /** True if `name` is a reserved hub aggregator name. */
 export function isHubName(name: string): boolean {
@@ -133,6 +134,7 @@ export function isHubName(name: string): boolean {
  *   "bash"                → { type: "hub",  namespace: "bash" }
  *   "tool"                → { type: "hub",  namespace: "tool" }
  *   "system"              → { type: "hub",  namespace: "system" }
+ *   "agent"               → { type: "hub",  namespace: "agent" }
  *   "app:moltbook"        → { type: "app",  namespace: "moltbook" }
  *   "app:weather:korea"   → { type: "app",  namespace: "weather:korea" }
  *   "bash:dev"            → { type: "bash", namespace: "dev" }

@@ -178,7 +178,7 @@ await section('events — local webhook appends text to current agent inbox', as
     const use = runCli(env, ['agent', 'use', 'hooked']);
     assert(use.code === 0, 'agent use ok');
 
-    const show = runCli(env, ['webhook', 'show']);
+    const show = runCli(env, ['event', 'webhook', 'show']);
     assert(show.code === 0, `webhook show ok. stderr: ${show.stderr}`);
     const webhookUrl = show.stdout.split('\n').find(line => line.startsWith('http://127.0.0.1:'));
     assert(!!webhookUrl, `webhook URL printed. stdout: ${show.stdout}`);
@@ -188,15 +188,16 @@ await section('events — local webhook appends text to current agent inbox', as
     const postedJson = JSON.parse(posted.body) as { event_id: string; agent_id: string };
     assert(postedJson.agent_id === 'hooked', 'webhook resolves target agent');
 
-    const list = runCli(env, ['event', '/events']);
+    const list = runCli(env, ['event', 'list']);
     assert(list.code === 0, `event list ok. stderr: ${list.stderr}`);
     assert(list.stdout.includes(postedJson.event_id), 'event list includes posted event');
+    assert(list.stdout.includes('string event read <id>'), 'event list shows CLI read form');
 
-    const read = runCli(env, ['event', `/events.read ${postedJson.event_id}`]);
+    const read = runCli(env, ['event', 'read', postedJson.event_id]);
     assert(read.code === 0, 'event read ok');
     assert(read.stdout.includes('scheduled event: check notifications'), 'event read includes webhook text');
 
-    const ack = runCli(env, ['event', `/events.ack ${postedJson.event_id}`]);
+    const ack = runCli(env, ['event', 'ack', postedJson.event_id]);
     assert(ack.code === 0, 'event ack ok');
 
     const bad = await postText(`http://127.0.0.1:${env.port}/webhook/bad-token`, 'bad');

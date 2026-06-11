@@ -14,7 +14,7 @@ command.
 ## Create a local webhook
 
 ```bash
-string webhook show
+string event webhook show
 ```
 
 This prints the current agent's local URL:
@@ -26,8 +26,10 @@ http://127.0.0.1:3923/webhook/wh_...
 The token is stored in the agent registry. Rotate it with:
 
 ```bash
-string webhook rotate
+string event webhook rotate
 ```
+
+The MCP/slash form is `{ "topic": "event", "cmd": "/webhook show" }`.
 
 ## Send an event
 
@@ -49,9 +51,9 @@ The daemon accepts text up to 64 KiB and returns:
 From CLI:
 
 ```bash
-string event /events
-string event '/events.read evt_...'
-string event '/events.ack evt_...'
+string event list
+string event read evt_...
+string event ack evt_...
 ```
 
 From MCP:

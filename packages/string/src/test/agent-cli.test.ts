@@ -152,6 +152,7 @@ await section('agent CLI — add/use/current + clobber fix (e2e)', async () => {
     const localConfig = path.join(localRoot, '.string', 'config.json');
     const localUse = runCli(env, ['agent', 'use', 'maya', '--local'], { STRING_PROJECT_DIR: localRoot });
     assert(localUse.code === 0, 'agent use --local exits 0');
+    assert(localUse.stdout.includes('Warning: STRING_CONFIG is set'), 'agent use --local warns when STRING_CONFIG overrides resolution');
     assert(JSON.parse(fs.readFileSync(localConfig, 'utf-8')).currentAgent === 'maya',
       'agent use --local writes workspace-local config');
     assert(readConfig(env).currentAgent === 'leo',
@@ -181,6 +182,114 @@ await section('agent CLI — add/use/current + clobber fix (e2e)', async () => {
     daemon.stop();
     fs.rmSync(path.dirname(env.dataDir), { recursive: true, force: true });
   }
+});
+
+await section('CLI grammar — unknown flags do not fall through to topics', async () => {
+  const env = makeEnv();
+  const r = runCli(env, ['--deamon', 'status']);
+  assert(r.code !== 0, 'unknown flag exits non-zero');
+  assert(r.stderr.includes("unknown flag '--deamon'"), 'unknown flag error shown');
+  assert(r.stderr.includes('Did you mean --daemon?'), 'daemon typo suggestion shown');
+  assert(!r.stdout.includes('COMMAND_UNSUPPORTED'), 'not routed through String command dispatcher');
+});
+
+await section('CLI grammar — management hubs cover agent/event/system', async () => {
+  const env = makeEnv();
+  const daemon = await startDaemon(env);
+  const leoHome = path.join(env.dataDir, 'leo-hub-home');
+  const leoHome2 = path.join(env.dataDir, 'leo-hub-home-2');
+  try {
+    const add = runCli(env, ['agent', 'add', 'leo', '--home', leoHome, '--allow', '/tmp/a,/tmp/b']);
+    assert(add.code === 0, `agent hub add exits 0 (stderr: ${add.stderr})`);
+    assert(add.stdout.includes("Added agent 'leo'"), 'agent hub add output');
+    let leo = readAgents(env).find(u => u.id === 'leo');
+    assert(leo?.home === leoHome, 'agent hub add stores home');
+    assert(JSON.stringify(leo?.allowedPaths) === JSON.stringify(['/tmp/a', '/tmp/b']),
+      'agent hub add stores allowedPaths');
+
+    const use = runCli(env, ['agent', 'use', 'leo']);
+    assert(use.code === 0, 'agent hub use exits 0');
+    assert(readConfig(env).currentAgent === 'leo', 'agent hub use updates currentAgent');
+
+    const agentHub = runCli(env, ['agent']);
+    assert(agentHub.code === 0, 'bare agent hub opens');
+    assert(agentHub.stdout.includes('# agent hub'), 'bare agent hub renders hub page');
+
+    const current = runCli(env, ['agent', 'current']);
+    assert(current.code === 0, 'agent hub current exits 0');
+    assert(current.stdout.includes('leo'), 'agent hub current prints leo');
+    assert(current.stdout.includes(leoHome), 'agent hub current prints home');
+
+    const list = runCli(env, ['agent', 'list']);
+    assert(list.code === 0, 'agent hub list exits 0');
+    assert(/\*\s*leo/.test(list.stdout), 'agent hub list marks current agent');
+
+    const setHome = runCli(env, ['agent', 'set-home', 'leo', leoHome2]);
+    assert(setHome.code === 0, 'agent hub set-home exits 0');
+    leo = readAgents(env).find(u => u.id === 'leo');
+    assert(leo?.home === leoHome2, 'agent hub set-home updates home');
+    assert(JSON.stringify(leo?.allowedPaths) === JSON.stringify(['/tmp/a', '/tmp/b']),
+      'agent hub set-home preserves allowedPaths');
+
+    const webhook = runCli(env, ['event', 'webhook', 'show']);
+    assert(webhook.code === 0, `event hub webhook show exits 0 (stderr: ${webhook.stderr})`);
+    assert(webhook.stdout.includes("Local webhook for agent 'leo'"), 'event hub webhook uses current agent');
+    assert(webhook.stdout.includes('/webhook/wh_'), 'event hub webhook prints URL');
+
+    const eventHub = runCli(env, ['event']);
+    assert(eventHub.code === 0, 'bare event hub opens');
+    assert(eventHub.stdout.includes('string event read <id>'), 'event hub shows CLI event commands');
+
+    const status = runCli(env, ['system', 'status']);
+    assert(status.code === 0, 'system hub status exits 0');
+    assert(status.stdout.includes(`stringd running on port ${env.port}`), 'system hub status prints daemon port');
+
+    const rm = runCli(env, ['agent', 'rm', 'leo']);
+    assert(rm.code === 0, 'agent hub rm exits 0');
+    assert(!readAgents(env).some(u => u.id === 'leo'), 'agent hub rm removes agent');
+    assert(readConfig(env).currentAgent === undefined, 'agent hub rm clears current agent');
+  } finally {
+    daemon.stop();
+    fs.rmSync(path.dirname(env.dataDir), { recursive: true, force: true });
+  }
+});
+
+await section('CLI grammar — management help separates CLI and slash forms', async () => {
+  const env = makeEnv();
+
+  const agentCliHelp = runCli(env, ['agent', '--help']);
+  assert(agentCliHelp.code === 0, 'agent --help exits 0');
+  assert(agentCliHelp.stdout.includes('string agent list'), 'agent --help shows CLI form');
+
+    const eventCliHelp = runCli(env, ['event', 'help']);
+    assert(eventCliHelp.code === 0, 'event help exits 0');
+    assert(eventCliHelp.stdout.includes('string event webhook show'), 'event help shows CLI form');
+    assert(eventCliHelp.stdout.includes('string event read <id>'), 'event help shows CLI read alias');
+
+  const daemon = await startDaemon(env);
+  try {
+    const agentSlashHelp = runCli(env, ['agent', '/help']);
+    assert(agentSlashHelp.code === 0, 'agent /help exits 0');
+    assert(agentSlashHelp.stdout.includes('/list'), 'agent /help shows slash form');
+
+    const eventSlashHelp = runCli(env, ['event', '/help']);
+    assert(eventSlashHelp.code === 0, 'event /help exits 0');
+    assert(eventSlashHelp.stdout.includes('/webhook show'), 'event /help shows slash form');
+
+    const systemSlashHelp = runCli(env, ['system', '/help']);
+    assert(systemSlashHelp.code === 0, 'system /help exits 0');
+    assert(systemSlashHelp.stdout.includes('/status'), 'system /help shows slash form');
+  } finally {
+    daemon.stop();
+    fs.rmSync(path.dirname(env.dataDir), { recursive: true, force: true });
+  }
+});
+
+await section('CLI grammar — removed top-level webhook command is explicit', async () => {
+  const env = makeEnv();
+  const r = runCli(env, ['webhook', 'show']);
+  assert(r.code !== 0, 'top-level webhook exits non-zero');
+  assert(r.stderr.includes('string event webhook show'), 'top-level webhook suggests event hub command');
 });
 
 await section('daemon — ensureAgent home/allowedPaths contract (clobber fix)', async () => {

@@ -68,8 +68,14 @@ export function globalConfigPath(): string {
   return join(homedir(), '.string', 'config.json');
 }
 
-function normalizeStartDir(value: string): string {
-  return resolve(isAbsolute(value) ? value : join(process.cwd(), value));
+function normalizeStartDir(value: string, baseDir = process.cwd()): string {
+  return resolve(isAbsolute(value) ? value : join(baseDir, value));
+}
+
+function defaultProjectStartDir(): string {
+  return process.env.STRING_PROJECT_DIR?.trim()
+    || process.env.CLAUDE_PROJECT_DIR?.trim()
+    || process.cwd();
 }
 
 /**
@@ -80,10 +86,8 @@ function normalizeStartDir(value: string): string {
  * enough to select the local config path for reads. Writes stay global unless
  * the caller explicitly asks for project-local config.
  */
-export function projectConfigPath(): string | undefined {
-  const rawStart = process.env.STRING_PROJECT_DIR?.trim()
-    || process.env.CLAUDE_PROJECT_DIR?.trim()
-    || process.cwd();
+export function projectConfigPath(startDir?: string): string | undefined {
+  const rawStart = startDir?.trim() || defaultProjectStartDir();
   let dir = normalizeStartDir(rawStart);
   const home = resolve(homedir());
 
@@ -100,12 +104,10 @@ export function projectConfigPath(): string | undefined {
 }
 
 /** Project-local config path for writes: nearest existing local config, else cwd/.string/config.json. */
-export function projectConfigPathForWrite(): string {
-  const existing = projectConfigPath();
+export function projectConfigPathForWrite(startDir?: string): string {
+  const existing = projectConfigPath(startDir);
   if (existing) return existing;
-  const rawStart = process.env.STRING_PROJECT_DIR?.trim()
-    || process.env.CLAUDE_PROJECT_DIR?.trim()
-    || process.cwd();
+  const rawStart = startDir?.trim() || defaultProjectStartDir();
   return join(normalizeStartDir(rawStart), '.string', 'config.json');
 }
 
@@ -137,6 +139,11 @@ function configPathForWrite(scope: ConfigWriteScope): string {
 /** Persist the client config, merging into any existing on-disk config. */
 export function saveClientConfig(patch: ClientConfig, scope: ConfigWriteScope = 'selected'): void {
   const file = configPathForWrite(scope);
+  saveClientConfigToPath(file, patch);
+}
+
+/** Persist the client config to an explicit file, merging existing fields. */
+export function saveClientConfigToPath(file: string, patch: ClientConfig): void {
   let existing: ClientConfig = {};
   try {
     const data = JSON.parse(readFileSync(file, 'utf-8'));
@@ -156,6 +163,11 @@ export function getCurrentAgent(): string | undefined {
 /** Set the configured current agent id. Defaults to global; use project for workspace-local. */
 export function setCurrentAgent(id: string, scope: ConfigWriteScope = 'global'): void {
   saveClientConfig({ currentAgent: id.trim() }, scope);
+}
+
+/** Set the configured current agent id in an explicit config file. */
+export function setCurrentAgentInFile(id: string, file: string): void {
+  saveClientConfigToPath(file, { currentAgent: id.trim() });
 }
 
 /** Clear the configured current agent (e.g. after removing that agent). */
