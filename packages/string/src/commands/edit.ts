@@ -13,7 +13,10 @@ import { formatDiff, formatLineNumbers } from '../diff.js';
 import { resolveConfig } from '../config.js';
 import {
   ok, err,
+  fileSha256,
+  finalizeUndoRecord,
   parsePosixFlags,
+  readUndoRecord,
   saveUndoBackup,
   toWorkspacePath,
   resolveFilePath,
@@ -98,6 +101,8 @@ async function markSeenAfterWrite(resolved: string, session: Session): Promise<v
   try {
     const stat = await fsPromises.stat(resolved);
     session.markFileSeen(resolved, stat);
+    const recordPath = session.lastUndoRecordPath;
+    if (recordPath) await finalizeUndoRecord(recordPath, resolved);
   } catch { /* best-effort stale-write tracking */ }
 }
 
@@ -133,7 +138,7 @@ export async function cmdWrite(
     try {
       const dir = path.dirname(resolved);
       await fsPromises.mkdir(dir, { recursive: true });
-      const oldContent = await saveUndoBackup(resolved, session);
+      const oldContent = await saveUndoBackup(resolved, session, loader);
       await fsPromises.writeFile(resolved, body, 'utf-8');
       const stat = await fsPromises.stat(resolved);
       await markSeenAfterWrite(resolved, session);
@@ -178,7 +183,7 @@ export async function cmdWrite(
   try {
     const dir = path.dirname(resolved);
     await fsPromises.mkdir(dir, { recursive: true });
-    const oldContent = await saveUndoBackup(resolved, session);
+    const oldContent = await saveUndoBackup(resolved, session, loader);
     await fsPromises.writeFile(resolved, content, 'utf-8');
     const stat = await fsPromises.stat(resolved);
     await markSeenAfterWrite(resolved, session);
@@ -221,7 +226,7 @@ export async function cmdAppend(
     }
 
     try {
-      const oldContent = await saveUndoBackup(resolved, session);
+      const oldContent = await saveUndoBackup(resolved, session, loader);
       const prefix = oldContent.length > 0 && !oldContent.endsWith('\n') ? '\n' : '';
       const newContent = oldContent + prefix + body;
       await fsPromises.writeFile(resolved, newContent, 'utf-8');
@@ -261,7 +266,7 @@ export async function cmdAppend(
   }
 
   try {
-    const oldContent = await saveUndoBackup(resolved, session);
+    const oldContent = await saveUndoBackup(resolved, session, loader);
     const prefix = oldContent.length > 0 && !oldContent.endsWith('\n') ? '\n' : '';
     const newContent = oldContent + prefix + content;
     await fsPromises.writeFile(resolved, newContent, 'utf-8');
@@ -306,7 +311,7 @@ export async function cmdEdit(
 
       let oldContent: string;
       try {
-        oldContent = await saveUndoBackup(resolved, session);
+        oldContent = await saveUndoBackup(resolved, session, loader);
         await fsPromises.writeFile(resolved, body, 'utf-8');
         await markSeenAfterWrite(resolved, session);
       } catch (e) {
@@ -425,7 +430,7 @@ export async function cmdEdit(
 
     let oldContent: string;
     try {
-      oldContent = await saveUndoBackup(resolved, session);
+      oldContent = await saveUndoBackup(resolved, session, loader);
       await fsPromises.writeFile(resolved, newSource, 'utf-8');
       await markSeenAfterWrite(resolved, session);
     } catch (e) {
@@ -549,7 +554,7 @@ export async function cmdEdit(
 
     let oldContent: string;
     try {
-      oldContent = await saveUndoBackup(resolved, session);
+      oldContent = await saveUndoBackup(resolved, session, loader);
       await fsPromises.writeFile(resolved, content, 'utf-8');
       await markSeenAfterWrite(resolved, session);
     } catch (e) {
@@ -662,7 +667,7 @@ export async function cmdEdit(
 
   let oldContent: string;
   try {
-    oldContent = await saveUndoBackup(resolved, session);
+    oldContent = await saveUndoBackup(resolved, session, loader);
     await fsPromises.writeFile(resolved, newSource, 'utf-8');
     await markSeenAfterWrite(resolved, session);
   } catch (e) {
@@ -812,7 +817,7 @@ export async function cmdReplace(
     const newSource = newLines.join('\n');
 
     try {
-      const oldContent = await saveUndoBackup(resolved, session);
+      const oldContent = await saveUndoBackup(resolved, session, loader);
       await fsPromises.writeFile(resolved, newSource, 'utf-8');
       await markSeenAfterWrite(resolved, session);
       const config = resolveConfig(session);
@@ -866,7 +871,7 @@ export async function cmdReplace(
     : source.replace(pair.oldText, pair.newText);
 
   try {
-    const oldContent = await saveUndoBackup(resolved, session);
+    const oldContent = await saveUndoBackup(resolved, session, loader);
     await fsPromises.writeFile(resolved, newSource, 'utf-8');
     await markSeenAfterWrite(resolved, session);
     const config = resolveConfig(session);
@@ -881,38 +886,51 @@ export async function cmdReplace(
 
 export async function cmdUndo(session: Session, loader: Loader): Promise<CommandResult> {
   const home = loader.home;
-  const targetFile = session.lastUndoPath;
+  const recordPath = session.lastUndoRecordPath;
 
-  if (!targetFile) {
+  if (!recordPath) {
     return err('Nothing to undo.', 'NOT_FOUND');
   }
 
-  const undoPath = targetFile + '.undo';
-  const displayPath = toWorkspacePath(targetFile, home);
-
-  // Check .undo file exists
+  let record;
   try {
-    await fsPromises.access(undoPath);
+    record = await readUndoRecord(recordPath);
   } catch {
     session.clearLastUndo();
     return err('Nothing to undo.', 'NOT_FOUND');
   }
 
-  const undoContent = await fsPromises.readFile(undoPath, 'utf-8');
+  const targetFile = record.targetPath;
+  const displayPath = toWorkspacePath(targetFile, home);
+  const boundaryError = validateWorkspaceBoundary(targetFile, home, displayPath, loader.accessMode);
+  if (boundaryError) {
+    return boundaryError;
+  }
+  if (record.afterSha256) {
+    const currentSha256 = await fileSha256(targetFile);
+    if (currentSha256 !== record.afterSha256) {
+      return err(
+        `Refusing to undo ${displayPath}: file changed since this topic's last edit.\n` +
+        `Run /edit ${displayPath} to inspect the current file, or use git if you need history-level recovery.`,
+        'CONFLICT'
+      );
+    }
+  }
 
-  if (undoContent === '') {
+  if (!record.existedBefore) {
     // File was newly created — undo means delete it
     try {
       await fsPromises.unlink(targetFile);
     } catch { /* already gone */ }
-    await fsPromises.unlink(undoPath);
+    await fsPromises.unlink(recordPath).catch(() => {});
     session.clearLastUndo();
     return ok(`Undo: deleted ${displayPath} (was newly created)`);
   }
 
   // Restore previous content
+  const undoContent = record.beforeContent ?? '';
   await fsPromises.writeFile(targetFile, undoContent, 'utf-8');
-  await fsPromises.unlink(undoPath);
+  await fsPromises.unlink(recordPath).catch(() => {});
   session.clearLastUndo();
 
   const lineCount = undoContent.split('\n').length;

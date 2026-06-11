@@ -21,7 +21,7 @@ export class Session {
   private _seenNavSources: Set<string> = new Set();
   private _seenFiles: Map<string, { mtimeMs: number; size: number }> = new Map();
   private _bash: BashSession | null = null;
-  private _lastUndoPath: string | null = null;
+  private _lastUndoRecordPath: string | null = null;
   private _cwdOverride: string | null = null;
 
   constructor(name: string) {
@@ -30,17 +30,17 @@ export class Session {
 
   // ── Undo Tracking ──────────────────────────────────────────────────────────
 
-  /** Record the resolved path of the last write/edit for /undo. */
-  setLastUndoPath(resolvedPath: string): void {
-    this._lastUndoPath = resolvedPath;
+  /** Record this topic's daemon-side undo record for /undo. */
+  setLastUndoRecordPath(recordPath: string): void {
+    this._lastUndoRecordPath = recordPath;
   }
 
-  get lastUndoPath(): string | null {
-    return this._lastUndoPath;
+  get lastUndoRecordPath(): string | null {
+    return this._lastUndoRecordPath;
   }
 
   clearLastUndo(): void {
-    this._lastUndoPath = null;
+    this._lastUndoRecordPath = null;
   }
 
   // ── File Read Tracking ─────────────────────────────────────────────────────
