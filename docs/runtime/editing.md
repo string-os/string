@@ -396,8 +396,8 @@ they execute. The diff feedback the AI receives confirms the save.
 
 ### /undo
 
-String keeps the state from before the last edit. `/undo` reverts
-to that state — one time only.
+String keeps the state from before the current topic's last edit.
+`/undo` reverts to that state — one time only.
 
 ```
 /replace ~/notes/meeting.md#decisions
@@ -417,18 +417,20 @@ to that state — one time only.
  14  │ <!-- /decisions -->
 ```
 
-The undo buffer holds exactly one state. After another edit, the
-previous undo is gone:
+Each topic has one undo record. After another edit in the same topic,
+that topic's previous undo is gone:
 
 ```
-/replace meeting.md#decisions    ← undo buffer: previous state
-/replace meeting.md#action-items ← undo buffer: overwritten
+/replace meeting.md#decisions    ← topic undo: previous state
+/replace meeting.md#action-items ← topic undo: overwritten
 /undo                            ← undoes #action-items, NOT #decisions
 ```
 
 This is deliberately simple. One level of undo is a safety net,
 not a full history system. In a git repository, use git for durable
 version history and String's editing commands for the immediate write.
+Undo records are stored in String's daemon state directory, not beside
+the edited files, so they do not create `.undo` files in the workspace.
 
 ---
 

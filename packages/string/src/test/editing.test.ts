@@ -135,6 +135,84 @@ await section('/write — diff feedback in response', async () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
+await section('/undo — daemon-side record without target sidecar', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-undo-test-');
+  const dataDir = fs.mkdtempSync('/tmp/string-undo-data-');
+  const prevDataDir = process.env.STRING_DATA_DIR;
+  process.env.STRING_DATA_DIR = dataDir;
+
+  try {
+    const b = new Browser({ home: tmpDir, agentId: 'agent-one' });
+    const write = await b.exec('/write note.md\nfirst');
+    assert(write.ok, 'write ok');
+    assert(!fs.existsSync(path.join(tmpDir, 'note.md.undo')), 'no target sidecar undo file');
+    assert(fs.existsSync(path.join(dataDir, 'undo')), 'daemon-side undo directory exists');
+
+    const undo = await b.exec('/undo');
+    assert(undo.ok, 'undo ok');
+    assert(!fs.existsSync(path.join(tmpDir, 'note.md')), 'undo deletes newly-created file');
+  } finally {
+    if (prevDataDir === undefined) delete process.env.STRING_DATA_DIR;
+    else process.env.STRING_DATA_DIR = prevDataDir;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+await section('/undo — one step per topic', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-undo-topic-test-');
+  const dataDir = fs.mkdtempSync('/tmp/string-undo-topic-data-');
+  const prevDataDir = process.env.STRING_DATA_DIR;
+  process.env.STRING_DATA_DIR = dataDir;
+
+  try {
+    const b = new Browser({ home: tmpDir, agentId: 'agent-one' });
+    await b.exec('/write a.md\nA', 'topic-a');
+    await b.exec('/write b.md\nB', 'topic-b');
+
+    const undoA = await b.exec('/undo', 'topic-a');
+    assert(undoA.ok, 'topic-a undo ok');
+    assert(!fs.existsSync(path.join(tmpDir, 'a.md')), 'topic-a file undone');
+    assert(fs.existsSync(path.join(tmpDir, 'b.md')), 'topic-b file remains');
+
+    const undoB = await b.exec('/undo', 'topic-b');
+    assert(undoB.ok, 'topic-b undo ok');
+    assert(!fs.existsSync(path.join(tmpDir, 'b.md')), 'topic-b file undone');
+  } finally {
+    if (prevDataDir === undefined) delete process.env.STRING_DATA_DIR;
+    else process.env.STRING_DATA_DIR = prevDataDir;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
+await section('/undo — same-file stale topic is rejected', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-undo-stale-test-');
+  const dataDir = fs.mkdtempSync('/tmp/string-undo-stale-data-');
+  const prevDataDir = process.env.STRING_DATA_DIR;
+  process.env.STRING_DATA_DIR = dataDir;
+
+  try {
+    const b = new Browser({ home: tmpDir, agentId: 'agent-one' });
+    await b.exec('/write shared.md\nA', 'topic-a');
+    await b.exec('/write --force shared.md\nB', 'topic-b');
+
+    const staleUndo = await b.exec('/undo', 'topic-a');
+    assert(!staleUndo.ok, 'stale topic undo rejected');
+    assert(staleUndo.code === 'CONFLICT', 'stale topic undo uses conflict');
+    assert(fs.readFileSync(path.join(tmpDir, 'shared.md'), 'utf-8') === 'B', 'stale undo does not overwrite newer edit');
+
+    const latestUndo = await b.exec('/undo', 'topic-b');
+    assert(latestUndo.ok, 'latest topic undo ok');
+    assert(fs.readFileSync(path.join(tmpDir, 'shared.md'), 'utf-8') === 'A', 'latest undo restores prior content');
+  } finally {
+    if (prevDataDir === undefined) delete process.env.STRING_DATA_DIR;
+    else process.env.STRING_DATA_DIR = prevDataDir;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+    fs.rmSync(dataDir, { recursive: true, force: true });
+  }
+});
+
 await section('/append — diff feedback in response', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-diff-test-');
   const b = new Browser({ home: tmpDir });

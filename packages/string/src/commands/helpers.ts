@@ -4,6 +4,8 @@
 
 import fs from 'fs';
 import fsPromises from 'fs/promises';
+import crypto from 'crypto';
+import os from 'os';
 import path from 'path';
 import { toSlug } from '@string-os/core';
 import type { ActionResult } from '../loader.js';
@@ -571,24 +573,103 @@ export function resolveEnvVars(
 
 // ─── File Path Helpers ───────────────────────────────────────────────────────
 
+export interface UndoRecord {
+  version: 1;
+  agentId: string;
+  topic: string;
+  targetPath: string;
+  existedBefore: boolean;
+  beforeContent: string | null;
+  afterSha256?: string;
+  createdAt: string;
+}
+
+function safeUndoSegment(value: string): string {
+  return encodeURIComponent(value).replace(/[!'()*]/g, (ch) => `%${ch.charCodeAt(0).toString(16).toUpperCase()}`);
+}
+
+export function undoDataDir(): string {
+  return process.env.STRING_DATA_DIR || path.join(os.homedir(), '.stringd');
+}
+
+export function undoRecordPath(loader: Loader, session: Session): string {
+  const agentId = loader.agentId || 'default';
+  return path.join(
+    undoDataDir(),
+    'undo',
+    safeUndoSegment(agentId),
+    safeUndoSegment(session.name),
+    'last.json',
+  );
+}
+
+export async function fileSha256(resolvedPath: string): Promise<string | null> {
+  try {
+    const content = await fsPromises.readFile(resolvedPath);
+    return crypto.createHash('sha256').update(content).digest('hex');
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (err.code === 'ENOENT') return null;
+    throw e;
+  }
+}
+
 /**
- * Save .undo backup before writing a file.
- * Overwrites any previous .undo for the same path (one-level undo).
- * If the file doesn't exist yet, writes an empty .undo marker.
- * Records the path on the session so /undo knows which file to revert.
+ * Save this topic's one-step undo snapshot before writing a file.
+ * Records live under the daemon state directory instead of beside target files,
+ * so edits do not dirty git working trees and each topic keeps its own /undo.
  */
-export async function saveUndoBackup(resolvedPath: string, session: Session): Promise<string> {
-  const undoPath = resolvedPath + '.undo';
+export async function saveUndoBackup(resolvedPath: string, session: Session, loader: Loader): Promise<string> {
   let oldContent = '';
+  let existedBefore = true;
   try {
     oldContent = await fsPromises.readFile(resolvedPath, 'utf-8');
-    await fsPromises.writeFile(undoPath, oldContent, 'utf-8');
-  } catch {
-    // File doesn't exist yet — write empty marker so /undo can delete it
-    await fsPromises.writeFile(undoPath, '', 'utf-8');
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    if (err.code !== 'ENOENT') throw e;
+    existedBefore = false;
   }
-  session.setLastUndoPath(resolvedPath);
+
+  const recordPath = undoRecordPath(loader, session);
+  const record: UndoRecord = {
+    version: 1,
+    agentId: loader.agentId || 'default',
+    topic: session.name,
+    targetPath: resolvedPath,
+    existedBefore,
+    beforeContent: existedBefore ? oldContent : null,
+    createdAt: new Date().toISOString(),
+  };
+
+  await fsPromises.mkdir(path.dirname(recordPath), { recursive: true });
+  await fsPromises.writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
+  session.setLastUndoRecordPath(recordPath);
   return oldContent;
+}
+
+export async function finalizeUndoRecord(recordPath: string, resolvedPath: string): Promise<void> {
+  const record = await readUndoRecord(recordPath);
+  if (record.targetPath !== resolvedPath) return;
+  record.afterSha256 = await fileSha256(resolvedPath) ?? undefined;
+  await fsPromises.writeFile(recordPath, `${JSON.stringify(record, null, 2)}\n`, { encoding: 'utf-8', mode: 0o600 });
+}
+
+export async function readUndoRecord(recordPath: string): Promise<UndoRecord> {
+  const raw = await fsPromises.readFile(recordPath, 'utf-8');
+  const record = JSON.parse(raw) as Partial<UndoRecord>;
+  if (
+    record.version !== 1 ||
+    typeof record.agentId !== 'string' ||
+    typeof record.topic !== 'string' ||
+    typeof record.targetPath !== 'string' ||
+    typeof record.existedBefore !== 'boolean' ||
+    typeof record.createdAt !== 'string' ||
+    (record.afterSha256 !== undefined && typeof record.afterSha256 !== 'string') ||
+    (record.beforeContent !== null && typeof record.beforeContent !== 'string')
+  ) {
+    throw new Error('Invalid undo record');
+  }
+  return record as UndoRecord;
 }
 
 /**
