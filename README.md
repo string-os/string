@@ -112,6 +112,31 @@ registered as server `string` and exposes one tool named `string`.
 For multiple local agents or workspace-specific homes, see
 [Agent Identity](./docs/start/agent-identity.md).
 
+To receive local String webhook events directly inside Claude Code, load the
+same String MCP server as a Claude Code channel:
+
+```json
+{
+  "mcpServers": {
+    "string": {
+      "command": "string",
+      "args": ["--mcp", "--agent", "leo"]
+    }
+  }
+}
+```
+
+```bash
+claude \
+  --mcp-config .mcp.json \
+  --dangerously-load-development-channels server:string
+```
+
+That keeps the normal `string` MCP tool available and also pushes local events
+for the selected String agent into the Claude Code session. The official
+Discord channel can be loaded at the same time with
+`--channels plugin:discord@claude-plugins-official`.
+
 ### Codex Plugin
 
 ```bash
