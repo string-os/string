@@ -263,12 +263,20 @@ execution, output framing, state, and credentials.
 - [SFMD Overview](./docs/sfmd/overview.md)
 - [Cookbook](https://github.com/string-os/cookbook)
 
+## Build an SFMD site
+
+Want a website that serves styled HTML to people and a clean `.md` twin to agents?
+
+- [`site-builder`](https://github.com/string-os/site-builder) — a Claude Code / Codex plugin that scaffolds, validates, and deploys human + AI sites. Pure `npx`, no runtime dependency.
+- [`@string-os/astro-sfmd`](https://www.npmjs.com/package/@string-os/astro-sfmd) — the Astro integration it drives: every page emits HTML + a mirrored `.md`.
+
 ## Packages
 
 - `@string-os/string` — CLI, daemon, MCP server, runtime
 - `@string-os/client` — HTTP/SSE client for `stringd`
 - `@string-os/core` — SFMD parser
 - `@string-os/compiler` — SFMD validator/compiler
+- `@string-os/astro-sfmd` — Astro integration for human + AI (SFMD) sites
 
 ## License
 
