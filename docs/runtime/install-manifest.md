@@ -8,7 +8,10 @@ A registry-agnostic JSON format that an HTTP source can return so the daemon's `
 
 ## Why
 
-Today an agent typing `/install <url>` is equivalent to "fetch this single markdown, copy to local". For multi-file or "URL-shortcut" installs, the agent has had to remember flags (`--link`, `--app`). This is a UX tax that grows with the registry.
+Web-hosted String apps may be a single markdown page, while multi-file
+apps are better represented by an install manifest. Agents should not
+have to remember flags for either case: a plain HTTP markdown page
+installs as a link, and a manifest can declare its own delivery mode.
 
 The manifest format lets the **publisher** encode `delivery` and `files` decisions at publish time. Daemon respects them; agent types one command for any app.
 
@@ -50,7 +53,7 @@ Typical use: a marketplace surfaces "Run `/install <url>` to install this app" a
 
 | value | daemon behavior |
 |---|---|
-| `"local"` | Download every `files[]` entry to `packages/{name}/`. Same as `/install` of a plain markdown URL today. |
+| `"local"` | Download every `files[]` entry to `packages/{name}/`. |
 | `"link"` | Don't download. Register the manifest URL in `config.json`. Every `/open app:{name}` re-fetches → `/open` always sees the publisher's latest. Linked packages are treated as remote SFMD: HTTP actions can run, `CLI` actions cannot. |
 | `"any"` | Treated as `local` by default; agent can override with `--link`. |
 | absent | Treated as `local`. |
@@ -64,13 +67,14 @@ Only `files[]` and `delivery` have meaning to the daemon. Registries are free to
 When `/install <source>` runs:
 
 1. **Local file or directory** → existing single-file install. Manifest support doesn't apply.
-2. **HTTP(S) URL** → daemon fetches with `Accept: application/json, text/markdown, text/plain`.
+2. **GitHub install source** (`github.com/...`, `gh:...`, or `raw.githubusercontent.com/...`) → local install by default. GitHub is treated as a package source, not a live web app surface.
+3. **Other HTTP(S) URL** → daemon fetches with `Accept: application/json, text/markdown, text/plain`.
    - Response body parses as JSON AND has `files[]` array → **treated as manifest**:
      - Loader extracts `files[].path == 'string.md'` content for SFMD parsing.
      - Installer reads `delivery`:
        - `delivery: 'link'` → register URL only, no file copy.
        - `delivery: 'local' | 'any' | undefined` → download all `files[]` to `packages/{name}/`.
-   - Response is plain markdown → existing single-file behavior (treat as `string.md`, copy to `packages/{name}/string.md`).
+   - Response is plain markdown → register the URL directly. Every `/open app:{name}` re-fetches the page, so web apps stay current.
    - Response is JSON but has no `files[]` array → not a manifest, fall through to plain-markdown handling (likely fails frontmatter parsing — a confusing error, but rare).
 
 ## Flags as overrides
@@ -80,7 +84,7 @@ Agent flags always win over manifest hints:
 | flag | effect |
 |---|---|
 | `--link` | Force link mode even if manifest says `delivery: 'local'`. |
-| (future) `--local` | Force download even if manifest says `delivery: 'link'`. |
+| `--local` | Force download/local snapshot even if the source would link by default. |
 | `--app` / `--tool` | Override frontmatter `type`. Same as before. |
 | `--as <local-name>` | Override the local registry key. Lets two apps that share `(namespace, name)`'s `name` part install side-by-side under different local handles. Independent of manifest contents. |
 
@@ -145,7 +149,7 @@ If `delivery` had been `"link"`, step 4 would skip; `config.json` would register
 ## Backwards compatibility
 
 - Existing daemon test suite (623 tests) passes with the manifest path added.
-- Plain markdown URLs install identically to before.
+- Plain markdown HTTP(S) URLs install as linked web apps by default, so `/open app:<name>` always fetches the current page. Use `--local` to snapshot one into `packages/<name>/`.
 - `--link` and `--app`/`--tool` flags work exactly as before; their semantics are unchanged.
 - No breaking changes to `config.json`, `packages/`, or any user-visible state.
 
@@ -153,7 +157,7 @@ If `delivery` had been `"link"`, step 4 would skip; `config.json` would register
 
 - `packages/string/src/loader.ts` — JSON manifest detection in `loadHttp`, `install_hint` surfacing, missing-`string.md` early bail.
 - `packages/string/src/installer.ts` — `readManifestDelivery()` helper, atomic stage-and-rename, manifest path validation.
-- `packages/string/src/commands/packages.ts` — `--link`, `--as` flag plumbing (`--link` tristate: true / undefined / future false).
+- `packages/string/src/commands/packages.ts` — `--link`, `--local`, `--as` flag plumbing.
 
 ## Open questions
 

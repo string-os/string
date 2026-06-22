@@ -18,13 +18,13 @@ const INSTALL_HELP = [
   'Source forms:',
   '  ./path/to/string.md                           Local single file',
   '  ./path/to/app-dir/                            Local directory (must contain string.md)',
-  '  https://example.com/foo/string.md             Single markdown URL',
+  '  https://example.com/foo/string.md             Single markdown URL (linked by default; /open re-fetches)',
   '  https://example.com/foo/manifest.json         Install manifest (multi-file, see runtime/install-manifest)',
-  '  https://github.com/owner/repo                 GitHub repo root — installs string.md at root if present',
+  '  https://github.com/owner/repo                 GitHub repo root — local install; uses string.md at root if present',
   '  https://github.com/owner/repo/tree/<ref>/<p>  GitHub directory — enumerates files via Contents API,',
   '                                                requires string.md inside <p>',
-  '  https://github.com/owner/repo/blob/<ref>/<p>  GitHub single file — collapses to a raw URL',
-  '  gh:owner/repo[/<path>][@<ref>]                GitHub short form. Defaults to repo default branch.',
+  '  https://github.com/owner/repo/blob/<ref>/<p>  GitHub single file — local install by default',
+  '  gh:owner/repo[/<path>][@<ref>]                GitHub short form. Local install; defaults to repo default branch.',
   '  (no source)                                   Install whatever is currently open in this session',
   '',
   'Path rules for GitHub directory installs:',
@@ -37,8 +37,9 @@ const INSTALL_HELP = [
   '  --app | --tool  Force package type when frontmatter is missing or wrong.',
   '  --as <name>     Install under a custom local registry name (lets two apps that share',
   '                  a frontmatter `name` but differ by `namespace` live side by side).',
-  '  --link          Force URL-shortcut mode — no files copied; /open re-fetches from the URL.',
-  '                  Requires an http(s) source.',
+  '  --link          Force URL-shortcut mode for manifest URLs — no files copied; /open re-fetches.',
+  '                  Plain http(s) markdown pages already use link mode by default.',
+  '  --local         Force local-copy mode for a URL source — snapshot into packages/<name>/.',
   '  --help / -h     Show this help.',
   '',
   'When the source returns a JSON install manifest (`{files:[...], delivery:...}`), the daemon picks',
@@ -88,14 +89,25 @@ export async function cmdInstall(
   }
 
   // --link: install as URL shortcut (no local file copy).
-  // Tristate: true = force link, undefined = let manifest decide, false = future --local.
+  // --local: force local-copy mode for URL sources.
   let linkOpt: boolean | undefined;
+  let localOpt: boolean | undefined;
   if ('link' in parsed.flags) {
     linkOpt = true;
     if (!parsed.bareFlags.has('link')) {
       // --link consumed the source token; fold it back
       source = source ? `${parsed.flags.link} ${source}` : String(parsed.flags.link);
     }
+  }
+  if ('local' in parsed.flags) {
+    localOpt = true;
+    if (!parsed.bareFlags.has('local')) {
+      // --local consumed the source token; fold it back
+      source = source ? `${parsed.flags.local} ${source}` : String(parsed.flags.local);
+    }
+  }
+  if (linkOpt && localOpt) {
+    return err('Choose either --link or --local, not both.', 'COMMAND_UNSUPPORTED');
   }
 
   // --as <name>: override the local registry key (e.g. install cookbook/weather
@@ -132,7 +144,7 @@ export async function cmdInstall(
     : path.resolve(deriveCwd(session, loader), source);
 
   try {
-    const result = await installPackage(resolvedSource, { type: typeOpt, link: linkOpt, as: asOpt }, loader);
+    const result = await installPackage(resolvedSource, { type: typeOpt, link: linkOpt, local: localOpt, as: asOpt }, loader);
     const localPath = result.localUri.startsWith('file://')
       ? new URL(result.localUri).pathname
       : result.localUri;

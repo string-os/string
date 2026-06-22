@@ -78,20 +78,28 @@ title: Packages
 /install ./weather.md                   # 로컬 파일
 /install --app ./weather.md             # 명시적으로 앱
 /install --tool ./translate.md          # 명시적으로 도구
-/install https://example.com/a.md       # 단일 마크다운 URL
+/install https://example.com/a.md       # 단일 마크다운 URL (기본 link 설치)
 /install https://hub.example/api/install/cookbook/weather  # install manifest URL
 /install https://github.com/owner/repo/tree/main/apps/foo   # GitHub 디렉토리 (다중 파일 자동)
 /install https://github.com/owner/repo/blob/main/apps/foo/string.md  # GitHub 단일 파일
 /install gh:owner/repo/apps/foo         # 위와 동일, 단축형 (기본 브랜치)
 /install gh:owner/repo/apps/foo@v1.0    # 태그/브랜치/SHA 지정
 /install --link https://hub.example/api/install/cookbook/weather  # URL 단축키로 등록 (로컬 복사 X)
+/install --local https://example.com/a.md  # 단일 마크다운 URL을 로컬 snapshot으로 설치
 /install --as weather-2 ./other.md      # 로컬 이름 강제 지정
 /install                                # 현재 열린 문서를 설치
 ```
 
-`--link`로 등록한 패키지는 매번 원격 URL을 다시 읽기 때문에 remote SFMD로
-취급된다. HTTP action은 실행할 수 있지만 `CLI` action은 실행할 수 없다.
-로컬 명령을 제공하는 app/tool은 로컬 복사 설치를 사용해야 한다.
+HTTP(S) 단일 마크다운 URL은 기본적으로 link 설치된다. 매번 원격 URL을
+다시 읽기 때문에 remote SFMD로 취급된다. HTTP action은 실행할 수 있지만
+`CLI` action은 실행할 수 없다. 로컬 명령을 제공하는 app/tool은 로컬 파일,
+GitHub 디렉토리, 또는 `delivery: local` manifest 설치를 사용해야 한다.
+
+GitHub 설치 URL(`github.com/...`, `gh:...`, `raw.githubusercontent.com/...`)은
+일반 웹 페이지가 아니라 패키지 소스로 취급하므로 기본적으로 로컬 설치된다.
+따라서 GitHub에서 설치한 앱은 검토 후 CLI action을 실행할 수 있다. 매번
+GitHub의 최신 파일을 다시 읽는 linked app으로 쓰고 싶을 때만 `--link`를
+명시한다.
 
 ### GitHub URL 설치
 
@@ -148,7 +156,8 @@ auth token` 출력값이나 PAT 둘 다 동작 (5000 req/hr).
 |--------|------|
 | `--app` / `--tool` | frontmatter `type` 명시적 override |
 | `--as <local-name>` | 로컬 레지스트리 키 강제 지정. 같은 (ns, name) 충돌 회피용 |
-| `--link` | URL을 그대로 레지스트리에 등록, 로컬 복사 안 함. `/open app:<name>`마다 publisher 서버에서 fetch. http(s) URL 전용. HTTP action만 실행 가능하고 `CLI` action은 차단됨 |
+| `--link` | URL을 그대로 레지스트리에 등록, 로컬 복사 안 함. manifest URL에 link 모드를 강제할 때 사용. 단일 HTTP(S) 마크다운 페이지는 기본적으로 link 설치됨 |
+| `--local` | URL source를 로컬 snapshot으로 강제 설치. 단일 HTTP(S) 마크다운 페이지도 `packages/<name>/string.md`로 복사됨 |
 
 ### /uninstall
 

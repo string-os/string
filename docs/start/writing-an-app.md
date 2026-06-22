@@ -282,10 +282,13 @@ small CLI tool installed on your machine.
 Distribute by:
 
 - **Local file** — `string '/install --app ./apps/myapp/string.md'`
-- **HTTPS URL** — `string '/install --app https://example.com/myapp/string.md'`.
-  For multi-file apps, the URL points at a manifest declaring sibling
-  files; the runtime fetches each and writes them into the package
-  directory.
+- **HTTPS markdown URL** — `string '/install https://example.com/myapp/string.md'`.
+  Single-page web apps install as URL links by default, so `/open app:<name>`
+  re-fetches the latest page.
+- **HTTPS manifest URL** — use an install manifest for multi-file apps. The
+  manifest's `delivery` field decides whether String links the URL or writes
+  files into the package directory. Use `--local` only when you intentionally
+  want to snapshot a single web page into `packages/<name>/`.
 
 Signed packages with proper provenance land in 0.2.
 

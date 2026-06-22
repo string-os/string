@@ -345,7 +345,7 @@ A topic processes one command at a time. If a second command arrives while the f
 { "error": "QUEUE_FULL", "message": "Topic default:main has 5 commands queued. Try again later." }
 ```
 
-If a queued request waits longer than `QUEUE_WAIT_TIMEOUT_MS = 30000` (30 seconds), it times out:
+If a queued request waits longer than `QUEUE_WAIT_TIMEOUT_MS = 120000` (120 seconds), it times out:
 
 **Error 504:**
 ```json

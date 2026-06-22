@@ -296,7 +296,7 @@ export class Loader {
     return new Promise((resolve) => {
       const child = spawn('/bin/bash', ['-c', commandTemplate], {
         cwd,
-        timeout: 30_000,
+        timeout: 120_000,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
       let output = '';
