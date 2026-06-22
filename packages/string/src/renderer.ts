@@ -16,6 +16,7 @@ import { extract } from '@string-os/core';
 import { toSlug } from '@string-os/core';
 import type { LoadedDocument } from './types.js';
 import type { Loader } from './loader.js';
+import { actionCommand } from './commands/builtins.js';
 
 // [@shortcut_id Label](href) — IDs may include dots for namespaced menu entries
 const SHORTCUT_RE = /\[(@[a-zA-Z0-9._-]+)\s+([^\]]+)\]\([^)]+\)/g;
@@ -328,10 +329,10 @@ export async function render(
   if (!blockId && doc.actions.length > 0) {
     // Names only — full signatures are noisy at the top of every render.
     // Authors should put usage examples in the body (Quick start). For the
-    // exact field list, run `/act.<name> --help` (single) or `/act --help`
+    // exact field list, run `/<name> --help` (single) or `/act --help`
     // (all actions on the current doc).
-    const names = doc.actions.map(a => a.id).join(', ');
-    hints.push(`[actions] ${names}  ·  /act --help (all)  ·  /act.<name> --help`);
+    const names = doc.actions.map(a => actionCommand(a.id)).join(', ');
+    hints.push(`[actions] ${names}  ·  /act --help (all)`);
   }
   // Missing-env warning: cross-check `requires:` frontmatter against env store.
   // Surfaces a clear "set this var" hint at /open time so the agent doesn't
@@ -417,13 +418,14 @@ export function renderActions(doc: LoadedDocument, singleId?: string): string {
 
   return list
     .map(a => {
-      // Header is the action's verb only — `/act.<id>`. The method (POST,
-      // CLI, etc.) and the URL/template are *implementation* details, not
+      // Header is the action's verb only. Prefer topic-local shorthand when
+      // it does not collide with a global command; keep `/act.<id>` otherwise.
+      // The method (POST, CLI, etc.) and the URL/template are *implementation* details, not
       // part of the call interface the agent needs to invoke the action.
       // Hiding them keeps the help surface focused on "what to call, what
       // to pass". For inspecting the underlying request, use `/source` to
       // dump the raw .md file.
-      const header = `/act.${a.id}`;
+      const header = actionCommand(a.id);
       const desc = a.description ? `\n   ${a.description}` : '';
       const fields =
         a.fields.length > 0

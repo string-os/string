@@ -96,6 +96,54 @@ await section('Dot-notation routing (/act.name)', async () => {
   assert(r.content.includes('No document open'), 'action handler asks for document');
 });
 
+await section('Action shorthand routing inside any document topic', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-action-shorthand-');
+  const appPath = path.join(tmpDir, 'app.md');
+  fs.writeFileSync(appPath, [
+    '# Local Actions',
+    '',
+    '```act.send',
+    'CLI echo send:$ARGS',
+    '```',
+    '',
+    '```act.read',
+    'CLI echo read:$ARGS',
+    '```',
+    '',
+    '```act.open',
+    'CLI echo action-open:$ARGS',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  const opened = await b.exec(`/open ${appPath}`, 'notes');
+  assert(opened.ok, 'open action doc ok');
+  assert(opened.content.includes('/send'), 'renderer shows shorthand');
+  assert(opened.content.includes('/read'), 'hub-local verb can render as shorthand outside hub');
+  assert(opened.content.includes('/act.open'), 'global built-in collision renders canonical act form');
+
+  const send = await b.exec('/send "hello world"', 'notes');
+  assert(send.ok, 'shorthand action ok');
+  assert(send.content.includes('send:hello world'), 'shorthand passes args');
+
+  const read = await b.exec('/read item-1', 'notes');
+  assert(read.ok, 'hub-local name works as document shorthand');
+  assert(read.content.includes('read:item-1'), 'hub-local name passes args');
+
+  const openCollision = await b.exec('/open "not action"', 'notes');
+  assert(!openCollision.content.includes('action-open'), 'global built-in wins over action shorthand');
+
+  const canonical = await b.exec('/act.open explicit', 'notes');
+  assert(canonical.ok, 'canonical collision action still works');
+  assert(canonical.content.includes('action-open:explicit'), 'canonical action invoked');
+
+  const unknown = await b.exec('/missing', 'notes');
+  assert(!unknown.ok, 'unknown shorthand rejected');
+  assert(unknown.content.includes('Actions here: /send, /read, /act.open'), 'unknown command lists action forms');
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
 await section('POSIX flag parsing', async () => {
   // This is an internal function test via dispatch
   const b = mkBrowser();

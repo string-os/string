@@ -14,6 +14,7 @@ import {
   resolveFilePath,
   validateWorkspaceBoundary,
 } from './helpers.js';
+import { actionCommand } from './builtins.js';
 
 // ─── /info ────────────────────────────────────────────────────────────────────
 
@@ -275,7 +276,7 @@ export function cmdHelp(session: Session, mode?: 'bash'): CommandResult {
         return `${alias}--${f.name} <${f.type}>`;
       });
       const flagStr = flags.length > 0 ? ' ' + flags.join(' ') : '';
-      lines.push(`/act.${a.id}${flagStr}`);
+      lines.push(`${actionCommand(a.id)}${flagStr}`);
     }
   }
 
