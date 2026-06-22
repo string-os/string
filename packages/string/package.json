@@ -1,6 +1,6 @@
 {
   "name": "@string-os/string",
-  "version": "0.1.11",
+  "version": "0.1.12",
   "description": "String runtime — an OS for AI agents, built on SFMD",
   "type": "module",
   "exports": {
