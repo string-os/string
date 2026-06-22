@@ -224,7 +224,7 @@ function getOrCreateTopic(runtime: RuntimeEntry, topic: string): TopicState {
 }
 
 const MAX_QUEUE_SIZE = 5;
-const QUEUE_WAIT_TIMEOUT_MS = 30_000; // max time a command waits in queue
+const QUEUE_WAIT_TIMEOUT_MS = 120_000; // max time a command waits in queue
 
 /** Extract first line of command, truncated to 80 chars */
 function truncateCmd(cmd: string): string {

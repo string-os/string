@@ -10,7 +10,7 @@ import type { CommandResult, StringErrorCode } from '../types.js';
 import { ok, err } from './helpers.js';
 import { cmdHelp, cmdBashInfo } from './info.js';
 
-const EXEC_TIMEOUT_MS = 30_000;
+const EXEC_TIMEOUT_MS = 120_000;
 
 // ─── /exec ─────────────────────────────────────────────────────────────────
 

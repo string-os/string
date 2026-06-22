@@ -1,6 +1,7 @@
 /**
  * String — Package Installer
- * Installs apps/tools by copying source to {home}/packages/ and registering in config.json.
+ * Installs apps/tools by registering them in config.json and, when needed,
+ * staging a local copy under {home}/packages/.
  * `home` here is the String agent's home (already a String-only directory).
  */
 
@@ -33,6 +34,26 @@ function readManifestDelivery(rawSource: string | undefined): 'link' | 'local' |
     if (m.delivery === 'local' || m.delivery === 'any') return 'local';
   } catch { /* not JSON — not a manifest */ }
   return undefined;
+}
+
+function isInstallManifest(rawSource: string | undefined): boolean {
+  if (!rawSource) return false;
+  try {
+    const m = JSON.parse(rawSource);
+    return Boolean(m && Array.isArray(m.files));
+  } catch {
+    return false;
+  }
+}
+
+function isGithubInstallSource(source: string): boolean {
+  if (parseGithubUrl(source)) return true;
+  try {
+    const url = new URL(source);
+    return url.hostname === 'raw.githubusercontent.com';
+  } catch {
+    return false;
+  }
 }
 
 /**
@@ -69,13 +90,17 @@ async function readInstalledIdentity(
  * Flow:
  * 1. Load the source document via loader
  * 2. Parse frontmatter for type/name
- * 3. Copy to {home}/packages/{name}/string.md (or skip if --link)
+ * 3. Link HTTP markdown pages by default, or copy local/manifest sources
  * 4. Register in config.json
  *
  * --link: register the source URL directly without copying files locally.
  *         /open app:name will fetch from the URL each time. Useful for
  *         external apps where the publisher wants their own server to
  *         remain the canonical source.
+ *
+ * --local: force a URL source to be copied into packages/{name}/. Useful for
+ *          intentionally snapshotting a web page or installing a trusted
+ *          single-file remote app with local CLI actions.
  *
  * --as <local-name>: override the registry key (default: frontmatter.name).
  *         Used to install two apps that share a `name` but differ by
@@ -85,7 +110,7 @@ async function readInstalledIdentity(
  */
 export async function installPackage(
   source: string,
-  opts: { type?: 'app' | 'tool'; link?: boolean; as?: string },
+  opts: { type?: 'app' | 'tool'; link?: boolean; local?: boolean; as?: string },
   loader: Loader,
 ): Promise<InstallResult> {
   // --link only makes sense for http(s) URLs. Check up-front so an agent who
@@ -103,6 +128,7 @@ export async function installPackage(
   let loadSource = source;
   let loaded: import('./loader.js').LoadResult;
   const ghParsed = parseGithubUrl(source);
+  const githubInstallSource = isGithubInstallSource(source);
   if (ghParsed) {
     const ghResult = await synthesizeGithubSource(ghParsed, loader);
     if ('singleFileRawUrl' in ghResult) {
@@ -224,21 +250,36 @@ export async function installPackage(
   };
 
   // Install mode priority (first non-null wins):
-  //   1. opts.link — explicit CLI flag (--link / future --local override)
+  //   1. opts.link / opts.local — explicit CLI flags
   //   2. manifest.delivery — publisher hint baked into the install manifest
   //      ("link" → register URL, "local"/"any" → download)
-  //   3. default — local copy (matches pre-manifest behavior)
+  //   3. plain http(s) markdown page — link by default, because the web page
+  //      is the canonical app surface and /open app:name should re-fetch it
+  //   4. default — local copy (local paths, GitHub install sources, and
+  //      manifest-local installs)
   //
   // Treating manifest.delivery as advisory keeps the daemon registry-agnostic:
   // any HTTP source emitting a generic { files: [...], delivery: ... } JSON
-  // gets the same handling. Same pattern as type/name from frontmatter.
-  const shouldLink = opts.link ?? readManifestDelivery(loaded.rawSource) === 'link';
+  // gets the same handling. Plain markdown web pages are different: they are
+  // already the app surface, so installing them records a URL shortcut.
+  // GitHub URLs are package sources, not web app surfaces, so they install
+  // locally by default and can run CLI actions after review.
+  const manifestDelivery = readManifestDelivery(loaded.rawSource);
+  const manifestSource = isInstallManifest(loaded.rawSource);
+  const httpSource = source.startsWith('http://') || source.startsWith('https://');
+  const shouldLink = opts.link
+    ?? (opts.local ? false : undefined)
+    ?? (manifestDelivery !== undefined ? manifestDelivery === 'link' : (!manifestSource && httpSource && !githubInstallSource));
 
   // Link mode: register the URL directly, skip local file copy.
   // /open will re-fetch from the URL each time. (Scheme check runs above so
   // a non-URL source fails before we waste a loader.load round-trip.)
   if (shouldLink) {
+    if (!httpSource) {
+      throw new Error('Link installs require an http(s) URL source.');
+    }
     removeDuplicates(source);
+    await fs.rm(path.join(loader.home, 'packages', name), { recursive: true, force: true });
     loader.envStore.setPackage(registryType as 'apps' | 'tools', name, source);
     return { name, type, localUri: source, linked: true };
   }

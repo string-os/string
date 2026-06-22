@@ -183,6 +183,171 @@ await section('/install --app — no source, current doc', async () => {
   fs.rmSync(tmpDir, { recursive: true });
 });
 
+await section('/install — plain web page installs as URL shortcut by default', async () => {
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-install-web-link-');
+  let version = 'v1';
+  const appSource = () => [
+    '---',
+    'name: webboard',
+    'namespace: agentnews',
+    'type: app',
+    '---',
+    '# Web Board',
+    '',
+    `Current version: ${version}`,
+  ].join('\n');
+
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/markdown' });
+    res.end(appSource());
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+  const url = `http://127.0.0.1:${port}/finance.md`;
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${url}`);
+  const install = await b.exec('/install');
+  assert(install.ok, `install ok. got: ${install.content}`);
+  assert(install.content.includes('Linked app:webboard'), 'output shows linked app');
+
+  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
+  assert(config.apps?.webboard === url, 'registry stores the URL, not a local file');
+  assert(!fs.existsSync(path.join(tmpDir, 'packages', 'webboard')), 'no local package copy');
+
+  version = 'v2';
+  const opened = await b.exec('/open app:webboard');
+  server.close();
+
+  assert(opened.ok, `open linked app ok. got: ${opened.content}`);
+  assert(opened.content.includes('Current version: v2'), 'linked app re-fetches latest source');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+await section('/install --local — plain web page snapshots into packages dir', async () => {
+  const http = await import('http');
+  const tmpDir = fs.mkdtempSync('/tmp/string-install-web-local-');
+  const appSource = [
+    '---',
+    'name: websnapshot',
+    'namespace: agentnews',
+    'type: app',
+    '---',
+    '# Web Snapshot',
+    '',
+    'Current version: v1',
+  ].join('\n');
+
+  const server = http.createServer((_req, res) => {
+    res.writeHead(200, { 'Content-Type': 'text/markdown' });
+    res.end(appSource);
+  });
+  await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
+  const addr = server.address();
+  const port = typeof addr === 'object' && addr ? addr.port : 0;
+  const url = `http://127.0.0.1:${port}/snapshot.md`;
+
+  const b = new Browser({ home: tmpDir });
+  const install = await b.exec(`/install --local ${url}`);
+  server.close();
+
+  assert(install.ok, `install ok. got: ${install.content}`);
+  assert(install.content.includes('Installed app:websnapshot'), 'output shows local install');
+
+  const installedPath = path.join(tmpDir, 'packages', 'websnapshot', 'string.md');
+  assert(fs.existsSync(installedPath), 'file copied to packages dir');
+  const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
+  assert(config.apps?.websnapshot === `file://${installedPath}`, 'registry stores local file URI');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+await section('/install — GitHub blob URL installs locally by default', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-install-github-blob-local-');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === 'https://raw.githubusercontent.com/owner/repo/main/apps/foo/string.md') {
+      return new Response([
+        '---',
+        'name: githubblob',
+        'namespace: github-test',
+        'type: app',
+        '---',
+        '# GitHub Blob',
+        '',
+        '```act.run',
+        'CLI echo github-blob-local',
+        '```',
+      ].join('\n'), { status: 200, headers: { 'Content-Type': 'text/markdown' } });
+    }
+    return originalFetch(input);
+  }) as typeof fetch;
+
+  try {
+    const b = new Browser({ home: tmpDir });
+    const install = await b.exec('/install https://github.com/owner/repo/blob/main/apps/foo/string.md');
+    assert(install.ok, `install ok. got: ${install.content}`);
+    assert(install.content.includes('Installed app:githubblob'), 'GitHub blob installs locally');
+    assert(!install.content.includes('Linked app:githubblob'), 'GitHub blob is not linked by default');
+
+    const installedPath = path.join(tmpDir, 'packages', 'githubblob', 'string.md');
+    assert(fs.existsSync(installedPath), 'GitHub blob copied to packages dir');
+    const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
+    assert(config.apps?.githubblob === `file://${installedPath}`, 'registry stores local file URI');
+
+    const action = await b.exec('/act.run --', 'app:githubblob');
+    assert(action.ok, `local GitHub install can run CLI. got: ${action.content}`);
+    assert(action.content.includes('github-blob-local'), 'CLI output returned');
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(tmpDir, { recursive: true });
+  }
+});
+
+await section('/install — raw GitHub URL installs locally by default', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-install-raw-github-local-');
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = (async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url === 'https://raw.githubusercontent.com/owner/repo/main/apps/bar/string.md') {
+      return new Response([
+        '---',
+        'name: rawgithub',
+        'namespace: github-test',
+        'type: app',
+        '---',
+        '# Raw GitHub',
+      ].join('\n'), { status: 200, headers: { 'Content-Type': 'text/markdown' } });
+    }
+    return originalFetch(input);
+  }) as typeof fetch;
+
+  try {
+    const b = new Browser({ home: tmpDir });
+    const install = await b.exec('/install https://raw.githubusercontent.com/owner/repo/main/apps/bar/string.md');
+    assert(install.ok, `install ok. got: ${install.content}`);
+    assert(install.content.includes('Installed app:rawgithub'), 'raw GitHub installs locally');
+    assert(fs.existsSync(path.join(tmpDir, 'packages', 'rawgithub', 'string.md')), 'raw GitHub copied to packages dir');
+  } finally {
+    globalThis.fetch = originalFetch;
+    fs.rmSync(tmpDir, { recursive: true });
+  }
+});
+
+await section('/install — --link and --local conflict', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-install-link-local-conflict-');
+  const b = new Browser({ home: tmpDir });
+  const r = await b.exec('/install --link --local https://example.com/app.md');
+  assert(!r.ok, 'conflicting flags fail');
+  assert(r.content.includes('Choose either --link or --local'), 'error explains conflict');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
 await section('/install — no source, no doc open → error', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-install-nodoc-');
   const b = new Browser({ home: tmpDir });

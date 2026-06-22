@@ -33,7 +33,7 @@ interface PtyModule {
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const MARKER_PREFIX = '__STRING_END_';
-const CMD_TIMEOUT_MS = 30_000;
+const CMD_TIMEOUT_MS = 120_000;
 const COLS = 200;
 const ROWS = 24;
 
