@@ -956,3 +956,29 @@ await section('install collision — cross-registry (app name vs tool name)', as
 
   fs.rmSync(tmpDir, { recursive: true });
 });
+
+await section('Install makes app source read-only (write bits stripped, execute preserved)', async () => {
+  const home = fs.mkdtempSync('/tmp/string-ro-install-');
+  const src = path.join(home, 'src', 'rotest');
+  fs.mkdirSync(src, { recursive: true });
+  fs.writeFileSync(path.join(src, 'string.md'), ['---','name: rotest','type: app','---','# ro','```act.go','CLI ./run.sh','```'].join('\n'));
+  fs.writeFileSync(path.join(src, 'run.sh'), '#!/bin/bash\necho ran\n');
+  fs.chmodSync(path.join(src, 'run.sh'), 0o755);
+
+  const b = new Browser({ home });
+  await b.exec(`/install ${path.join(src, 'string.md')}`);
+  const pkg = path.join(home, 'packages', 'rotest');
+
+  assert(!(fs.statSync(path.join(pkg, 'string.md')).mode & 0o222), 'string.md has no write bits');
+  const sh = fs.statSync(path.join(pkg, 'run.sh')).mode;
+  assert(!!(sh & 0o100) && !(sh & 0o222), 'executable helper keeps exec bit, loses write bit');
+
+  assert((await b.exec('/act.go', 'app:rotest')).content.includes('ran'), 'executable helper still runs after read-only');
+
+  // uninstall + reinstall still work despite read-only files
+  await b.exec('/uninstall rotest');
+  assert(!fs.existsSync(pkg), 'uninstall removes read-only package');
+  assert((await b.exec(`/install ${path.join(src, 'string.md')}`)).ok, 'reinstall over read-only works');
+
+  fs.rmSync(home, { recursive: true, force: true });
+});

@@ -46,6 +46,32 @@ function isInstallManifest(rawSource: string | undefined): boolean {
   }
 }
 
+/**
+ * Recursively strip write permission bits from every file under `dir`,
+ * preserving read + execute. Directories are left writable so the install can
+ * still be removed/replaced by /uninstall + reinstall. Best-effort: a chmod
+ * failure (e.g. odd FS) must not fail the install.
+ */
+async function stripWriteBits(dir: string): Promise<void> {
+  let entries: import('fs').Dirent[];
+  try {
+    entries = await fs.readdir(dir, { withFileTypes: true });
+  } catch {
+    return;
+  }
+  for (const entry of entries) {
+    const full = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await stripWriteBits(full);
+    } else if (entry.isFile()) {
+      try {
+        const { mode } = await fs.stat(full);
+        await fs.chmod(full, mode & ~0o222);
+      } catch { /* best-effort */ }
+    }
+  }
+}
+
 function isGithubInstallSource(source: string): boolean {
   if (parseGithubUrl(source)) return true;
   try {
@@ -386,6 +412,12 @@ export async function installPackage(
     // target or a single file; replacing a directory requires explicit rm first.
     await fs.rm(packagesDir, { recursive: true, force: true });
     await fs.rename(stagingDir, packagesDir);
+    // Make the installed source read-only: an app's CLI actions run with cwd =
+    // its own dir, so without this an action could silently mutate its own
+    // source. Apps write to $STRING_WORK_DIR instead. We strip *write* bits only
+    // (preserve read + execute, so helper scripts like `./kanban` still run) and
+    // leave directories writable so /uninstall + reinstall can still remove files.
+    await stripWriteBits(packagesDir);
   } catch (err) {
     // Any failure: drop the staging dir so we leave no partial bytes behind.
     // The live packages/{name}/ is untouched (we haven't renamed yet).

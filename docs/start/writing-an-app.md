@@ -180,6 +180,32 @@ When an action fails AND the package has a `requirements.md`, the error
 response auto-appends `Setup info: /open requirements.md`. The agent
 knows where to go.
 
+## App directory vs working directory
+
+A `CLI` action runs with its **working directory set to the app's own directory**,
+so it references shipped files with plain relative paths — `node ./helper.mjs`,
+`cat ./template.txt`. No absolute paths, no `cd`.
+
+The app directory is **read-only**: the installer strips write bits from the source
+(execute bits are preserved, so `./wrapper` still runs). This keeps an app from
+silently mutating or polluting its own source. Anything an action needs to *create*
+goes under **`$STRING_WORK_DIR`** — a writable scratch directory String provides:
+
+```
+```act.scan
+CLI node ./scan.mjs > "$STRING_WORK_DIR/last-run.json" && echo saved
+```
+```
+
+The rule is one line: **read relative from the app dir; write under `$STRING_WORK_DIR`.**
+`$STRING_WORK_DIR` is keyed per `(agent, app, config)` and persists between runs, so the
+same app under different configs (`app:foo:a` vs `app:foo:b`) keeps separate state. The
+app's own directory is also available as `$STRING_APP_DIR` if you need an explicit path.
+
+For data that lives in a **different** repo or directory (not the app's own files and not
+scratch — e.g. a content repo the app reads), take a `requires:` env var pointing at it
+and `/set` it once per install; don't hardcode an absolute path.
+
 ## Multi-file apps
 
 One `string.md` is fine for hello-world. Real apps usually split. The
