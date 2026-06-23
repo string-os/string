@@ -290,24 +290,26 @@ await section('events — watchAgentEvents self-reconnects after the stream drop
   const watcher = client.watchAgentEvents(PORT, 't', e => received.push(e.text), () => {},
     { minReconnectMs: 100, maxReconnectMs: 500, idleTimeoutMs: 4000 });
 
-  await new Promise(r => setTimeout(r, 300));
+  // Poll for conditions (not fixed sleeps) so the test is deterministic on slow CI.
+  await waitFor(() => received.length === 1, 5000);
   assert(received.length === 1, 'received the event on first connect');
 
   // Simulate a daemon restart: drop the server, bring it back on the same port.
   server!.closeAllConnections?.(); await new Promise<void>(r => server!.close(() => r()));
-  await new Promise(r => setTimeout(r, 400));
+  await wait(200);
   server = await mkServer();
-  await new Promise(r => setTimeout(r, 700));
 
+  await waitFor(() => received.length >= 2, 8000);
   assert(received.length >= 2, 'watcher auto-reconnected and delivered a post-restart event');
 
   watcher.close();
-  await new Promise(r => setTimeout(r, 200));
+  await wait(300);
   const afterClose = received.length;
   // After close(), bringing the server up again must NOT resurrect delivery.
+  // (A negative assertion — give it well over the backoff window to (not) fire.)
   server!.closeAllConnections?.(); await new Promise<void>(r => server!.close(() => r()));
   server = await mkServer();
-  await new Promise(r => setTimeout(r, 400));
+  await wait(1000);
   assert(received.length === afterClose, 'close() stops reconnecting for good');
 
   server!.closeAllConnections?.(); await new Promise<void>(r => server!.close(() => r()));
