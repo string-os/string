@@ -1561,3 +1561,34 @@ await section('Field default $VAR still resolves (author-controlled, regression)
   assert(parsed.tag === 'resolved-from-store', 'author field-default $VAR still resolves from store');
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
+
+await section('$STRING_WORK_DIR + $STRING_APP_DIR — writable scratch, read-only app cwd, per-config', async () => {
+  const home = fs.mkdtempSync('/tmp/string-workdir-');
+  const appSrc = path.join(home, 'src', 'wdtest');
+  fs.mkdirSync(appSrc, { recursive: true });
+  fs.writeFileSync(path.join(appSrc, 'string.md'), [
+    '---', 'name: wdtest', 'type: app', '---', '# wd',
+    '```act.probe',
+    'CLI echo "APP=$STRING_APP_DIR"; echo "WORK=$STRING_WORK_DIR"; echo hi > "$STRING_WORK_DIR/n.txt"; echo "READ=$(cat $STRING_WORK_DIR/n.txt)"; [ -f ./string.md ] && echo OWN',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home });
+  await b.exec(`/install ${path.join(appSrc, 'string.md')}`);
+
+  const r = await b.exec('/act.probe', 'app:wdtest');
+  assert(/WORK=.*\/\.string-work\/wdtest(\n|$)/.test(r.content), 'work dir keyed by app under .string-work');
+  assert(r.content.includes('READ=hi'), 'action can write to and read back from $STRING_WORK_DIR');
+  assert(r.content.includes('OWN'), 'cwd is the app dir (can read its own ./string.md)');
+  assert(/APP=.*packages\/wdtest/.test(r.content), '$STRING_APP_DIR points at the installed app dir');
+
+  // A named config gets a separate work dir.
+  const r2 = await b.exec('/act.probe', 'app:wdtest:alpha');
+  assert(r2.content.includes('.string-work/wdtest:alpha'), 'named config gets its own work dir');
+
+  const workDirs = fs.readdirSync(path.join(home, '.string-work')).sort();
+  assert(workDirs.includes('wdtest') && workDirs.includes('wdtest:alpha'),
+    'default and named-config work dirs are isolated on disk');
+
+  fs.rmSync(home, { recursive: true, force: true });
+});
