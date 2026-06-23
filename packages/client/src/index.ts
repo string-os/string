@@ -242,62 +242,125 @@ export async function rotateAgentWebhook(port: number, id: string): Promise<Agen
 }
 
 /** GET /events/stream — subscribe to live agent-local events. */
+export interface WatchOptions {
+  /** First reconnect delay after a drop (ms). Doubles per consecutive failure. */
+  minReconnectMs?: number;
+  /** Reconnect delay ceiling (ms). */
+  maxReconnectMs?: number;
+  /** Reconnect if no data (event or heartbeat) arrives within this window (ms).
+   *  The daemon sends a `ping` every 30s, so this catches silently-dead sockets. */
+  idleTimeoutMs?: number;
+}
+
+/**
+ * Subscribe to an agent's event stream, **self-healing across drops**.
+ *
+ * The daemon's SSE stream dies whenever the daemon restarts (e.g. every release)
+ * or the socket is reset. This watcher reconnects on its own with exponential
+ * backoff — not a tight loop — and uses the daemon's 30s heartbeat to detect a
+ * half-open connection that never fired an error. Backoff resets once data flows
+ * again. `close()` stops reconnecting for good.
+ *
+ * Note: the daemon does not replay missed events on reconnect; events that arrived
+ * during a gap stay in the inbox (read via the events API). This watcher restores
+ * *live* delivery, it does not backfill.
+ */
 export function watchAgentEvents(
   port: number,
   agentId: string,
   onEvent: (event: AgentEvent) => void,
   onError?: (error: Error) => void,
+  options: WatchOptions = {},
 ): EventWatcher {
+  const minReconnectMs = options.minReconnectMs ?? 2_000;
+  const maxReconnectMs = options.maxReconnectMs ?? 30_000;
+  const idleTimeoutMs = options.idleTimeoutMs ?? 75_000; // > 2 missed 30s heartbeats
+
   let closed = false;
+  let backoff = minReconnectMs;
+  let current: http.ClientRequest | null = null;
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  let idleTimer: ReturnType<typeof setTimeout> | null = null;
   const state = { event: '', data: '', buffer: '' };
 
-  const req = http.request(
-    {
-      hostname: '127.0.0.1',
-      port,
-      method: 'GET',
-      path: '/events/stream',
-      headers: { 'X-Agent-Id': agentId },
-    },
-    (res) => {
-      if ((res.statusCode ?? 0) !== 200) {
-        const chunks: Buffer[] = [];
-        res.on('data', c => chunks.push(c));
-        res.on('end', () => {
-          if (!closed) {
-            const body = Buffer.concat(chunks).toString('utf-8');
-            onError?.(new Error(`event stream failed (${res.statusCode ?? 0}): ${body}`));
-          }
-        });
-        return;
-      }
+  const clearIdle = () => {
+    if (idleTimer) { clearTimeout(idleTimer); idleTimer = null; }
+  };
 
-      res.setEncoding('utf-8');
-      res.on('data', (chunk: string) => {
-        parseSSEChunk(chunk, state, (eventName, data) => {
-          if (eventName !== 'event') return;
-          try {
-            onEvent(JSON.parse(data) as AgentEvent);
-          } catch (e) {
-            onError?.(e instanceof Error ? e : new Error(String(e)));
-          }
-        });
-      });
-      res.on('error', e => {
-        if (!closed) onError?.(e);
-      });
-    },
-  );
+  // No event or heartbeat within the idle window → the socket is dead but never
+  // told us. Destroy it; the 'error'/'close' path then schedules a reconnect.
+  const bumpIdle = () => {
+    clearIdle();
+    idleTimer = setTimeout(() => { current?.destroy(); }, idleTimeoutMs);
+  };
 
-  req.on('error', e => {
-    if (!closed) onError?.(e);
-  });
-  req.end();
+  const scheduleReconnect = () => {
+    if (closed || reconnectTimer) return;
+    clearIdle();
+    const delay = backoff;
+    backoff = Math.min(backoff * 2, maxReconnectMs); // grows only while failing
+    reconnectTimer = setTimeout(() => { reconnectTimer = null; connect(); }, delay);
+  };
+
+  const connect = () => {
+    if (closed) return;
+    state.event = ''; state.data = ''; state.buffer = '';
+
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        method: 'GET',
+        path: '/events/stream',
+        headers: { 'X-Agent-Id': agentId },
+      },
+      (res) => {
+        if ((res.statusCode ?? 0) !== 200) {
+          const chunks: Buffer[] = [];
+          res.on('data', c => chunks.push(c));
+          res.on('end', () => {
+            if (!closed) {
+              const body = Buffer.concat(chunks).toString('utf-8');
+              onError?.(new Error(`event stream failed (${res.statusCode ?? 0}): ${body}`));
+            }
+            scheduleReconnect();
+          });
+          res.on('error', () => scheduleReconnect());
+          return;
+        }
+
+        bumpIdle();
+        res.setEncoding('utf-8');
+        res.on('data', (chunk: string) => {
+          backoff = minReconnectMs; // data flowing → connection is healthy
+          bumpIdle();
+          parseSSEChunk(chunk, state, (eventName, data) => {
+            if (eventName !== 'event') return; // 'ready' / 'ping' are control frames
+            try {
+              onEvent(JSON.parse(data) as AgentEvent);
+            } catch (e) {
+              onError?.(e instanceof Error ? e : new Error(String(e)));
+            }
+          });
+        });
+        res.on('end', () => { if (!closed) scheduleReconnect(); });
+        res.on('error', e => { if (!closed) { onError?.(e); scheduleReconnect(); } });
+      },
+    );
+
+    req.on('error', e => { if (!closed) { onError?.(e); scheduleReconnect(); } });
+    req.end();
+    current = req;
+  };
+
+  connect();
 
   return {
     close() {
       closed = true;
-      req.destroy();
+      if (reconnectTimer) { clearTimeout(reconnectTimer); reconnectTimer = null; }
+      clearIdle();
+      current?.destroy();
     },
   };
 }

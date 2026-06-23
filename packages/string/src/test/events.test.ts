@@ -268,3 +268,47 @@ await section('events — local webhook appends text to current agent inbox', as
     fs.rmSync(env.root, { recursive: true, force: true });
   }
 });
+
+await section('events — watchAgentEvents self-reconnects after the stream drops', async () => {
+  const PORT = 39411;
+  let server: http.Server | null = null;
+  const mkServer = () => new Promise<http.Server>((resolve) => {
+    const s = http.createServer((req, res) => {
+      if (req.url === '/events/stream') {
+        res.writeHead(200, { 'Content-Type': 'text/event-stream' });
+        res.write('event: ready\ndata: {"agent_id":"t"}\n\n');
+        setTimeout(() => res.write(
+          `event: event\ndata: ${JSON.stringify({ id: 'e', agentId: 't', text: 'tick', source: 'test', receivedAt: 'now' })}\n\n`,
+        ), 50);
+      } else { res.writeHead(404); res.end(); }
+    });
+    s.listen(PORT, '127.0.0.1', () => resolve(s));
+  });
+
+  const received: string[] = [];
+  server = await mkServer();
+  const watcher = client.watchAgentEvents(PORT, 't', e => received.push(e.text), () => {},
+    { minReconnectMs: 100, maxReconnectMs: 500, idleTimeoutMs: 4000 });
+
+  await new Promise(r => setTimeout(r, 300));
+  assert(received.length === 1, 'received the event on first connect');
+
+  // Simulate a daemon restart: drop the server, bring it back on the same port.
+  server!.closeAllConnections?.(); await new Promise<void>(r => server!.close(() => r()));
+  await new Promise(r => setTimeout(r, 400));
+  server = await mkServer();
+  await new Promise(r => setTimeout(r, 700));
+
+  assert(received.length >= 2, 'watcher auto-reconnected and delivered a post-restart event');
+
+  watcher.close();
+  await new Promise(r => setTimeout(r, 200));
+  const afterClose = received.length;
+  // After close(), bringing the server up again must NOT resurrect delivery.
+  server!.closeAllConnections?.(); await new Promise<void>(r => server!.close(() => r()));
+  server = await mkServer();
+  await new Promise(r => setTimeout(r, 400));
+  assert(received.length === afterClose, 'close() stops reconnecting for good');
+
+  server!.closeAllConnections?.(); await new Promise<void>(r => server!.close(() => r()));
+});
