@@ -67,6 +67,20 @@ export class EventStore {
       }));
   }
 
+  /**
+   * Pending (unacked) events, oldest-first — for replay to a (re)connecting
+   * event stream. Live push (`notifyEventStreams`) only reaches streams connected
+   * at fire time; anything that arrived during a disconnect is persisted here as
+   * `pending` and would otherwise never be delivered. Replaying these on connect
+   * is what lets a reconnecting agent catch up on cron ticks / handoffs it missed.
+   */
+  async pending(): Promise<AgentEvent[]> {
+    const events = await this.readAll();
+    return events
+      .filter(e => e.status === 'pending')
+      .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
+  }
+
   async read(id: string): Promise<AgentEvent | null> {
     if (!validEventId(id)) return null;
     try {

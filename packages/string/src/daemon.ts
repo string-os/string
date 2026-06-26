@@ -103,6 +103,13 @@ const STRING_DATA_DIR = process.env.STRING_DATA_DIR || join(homedir(), '.string'
 const agents = new AgentRegistry([], join(STRING_DATA_DIR, 'agents.json'));
 const runtimes = new Map<string, RuntimeEntry>();
 const eventStreams = new Map<string, Set<http.ServerResponse>>();
+
+// Event ids already delivered (live push or backfill) during this daemon's
+// lifetime. Lets the on-connect backfill skip events a still-connected stream
+// already saw, so frequent reconnects don't re-flood the agent with the same
+// pending events (a turn-storm). Cleared on daemon restart — a restarted daemon
+// re-delivers still-pending events once, which is the desired catch-up.
+const deliveredEventIds = new Set<string>();
 let log: Logger;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -156,13 +163,20 @@ function sseEvent(res: http.ServerResponse, event: string, data: unknown): void 
 function notifyEventStreams(agentId: string, event: AgentEvent): void {
   const streams = eventStreams.get(agentId);
   if (!streams || streams.size === 0) return;
+  // Mark delivered even if a stream dies mid-write: a live push reaching at least
+  // one open stream counts, and the backfill's job is only to cover events that
+  // reached *no* stream. (If every stream here is already dead, the event stays
+  // un-marked and the next connect's backfill will replay it.)
+  let pushed = false;
   for (const stream of [...streams]) {
     if (stream.writableEnded || stream.destroyed) {
       streams.delete(stream);
       continue;
     }
     sseEvent(stream, 'event', event);
+    pushed = true;
   }
+  if (pushed) deliveredEventIds.add(event.id);
 }
 
 function buildMeta(browser: Browser, topic: string): SessionMeta | null {
@@ -396,6 +410,35 @@ function handleEventStream(req: http.IncomingMessage, res: http.ServerResponse):
   streams.add(res);
   log.info('events.stream.open', { agentId, count: streams.size });
   sseEvent(res, 'ready', { agent_id: agentId });
+
+  // Backfill: replay pending events this agent never received live. Webhooks (cron
+  // ticks, agent handoffs) push to streams connected *at fire time* only; anything
+  // that arrived while the agent's channel was down is persisted as `pending` and
+  // would otherwise be lost silently. Replaying on connect is what makes a dropped
+  // channel self-heal its backlog rather than just resume live. `deliveredEventIds`
+  // skips events an already-connected stream saw, so reconnect churn can't re-flood.
+  // Events stay `pending` until the agent acks them — this is at-least-once catch-up,
+  // not a destructive drain.
+  void (async () => {
+    const agent = agents.get(agentId);
+    if (!agent) return;
+    let pending: AgentEvent[];
+    try {
+      pending = await new EventStore(agent.home).pending();
+    } catch (err) {
+      log.error('events.stream.backfill_failed', { agentId, err: String(err) });
+      return;
+    }
+    let replayed = 0;
+    for (const ev of pending) {
+      if (res.writableEnded || res.destroyed) break;
+      if (deliveredEventIds.has(ev.id)) continue;
+      deliveredEventIds.add(ev.id);
+      sseEvent(res, 'event', ev);
+      replayed++;
+    }
+    if (replayed > 0) log.info('events.stream.backfill', { agentId, replayed });
+  })();
 
   const heartbeat = setInterval(() => {
     if (!res.writableEnded && !res.destroyed) sseEvent(res, 'ping', { t: new Date().toISOString() });

@@ -269,6 +269,43 @@ await section('events — local webhook appends text to current agent inbox', as
   }
 });
 
+await section('events — stream backfills pending events that arrived while disconnected', async () => {
+  const env = makeEnv();
+  const daemon = await startDaemon(env);
+  const home = path.join(env.root, 'agent-home-backfill');
+  let watcher: ReturnType<typeof client.watchAgentEvents> | null = null;
+  try {
+    assert(await client.ping(env.port), 'daemon up for backfill test');
+    assert(runCli(env, ['agent', 'add', 'lonely', '--home', home]).code === 0, 'agent add ok');
+    assert(runCli(env, ['agent', 'use', 'lonely']).code === 0, 'agent use ok');
+    const show = runCli(env, ['event', 'webhook', 'show']);
+    const webhookUrl = show.stdout.split('\n').find(line => line.startsWith('http://127.0.0.1:'));
+    assert(!!webhookUrl, 'webhook URL printed');
+
+    // Event arrives with NO stream connected → persisted as pending, delivered to nobody live.
+    const posted = await postText(webhookUrl!, 'missed while offline');
+    assert(posted.status === 202, 'webhook accepted while no stream connected');
+
+    // Connect AFTER the fact: the backfill must replay the pending event on connect.
+    const received: client.AgentEvent[] = [];
+    watcher = client.watchAgentEvents(env.port, 'lonely', e => received.push(e));
+    await waitFor(() => received.some(e => e.text === 'missed while offline'), 5000);
+    assert(received.some(e => e.text === 'missed while offline'), 'backfill replayed the pending event on connect');
+
+    // A second connect must NOT re-deliver it — still pending (unacked), but de-duped
+    // within this daemon session so reconnect churn can't re-flood the agent.
+    const received2: client.AgentEvent[] = [];
+    const watcher2 = client.watchAgentEvents(env.port, 'lonely', e => received2.push(e));
+    await wait(600);
+    watcher2.close();
+    assert(received2.length === 0, 'already-delivered pending event is not re-flooded on reconnect');
+  } finally {
+    watcher?.close();
+    daemon.stop();
+    fs.rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
 await section('events — watchAgentEvents self-reconnects after the stream drops', async () => {
   const PORT = 39411;
   let server: http.Server | null = null;
