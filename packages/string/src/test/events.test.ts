@@ -64,6 +64,15 @@ async function startDaemon(env: Env): Promise<{ stop: () => void }> {
   };
 }
 
+function stopSpawned(child: ReturnType<typeof spawn> | null): void {
+  if (!child?.pid) return;
+  try {
+    process.kill(-child.pid, 'SIGTERM');
+  } catch {
+    try { child.kill('SIGTERM'); } catch { /* already gone */ }
+  }
+}
+
 function postText(urlString: string, text: string): Promise<{ status: number; body: string }> {
   const url = new URL(urlString);
   return new Promise((resolve, reject) => {
@@ -214,6 +223,7 @@ await section('events — local webhook appends text to current agent inbox', as
 
     channel = spawn('npx', ['tsx', CLI, '--mcp', '--agent', 'hooked'], {
       env: env.base,
+      detached: true,
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     let channelOut = '';
@@ -263,7 +273,7 @@ await section('events — local webhook appends text to current agent inbox', as
       throw new Error(`${e.message}. stdout: ${channelOut} stderr: ${channelErr}`);
     });
   } finally {
-    channel?.kill('SIGTERM');
+    stopSpawned(channel);
     daemon.stop();
     fs.rmSync(env.root, { recursive: true, force: true });
   }
@@ -306,16 +316,80 @@ await section('events — stream backfills pending events that arrived while dis
   }
 });
 
+await section('events — MCP channel backfills pending webhook on startup', async () => {
+  const env = makeEnv();
+  const daemon = await startDaemon(env);
+  const home = path.join(env.root, 'agent-home-channel-backfill');
+  let channel: ReturnType<typeof spawn> | null = null;
+  try {
+    assert(await client.ping(env.port), 'daemon up for channel backfill test');
+    assert(runCli(env, ['agent', 'add', 'channel-late', '--home', home]).code === 0, 'agent add ok');
+    assert(runCli(env, ['agent', 'use', 'channel-late']).code === 0, 'agent use ok');
+    const show = runCli(env, ['event', 'webhook', 'show']);
+    const webhookUrl = show.stdout.split('\n').find(line => line.startsWith('http://127.0.0.1:'));
+    assert(!!webhookUrl, 'webhook URL printed');
+
+    const posted = await postText(webhookUrl!, 'offline channel wake');
+    assert(posted.status === 202, 'webhook accepted while channel offline');
+
+    channel = spawn('npx', ['tsx', CLI, '--mcp', '--agent', 'channel-late'], {
+      env: env.base,
+      detached: true,
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let channelOut = '';
+    let channelErr = '';
+    channel.stdout.setEncoding('utf-8');
+    channel.stderr.setEncoding('utf-8');
+    channel.stdout.on('data', chunk => { channelOut += chunk; });
+    channel.stderr.on('data', chunk => { channelErr += chunk; });
+
+    channel.stdin.write(JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'initialize',
+      params: {
+        protocolVersion: '2025-11-25',
+        capabilities: {},
+        clientInfo: { name: 'string-test', version: '0.0.0' },
+      },
+    }) + '\n');
+    await waitFor(() => channelOut.includes('"id":1'), 5000);
+
+    channel.stdin.write(JSON.stringify({
+      jsonrpc: '2.0',
+      method: 'notifications/initialized',
+      params: {},
+    }) + '\n');
+
+    await waitFor(
+      () => channelOut.includes('notifications/claude/channel')
+        && channelOut.includes('"content":"offline channel wake"')
+        && channelOut.includes('"source":"string"'),
+      5000,
+    ).catch(e => {
+      throw new Error(`${e.message}. stdout: ${channelOut} stderr: ${channelErr}`);
+    });
+    assert(channelOut.includes('"content":"offline channel wake"'), 'pending webhook replayed as Claude channel notification');
+  } finally {
+    stopSpawned(channel);
+    daemon.stop();
+    fs.rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
 await section('events — watchAgentEvents self-reconnects after the stream drops', async () => {
   const PORT = 39411;
   let server: http.Server | null = null;
+  let seq = 0;
   const mkServer = () => new Promise<http.Server>((resolve) => {
     const s = http.createServer((req, res) => {
       if (req.url === '/events/stream') {
+        const id = `e${++seq}`;
         res.writeHead(200, { 'Content-Type': 'text/event-stream' });
         res.write('event: ready\ndata: {"agent_id":"t"}\n\n');
         setTimeout(() => res.write(
-          `event: event\ndata: ${JSON.stringify({ id: 'e', agentId: 't', text: 'tick', source: 'test', receivedAt: 'now' })}\n\n`,
+          `event: event\ndata: ${JSON.stringify({ id, agentId: 't', text: 'tick', source: 'test', receivedAt: 'now' })}\n\n`,
         ), 50);
       } else { res.writeHead(404); res.end(); }
     });

@@ -11,35 +11,31 @@ label somewhere (e.g. `plugins/string/.codex-plugin/plugin.json` was stuck at
 
 | File | Field(s) |
 |------|----------|
+| `package.json` | `version` |
 | `packages/string/package.json` | `version` |
 | `.codex-plugin/plugin.json` | `version` |
 | `.codex-plugin/marketplace.json` | `metadata.version` **and** `plugins[0].version` |
 | `.claude-plugin/plugin.json` | `version` |
 | `.claude-plugin/marketplace.json` | `metadata.version` **and** `plugins[0].version` |
 | `plugins/string/.codex-plugin/plugin.json` | `version` — the manifest `codex plugin add` actually installs |
+| `.mcp.json` and `plugins/string/.mcp.json` | `mcpServers.string.args[]` package pin |
 
 Quick check that nothing was missed (run before committing):
 
 ```bash
-grep -rn '"version"' \
-  packages/string/package.json \
-  .codex-plugin/plugin.json .codex-plugin/marketplace.json \
-  .claude-plugin/plugin.json .claude-plugin/marketplace.json \
-  plugins/string/.codex-plugin/plugin.json
-# every line must show the new version
+pnpm check:version
 ```
 
 ## What the plugins actually run
 
-The plugin MCP servers launch `npx -y @string-os/string@latest --mcp`, so the
-**runtime code is always the latest published npm**, independent of the manifest
-`version` label. The label is metadata (shown by `plugin add` / listings) and is
-keyed for the plugin cache directory — keep it correct so installs aren't
-misleading and the cache refreshes, but it does not pin the running code.
+The plugin MCP servers launch `npx -y @string-os/string@X.Y.Z --mcp`, pinned to
+the same version as `packages/string/package.json`. That keeps the installed
+plugin label, cache directory, and running MCP server coherent. Do not use
+`@latest` here; it lets the plugin metadata and runtime drift.
 
 ## Publish, tag, release
 
-1. `pnpm -r build && pnpm --filter @string-os/string test` (must be green)
+1. `pnpm check:version && pnpm -r build && pnpm --filter @string-os/string test` (must be green)
 2. `npm publish --access public` from `packages/string/`
 3. Tag the release commit `vX.Y.Z` and push it
 4. Create the GitHub release with notes

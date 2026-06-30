@@ -41,6 +41,11 @@ export interface EventWatcher {
   close(): void;
 }
 
+// Process-local delivery cache. The daemon replays pending events until ack so a
+// restarted MCP/channel process can wake on missed work; this cache prevents one
+// still-running process from firing duplicate callbacks during reconnect churn.
+const seenEventKeys = new Set<string>();
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function request(
@@ -261,9 +266,9 @@ export interface WatchOptions {
  * half-open connection that never fired an error. Backoff resets once data flows
  * again. `close()` stops reconnecting for good.
  *
- * Note: the daemon does not replay missed events on reconnect; events that arrived
- * during a gap stay in the inbox (read via the events API). This watcher restores
- * *live* delivery, it does not backfill.
+ * The daemon replays pending events on connect until they are acked. This watcher
+ * suppresses duplicate callbacks within the current process; a restarted process
+ * intentionally receives pending events again so unacked work can wake it.
  */
 export function watchAgentEvents(
   port: number,
@@ -337,7 +342,11 @@ export function watchAgentEvents(
           parseSSEChunk(chunk, state, (eventName, data) => {
             if (eventName !== 'event') return; // 'ready' / 'ping' are control frames
             try {
-              onEvent(JSON.parse(data) as AgentEvent);
+              const parsed = JSON.parse(data) as AgentEvent;
+              const key = `${port}:${agentId}:${parsed.id}`;
+              if (seenEventKeys.has(key)) return;
+              seenEventKeys.add(key);
+              onEvent(parsed);
             } catch (e) {
               onError?.(e instanceof Error ? e : new Error(String(e)));
             }
@@ -399,7 +408,7 @@ export async function shutdown(port: number): Promise<void> {
 }
 
 /** GET /health — daemon health with agent/session counts. */
-export async function health(port: number): Promise<{ ok: boolean; agents: number; sessions: number }> {
+export async function health(port: number): Promise<{ ok: boolean; version?: string; agents: number; sessions: number }> {
   const res = await request(port, 'GET', '/health');
   if (res.status !== 200) {
     throw new Error(`health check failed (${res.status}): ${res.body}`);

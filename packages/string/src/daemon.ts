@@ -45,6 +45,7 @@ import { AgentRegistry, type Agent } from './agent.js';
 import { createStringServer, type McpExecFn } from './mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { EventStore, createWebhookToken, type AgentEvent } from './events.js';
+import { STRING_VERSION } from './version.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -103,13 +104,6 @@ const STRING_DATA_DIR = process.env.STRING_DATA_DIR || join(homedir(), '.string'
 const agents = new AgentRegistry([], join(STRING_DATA_DIR, 'agents.json'));
 const runtimes = new Map<string, RuntimeEntry>();
 const eventStreams = new Map<string, Set<http.ServerResponse>>();
-
-// Event ids already delivered (live push or backfill) during this daemon's
-// lifetime. Lets the on-connect backfill skip events a still-connected stream
-// already saw, so frequent reconnects don't re-flood the agent with the same
-// pending events (a turn-storm). Cleared on daemon restart — a restarted daemon
-// re-delivers still-pending events once, which is the desired catch-up.
-const deliveredEventIds = new Set<string>();
 let log: Logger;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -163,10 +157,6 @@ function sseEvent(res: http.ServerResponse, event: string, data: unknown): void 
 function notifyEventStreams(agentId: string, event: AgentEvent): void {
   const streams = eventStreams.get(agentId);
   if (!streams || streams.size === 0) return;
-  // Mark delivered even if a stream dies mid-write: a live push reaching at least
-  // one open stream counts, and the backfill's job is only to cover events that
-  // reached *no* stream. (If every stream here is already dead, the event stays
-  // un-marked and the next connect's backfill will replay it.)
   let pushed = false;
   for (const stream of [...streams]) {
     if (stream.writableEnded || stream.destroyed) {
@@ -176,7 +166,7 @@ function notifyEventStreams(agentId: string, event: AgentEvent): void {
     sseEvent(stream, 'event', event);
     pushed = true;
   }
-  if (pushed) deliveredEventIds.add(event.id);
+  if (pushed) log.info('events.stream.push', { agentId, eventId: event.id, streams: streams.size });
 }
 
 function buildMeta(browser: Browser, topic: string): SessionMeta | null {
@@ -411,14 +401,10 @@ function handleEventStream(req: http.IncomingMessage, res: http.ServerResponse):
   log.info('events.stream.open', { agentId, count: streams.size });
   sseEvent(res, 'ready', { agent_id: agentId });
 
-  // Backfill: replay pending events this agent never received live. Webhooks (cron
-  // ticks, agent handoffs) push to streams connected *at fire time* only; anything
-  // that arrived while the agent's channel was down is persisted as `pending` and
-  // would otherwise be lost silently. Replaying on connect is what makes a dropped
-  // channel self-heal its backlog rather than just resume live. `deliveredEventIds`
-  // skips events an already-connected stream saw, so reconnect churn can't re-flood.
-  // Events stay `pending` until the agent acks them — this is at-least-once catch-up,
-  // not a destructive drain.
+  // Backfill: replay every pending event on connect. Events are not considered
+  // handled until the agent explicitly acks them, so daemon-memory "delivered"
+  // flags must never hide unacked work from a restarted channel. Client watchers
+  // suppress duplicate callbacks inside one process to avoid reconnect storms.
   void (async () => {
     const agent = agents.get(agentId);
     if (!agent) return;
@@ -432,8 +418,6 @@ function handleEventStream(req: http.IncomingMessage, res: http.ServerResponse):
     let replayed = 0;
     for (const ev of pending) {
       if (res.writableEnded || res.destroyed) break;
-      if (deliveredEventIds.has(ev.id)) continue;
-      deliveredEventIds.add(ev.id);
       sseEvent(res, 'event', ev);
       replayed++;
     }
@@ -923,7 +907,7 @@ function createServer(): http.Server {
       } else if (method === 'GET' && pathname === '/health') {
         let totalTopics = 0;
         for (const r of runtimes.values()) totalTopics += r.topics.size;
-        sendJson(res, 200, { ok: true, agents: agents.list().length, sessions: totalTopics });
+        sendJson(res, 200, { ok: true, version: STRING_VERSION, agents: agents.list().length, sessions: totalTopics });
 
       } else {
         sendJson(res, 404, { error: `Not found: ${method} ${pathname}` });
@@ -981,7 +965,7 @@ export function startDaemon(port = 3923, opts?: { log?: boolean }): void {
   server.listen(port, '127.0.0.1', () => {
     console.log(`stringd listening on http://127.0.0.1:${port}`);
     console.log('Endpoints: POST/GET/DELETE /agents  GET/POST /agents/:id/webhook  POST /webhook/:token  GET /events/stream  GET/POST/DELETE /sessions  POST /exec  /mcp');
-    log.info('server.start', { port, dataDir: STRING_DATA_DIR, logEnabled });
+    log.info('server.start', { port, version: STRING_VERSION, dataDir: STRING_DATA_DIR, logEnabled });
   });
 
   const shutdown = (signal: string) => {
