@@ -15,6 +15,7 @@
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import { wrapEnvelope } from './envelope.js';
+import { STRING_VERSION } from './version.js';
 
 /** Result returned by an exec backend. Matches the daemon's exec envelope. */
 export interface McpExecResult {
@@ -70,7 +71,7 @@ export function createStringServer(execFn: McpExecFn, opts: StringServerOptions 
     }
     : undefined;
 
-  const server = new McpServer({ name: 'string', version: '0.1.0' }, serverOptions);
+  const server = new McpServer({ name: 'string', version: STRING_VERSION }, serverOptions);
 
   server.registerTool(
     'string',

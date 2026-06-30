@@ -16,6 +16,7 @@ import * as client from '@string-os/client';
 import { parseTopic, topicToString } from './types.js';
 import { resolveAgentId } from './config.js';
 import { agentHelp, eventHelp, systemHelp } from './commands/management.js';
+import { STRING_VERSION } from './version.js';
 
 /**
  * Terse-path agent provisioning: ensure the agent exists WITHOUT clobbering a
@@ -306,7 +307,7 @@ async function cmdDaemon(args: string[]): Promise<void> {
 
 function printUsage(): void {
   console.log(`
-String v0.1
+String v${STRING_VERSION}
 
 Usage:
   string <topic> '<body>'              Execute command on topic

@@ -1,6 +1,6 @@
 {
   "name": "string-os",
-  "version": "0.1.0",
+  "version": "0.1.15",
   "private": true,
   "description": "String — an OS for AI agents, built on SFMD. HTML for humans, SFMD for agents.",
   "repository": {
@@ -14,7 +14,8 @@
   "scripts": {
     "build": "pnpm -r build",
     "test": "pnpm --filter @string-os/string test",
-    "typecheck": "pnpm -r exec tsc --noEmit"
+    "typecheck": "pnpm -r exec tsc --noEmit",
+    "check:version": "node scripts/check-version.mjs"
   },
   "devDependencies": {
     "tsx": "^4.21.0",
