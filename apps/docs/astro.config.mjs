@@ -69,6 +69,10 @@ export default defineConfig({
 		sfmd({ contentDir: 'src/content/docs', sidebar }),
 		starlight({
 			title: 'String',
+			logo: {
+				src: './src/assets/string-logo.webp',
+				replacesTitle: true,
+			},
 			social: [
 				{ icon: 'github', label: 'GitHub', href: 'https://github.com/string-os/string' },
 			],
