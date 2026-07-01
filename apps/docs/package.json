@@ -19,5 +19,8 @@
     "@vercel/functions": "^3.6.0",
     "astro": "^6.1.9",
     "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260621.1"
   }
 }
