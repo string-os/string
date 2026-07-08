@@ -59,6 +59,87 @@ export async function cmdAgentHub(args: string, loader: Loader): Promise<Command
   }
 }
 
+/**
+ * /capability mint|list|revoke — shell surface for capability issuance.
+ * Sugar over the daemon's /capabilities routes (one code path with pairing).
+ */
+export async function cmdAgentCapability(args: string, loader: Loader): Promise<CommandResult> {
+  const parsed = parsePosixFlags(args);
+  if (parsed === null) return ok(agentHelp('slash'));
+  const [sub, ...rest] = parsed.rest;
+
+  switch (sub) {
+    case 'mint':
+      return mintCapability(parsed.flags, loader);
+    case undefined:
+    case 'list':
+      return listCapabilities(parsed.flags, loader);
+    case 'revoke':
+      return revokeCapability(rest);
+    default:
+      return err(`Unknown capability command: ${sub}\n\n${agentHelp('slash')}`, 'COMMAND_UNSUPPORTED');
+  }
+}
+
+/** '1h' | '30m' | '90s' | '2d' | plain ms → milliseconds. */
+function parseTtl(raw: string | undefined): number | null {
+  if (!raw) return 60 * 60 * 1000; // default 1h
+  const m = raw.trim().match(/^(\d+)(ms|s|m|h|d)?$/);
+  if (!m) return null;
+  const n = Number(m[1]);
+  const unit = m[2] ?? 'ms';
+  const factor = unit === 'ms' ? 1 : unit === 's' ? 1000 : unit === 'm' ? 60_000 : unit === 'h' ? 3_600_000 : 86_400_000;
+  return n * factor;
+}
+
+async function mintCapability(flags: Record<string, string>, loader: Loader): Promise<CommandResult> {
+  const usage = 'Usage: /capability mint --path <prefix> --verbs <put,get,delete,stat> [--ttl 1h] [--single-use] [--agent <id>]';
+  if (flags.path === undefined) return err(usage, 'INVALID_PAYLOAD');
+  const verbs = splitAllow(flags.verbs).map(v => v.toUpperCase()) as client.CapabilityVerb[];
+  if (verbs.length === 0) return err(usage, 'INVALID_PAYLOAD');
+  const ttlMs = parseTtl(flags.ttl);
+  if (ttlMs === null) return err(`Invalid --ttl: ${flags.ttl} (use e.g. 90s, 30m, 1h, 2d)`, 'INVALID_PAYLOAD');
+  const agentId = flags.agent || currentAgentId(loader);
+
+  const minted = await client.mintCapability(port(), {
+    agentId,
+    pathPrefix: flags.path,
+    verbs,
+    ttlMs,
+    singleUse: flags['single-use'] === 'true',
+  });
+  return ok([
+    `Minted capability ${minted.token_id} into workspace '${minted.agent_id}':`,
+    `  scope:   ${minted.path_prefix || '(whole workspace)'} [${minted.verbs.join(', ')}]`,
+    `  expires: ${minted.expires_at}${minted.single_use ? '   single-use' : ''}`,
+    '',
+    `  secret: ${minted.secret}`,
+    '',
+    'The secret is shown ONLY here — hand it to the component, never store it in a repo.',
+    `Use: curl -H 'Authorization: Bearer ${minted.secret}' http://127.0.0.1:${port()}/fs/<path>`,
+    `Revoke: /capability revoke ${minted.token_id}`,
+  ].join('\n'));
+}
+
+async function listCapabilities(flags: Record<string, string>, loader: Loader): Promise<CommandResult> {
+  const agentFilter = flags.agent || (flags.all === 'true' ? undefined : currentAgentId(loader));
+  const records = await client.listCapabilities(port(), agentFilter);
+  if (records.length === 0) return ok(`No capabilities${agentFilter ? ` for agent '${agentFilter}'` : ''}.`);
+  const now = Date.now();
+  const lines = records.map(r => {
+    const state = r.revoked_at ? 'revoked' : r.used_at ? 'used' : now > Date.parse(r.expires_at) ? 'expired' : 'live';
+    return `  ${r.token_id}\t${r.agent_id}\t${r.path_prefix || '(workspace)'}\t[${r.verbs.join(',')}]\t${state}\texpires ${r.expires_at}`;
+  });
+  return ok([`Capabilities${agentFilter ? ` for '${agentFilter}'` : ''}:`, ...lines].join('\n'));
+}
+
+async function revokeCapability(rest: string[]): Promise<CommandResult> {
+  const tokenId = rest[0];
+  if (!tokenId) return err('Usage: /capability revoke <token_id>', 'INVALID_PAYLOAD');
+  const revoked = await client.revokeCapability(port(), tokenId);
+  return ok(revoked ? `Revoked ${tokenId}.` : `${tokenId} was not a live capability (unknown or already dead).`);
+}
+
 async function addAgent(rest: string[], flags: Record<string, string>): Promise<CommandResult> {
   const id = rest[0];
   if (!id) return err('Usage: /add <id> [--home <path>] [--allow <p1,p2,...>]', 'INVALID_PAYLOAD');
@@ -205,6 +286,11 @@ export function agentHelp(style: 'cli' | 'slash' = 'slash'): string {
       '  string agent set-home <id> <path>                      Change agent home',
       '  string agent rm <id>                                   Remove an agent',
       '',
+      '  string agent capability mint --path <prefix> --verbs <v1,v2> [--ttl 1h]',
+      '                          [--single-use] [--agent <id>]   Mint a scoped fs capability',
+      '  string agent capability list [--agent <id>]             List capabilities (no secrets)',
+      '  string agent capability revoke <token_id>               Revoke a capability',
+      '',
       "Slash/MCP form: string agent '/list'",
     ].join('\n');
   }
@@ -216,6 +302,9 @@ export function agentHelp(style: 'cli' | 'slash' = 'slash'): string {
     '  /use <id> [--local]                              Set current agent',
     '  /set-home <id> <path>                            Change agent home',
     '  /rm <id>                                         Remove an agent',
+    '  /capability mint --path <prefix> --verbs <v1,v2> [--ttl 1h] [--single-use] [--agent <id>]',
+    '  /capability list [--agent <id>]                  List capabilities (no secrets)',
+    '  /capability revoke <token_id>                    Revoke a capability',
   ].join('\n');
 }
 

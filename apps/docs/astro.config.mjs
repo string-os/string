@@ -29,6 +29,7 @@ const sidebar = [
 			{ slug: 'runtime/packages' },
 			{ slug: 'runtime/editing' },
 			{ slug: 'runtime/events' },
+			{ slug: 'runtime/system-api' },
 			{ slug: 'runtime/authoring' },
 			{ slug: 'runtime/shell' },
 			{ slug: 'runtime/errors' },
