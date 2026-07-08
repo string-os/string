@@ -15,6 +15,7 @@ import './client.test.js';
 import './agent-config.test.js';
 import './agent-cli.test.js';
 import './events.test.js';
+import './recovery.test.js';
 import './misc.test.js';
 import { printSummary } from './runner.js';
 printSummary();

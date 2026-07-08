@@ -931,25 +931,34 @@ export function startDaemon(port = 3923, opts?: { log?: boolean }): void {
   // Disk-first recovery: ~/.string/agents/<id> is the source of truth for agent
   // homes. If the registry JSON gets lost/corrupted or the daemon migrates
   // STRING_DATA_DIR, re-register any home dirs we discover. Idempotent.
-  const agentsRoot = join(homedir(), '.string', 'agents');
-  try {
-    for (const entry of readdirSync(agentsRoot)) {
-      const home = join(agentsRoot, entry);
-      try {
-        if (!statSync(home).isDirectory()) continue;
-      } catch {
-        continue;
+  //
+  // STRING_NO_AGENT_RECOVERY=1 skips this: a dev/test daemon on a shared
+  // machine must be able to start with an EMPTY registry instead of adopting
+  // every agent home on the box (a registered agent is /exec-able through
+  // this daemon, so silent adoption widens the blast radius of any caller).
+  if (process.env.STRING_NO_AGENT_RECOVERY === '1') {
+    console.log('Agent recovery disabled (STRING_NO_AGENT_RECOVERY=1) — registry starts from agents.json only');
+  } else {
+    const agentsRoot = join(homedir(), '.string', 'agents');
+    try {
+      for (const entry of readdirSync(agentsRoot)) {
+        const home = join(agentsRoot, entry);
+        try {
+          if (!statSync(home).isDirectory()) continue;
+        } catch {
+          continue;
+        }
+        if (agents.has(entry)) continue;
+        agents.register({
+          id: entry,
+          home,
+          allowedPaths: [],
+          createdAt: new Date().toISOString(),
+        });
       }
-      if (agents.has(entry)) continue;
-      agents.register({
-        id: entry,
-        home,
-        allowedPaths: [],
-        createdAt: new Date().toISOString(),
-      });
+    } catch {
+      // agentsRoot doesn't exist yet — fresh install, fine.
     }
-  } catch {
-    // agentsRoot doesn't exist yet — fresh install, fine.
   }
 
   const loadedUsers = agents.list().length;
