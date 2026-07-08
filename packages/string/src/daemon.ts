@@ -49,7 +49,7 @@ import { AgentRegistry, type Agent } from './agent.js';
 import { createStringServer, type McpExecFn } from './mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { EventStore, createWebhookToken, type AgentEvent } from './events.js';
-import { CapabilityStore, type FsVerb, type VerifyFailure } from './capability.js';
+import { CapabilityStore, FS_VERBS, normalizeFsPath, type FsVerb, type VerifyFailure } from './capability.js';
 import { STRING_VERSION } from './version.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -244,18 +244,51 @@ function truncateCmd(cmd: string): string {
 
 // ─── Agent handlers ───────────────────────────────────────────────────────────
 
+interface ProvisionCapabilitySpec {
+  path_prefix?: string;
+  verbs?: string[];
+  ttl_ms?: number;
+  single_use?: boolean;
+}
+
 async function handleRegisterAgent(
   req: http.IncomingMessage,
   res: http.ServerResponse,
 ): Promise<void> {
   const body = await readBody(req);
-  let data: { agent_id?: string; home?: string; allowed_paths?: string[] } = {};
+  let data: {
+    agent_id?: string;
+    home?: string;
+    allowed_paths?: string[];
+    webhook?: boolean;
+    capability?: ProvisionCapabilitySpec;
+  } = {};
   try { data = JSON.parse(body); } catch { /* ignore */ }
 
   const agentId = data.agent_id?.trim();
   if (!agentId) {
     sendJson(res, 400, { error: 'agent_id required' });
     return;
+  }
+
+  // One-call provisioning (pairing): optional webhook + initial capability
+  // in the same POST. The capability spec is validated BEFORE the agent is
+  // touched so a bad request can never half-create a workspace.
+  const capSpec = data.capability;
+  if (capSpec !== undefined) {
+    const verbs = Array.isArray(capSpec.verbs) ? capSpec.verbs.map(v => String(v).toUpperCase()) : [];
+    if (verbs.length === 0 || verbs.some(v => !FS_VERBS.includes(v as FsVerb))) {
+      sendJson(res, 400, { error: 'capability.verbs must be a non-empty subset of PUT|GET|DELETE|STAT' });
+      return;
+    }
+    if (!Number.isFinite(capSpec.ttl_ms) || (capSpec.ttl_ms as number) <= 0) {
+      sendJson(res, 400, { error: 'capability.ttl_ms must be a positive duration' });
+      return;
+    }
+    if (normalizeFsPath(capSpec.path_prefix ?? '') === null) {
+      sendJson(res, 400, { error: `capability.path_prefix can never be legal: ${capSpec.path_prefix}` });
+      return;
+    }
   }
 
   const home = data.home?.trim();
@@ -273,7 +306,8 @@ async function handleRegisterAgent(
     if (allowedPaths !== undefined) {
       agents.register({ ...agent, allowedPaths });
     }
-    sendJson(res, 200, { agent_id: agentId, home: agent.home, created: !existing });
+    log.info(existing ? 'agent.ensure' : 'agent.register', { agentId, home: agent.home });
+    sendJson(res, 200, provisionResponse(req, agentId, agent.home, !existing, data));
     return;
   }
 
@@ -288,7 +322,52 @@ async function handleRegisterAgent(
     webhookToken: existing?.webhookToken,
   });
   log.info(existing ? 'agent.update' : 'agent.register', { agentId, home });
-  sendJson(res, 200, { agent_id: agentId, home, created: !existing });
+  sendJson(res, 200, provisionResponse(req, agentId, home, !existing, data));
+}
+
+/**
+ * Build the POST /agents response, honoring the one-call provisioning
+ * extras: `webhook: true` returns (and creates if needed) the webhook URL;
+ * `capability: {...}` mints an initial grant. Capability specs were
+ * validated up front, so minting here cannot fail on user input.
+ */
+function provisionResponse(
+  req: http.IncomingMessage,
+  agentId: string,
+  home: string,
+  created: boolean,
+  data: { webhook?: boolean; capability?: ProvisionCapabilitySpec },
+): object {
+  const response: Record<string, unknown> = { agent_id: agentId, home, created };
+
+  if (data.webhook === true) {
+    const withHook = ensureAgentWebhook(agents.get(agentId)!);
+    response.webhook_url = webhookUrl(req, withHook.webhookToken!);
+  }
+
+  if (data.capability !== undefined) {
+    const record = capabilities.mint({
+      agentId,
+      pathPrefix: data.capability.path_prefix ?? '',
+      verbs: data.capability.verbs!.map(v => String(v).toUpperCase()) as FsVerb[],
+      ttlMs: data.capability.ttl_ms!,
+      singleUse: data.capability.single_use ?? false,
+    });
+    log.info('capability.mint', {
+      tokenId: record.tokenId, agentId, pathPrefix: record.pathPrefix,
+      verbs: record.verbs.join(','), expiresAt: record.expiresAt, singleUse: record.singleUse,
+    });
+    response.capability = {
+      token_id: record.tokenId,
+      secret: record.secret, // shown exactly once, same discipline as POST /capabilities
+      path_prefix: record.pathPrefix,
+      verbs: record.verbs,
+      expires_at: record.expiresAt,
+      single_use: record.singleUse,
+    };
+  }
+
+  return response;
 }
 
 function handleListAgents(_req: http.IncomingMessage, res: http.ServerResponse): void {
@@ -297,13 +376,41 @@ function handleListAgents(_req: http.IncomingMessage, res: http.ServerResponse):
   });
 }
 
+/**
+ * DELETE /agents/:id — full teardown, the disposable-agent contract:
+ * registry entry (incl. webhook token), live runtime (Browser + sessions),
+ * open event streams, and every capability into the workspace all die
+ * together. The home directory is intentionally left on disk — the daemon
+ * never deletes agent files (an agent home may be a real project dir).
+ */
 function handleDeleteAgent(res: http.ServerResponse, agentId: string): void {
   const existed = agents.delete(agentId);
-  runtimes.delete(agentId);
+
+  const runtime = runtimes.get(agentId);
+  let disposedSessions = 0;
+  if (runtime) {
+    disposedSessions = runtime.topics.size;
+    runtime.browser.dispose();
+    runtimes.delete(agentId);
+  }
+
+  const streams = eventStreams.get(agentId);
+  if (streams) {
+    for (const stream of [...streams]) {
+      try { stream.end(); } catch { /* already dead */ }
+    }
+    eventStreams.delete(agentId);
+  }
+
   // Capabilities are grants INTO this agent's workspace — they die with it.
   const revokedCaps = capabilities.revokeAllForAgent(agentId);
-  log.info('agent.delete', { agentId, existed, revokedCaps });
-  sendJson(res, 200, { agent_id: agentId, deleted: existed });
+  log.info('agent.delete', { agentId, existed, revokedCaps, disposedSessions });
+  sendJson(res, 200, {
+    agent_id: agentId,
+    deleted: existed,
+    revoked_capabilities: revokedCaps,
+    disposed_sessions: disposedSessions,
+  });
 }
 
 function webhookUrl(req: http.IncomingMessage, token: string): string {

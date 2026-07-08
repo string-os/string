@@ -97,6 +97,30 @@ string agent capability list
 string agent capability revoke cap_abc123
 ```
 
+### One-call pairing and disposable agents
+
+`POST /agents` can pair a component in a single request — ensure the agent,
+return its webhook URL, and mint its initial capability together:
+
+```json
+{
+  "agent_id": "discord-channel",
+  "webhook": true,
+  "capability": { "path_prefix": "inbox/discord", "verbs": ["PUT", "STAT"], "ttl_ms": 86400000 }
+}
+```
+
+The response carries `webhook_url` and `capability` (secret shown exactly
+once). A bad capability spec is refused before the agent is touched — pairing
+can never half-create a workspace.
+
+`DELETE /agents/{id}` is the matching teardown: registry entry, webhook
+token, live sessions, open event streams, and **every capability into the
+workspace** die together (the response reports `revoked_capabilities` and
+`disposed_sessions`). The home directory stays on disk — the daemon never
+deletes agent files. Disposable test agents are exactly this cycle:
+provision → use → delete, and nothing survives except files you wrote.
+
 ## Worked example — outbound attachment (TLDR flow)
 
 The agent has prepared `outbox/report.pdf` in its workspace and wants a
