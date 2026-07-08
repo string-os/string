@@ -79,7 +79,8 @@ await section('describe — default (unconfigured) instance', async () => {
     assert(desc!.version === PKG_VERSION, 'version matches package.json');
     assert(desc!.api === 'string-daemon/v2', 'api surface id is string-daemon/v2');
     assert(desc!.instance.instance_label === 'stringd', 'unconfigured label defaults to stringd');
-    assert(desc!.instance.role === 'dev', 'unconfigured role defaults to dev');
+    assert(desc!.instance.role === 'unknown',
+      'unconfigured role reports unknown (fail-safe: consumers refuse unlabeled daemons)');
 
     for (const key of ['describe', 'agents', 'agent-webhooks', 'events', 'event-stream', 'sessions', 'exec', 'mcp']) {
       assert(key in desc!.capabilities, `capability advertised: ${key}`);
@@ -117,11 +118,11 @@ await section('describe — instance identity from daemon.json', async () => {
     assert(relabeled!.instance.instance_label === 'scratch', 'relabel applies without restart');
     assert(relabeled!.instance.role === 'test', 'role change applies without restart');
 
-    // Invalid values fall back to defaults rather than propagating garbage.
+    // Invalid values fall back to fail-safe defaults, not to a trusted role.
     writeInstanceConfig(env, { instance_label: '   ', role: 'prod' });
     const fallback = await client.describe(env.port);
     assert(fallback!.instance.instance_label === 'stringd', 'blank label falls back to default');
-    assert(fallback!.instance.role === 'dev', 'unknown role falls back to dev');
+    assert(fallback!.instance.role === 'unknown', 'invalid role falls back to unknown, never dev');
   } finally {
     daemon.stop();
     fs.rmSync(env.root, { recursive: true, force: true });

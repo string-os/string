@@ -422,8 +422,9 @@ export interface DaemonDescription {
   version: string;
   /** API surface version, e.g. "string-daemon/v2". */
   api: string;
-  /** Self-declared identity — clients refuse production daemons by role, not port. */
-  instance: { instance_label: string; role: 'production' | 'dev' | 'test' };
+  /** Self-declared identity — clients refuse production daemons by role, not
+   *  port. "unknown" = unlabeled instance; treat as refuse-by-default. */
+  instance: { instance_label: string; role: 'production' | 'dev' | 'test' | 'unknown' };
   /** Feature id → operational limits. Presence of a key = feature supported. */
   capabilities: Record<string, Record<string, number | string | boolean>>;
 }

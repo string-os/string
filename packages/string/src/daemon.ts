@@ -836,20 +836,23 @@ async function handleMcp(req: http.IncomingMessage, res: http.ServerResponse): P
 /** Daemon API surface version. Bump when routes/semantics change incompatibly. */
 const STRING_DAEMON_API = 'string-daemon/v2';
 
-type InstanceRole = 'production' | 'dev' | 'test';
+type InstanceRole = 'production' | 'dev' | 'test' | 'unknown';
 
 /**
  * Instance identity, sourced from `${STRING_DATA_DIR}/daemon.json`:
  *   { "instance_label": "main", "role": "production" | "dev" | "test" }
  *
  * Lets clients refuse (or require) a production daemon by self-declaration
- * instead of hardcoded port checks. An unconfigured instance defaults to
- * role "dev" — production deployments MUST set daemon.json explicitly.
+ * instead of hardcoded port checks. An unconfigured (or invalid) instance
+ * reports role "unknown" — fail-safe: consumers accept only roles they
+ * recognize (dev|test for integration tests), so an unlabeled daemon is
+ * un-hittable rather than silently claiming dev. Every deployment,
+ * production and dev alike, labels itself explicitly via daemon.json.
  * Read per request so operators can (re)label a running daemon.
  */
 function loadInstanceIdentity(): { instance_label: string; role: InstanceRole } {
   let instanceLabel = 'stringd';
-  let role: InstanceRole = 'dev';
+  let role: InstanceRole = 'unknown';
   try {
     const raw = JSON.parse(readFileSync(join(STRING_DATA_DIR, 'daemon.json'), 'utf-8')) as {
       instance_label?: unknown;
