@@ -14,6 +14,7 @@ import './references.test.js';
 import './client.test.js';
 import './agent-config.test.js';
 import './agent-cli.test.js';
+import './capability.test.js';
 import './describe.test.js';
 import './events.test.js';
 import './recovery.test.js';
