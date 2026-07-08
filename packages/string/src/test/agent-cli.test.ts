@@ -40,8 +40,15 @@ function makeEnv(): Env {
   const configFile = path.join(root, 'config.json');
   // Random high port to avoid colliding with a real daemon on 3923.
   const port = 21000 + Math.floor(Math.random() * 9000);
+  // Hermetic env: the host session may export STRING_* vars (e.g. a String
+  // plugin sets STRING_AGENT_ID), which would redirect CLI agent resolution
+  // away from the agents these tests create. Strip them all, then set ours.
+  const inherited: NodeJS.ProcessEnv = { ...process.env };
+  for (const key of Object.keys(inherited)) {
+    if (key.startsWith('STRING_')) delete inherited[key];
+  }
   const base: NodeJS.ProcessEnv = {
-    ...process.env,
+    ...inherited,
     STRING_DATA_DIR: dataDir,
     STRING_CONFIG: configFile,
     STRING_PORT: String(port),
