@@ -442,3 +442,107 @@ export async function describe(port: number): Promise<DaemonDescription | null> 
   }
   return JSON.parse(res.body) as DaemonDescription;
 }
+
+// ─── System plane: fs verbs ──────────────────────────────────────────────────
+//
+// PUT/GET/DELETE/STAT /fs/{workspace-path}, authenticated by a capability
+// secret (Authorization: Bearer). STAT maps to HTTP HEAD; stat data rides in
+// Content-Length / Last-Modified headers. These helpers never throw on
+// application-level refusals — the status (and reason, when the daemon sends
+// one) is the result, so callers/tests can assert on 401/403/404/409/413.
+
+function fsUrlPath(fsPath: string): string {
+  return '/fs/' + fsPath.split('/').map(encodeURIComponent).join('/');
+}
+
+function fsRequest(
+  port: number,
+  method: string,
+  fsPath: string,
+  cap: string,
+  body?: Buffer,
+): Promise<{ status: number; body: Buffer; headers: http.IncomingHttpHeaders }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      {
+        hostname: '127.0.0.1',
+        port,
+        method,
+        path: fsUrlPath(fsPath),
+        agent: false, // see request(): fresh socket per call, no pooled-socket resets
+        headers: {
+          Authorization: `Bearer ${cap}`,
+          ...(body !== undefined
+            ? { 'Content-Type': 'application/octet-stream', 'Content-Length': body.length }
+            : {}),
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on('data', (c) => chunks.push(c));
+        res.on('end', () =>
+          resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks), headers: res.headers }),
+        );
+        res.on('error', reject);
+      },
+    );
+    req.on('error', reject);
+    if (body !== undefined) req.write(body);
+    req.end();
+  });
+}
+
+function fsReason(body: Buffer): string | undefined {
+  try { return (JSON.parse(body.toString('utf-8')) as { reason?: string }).reason; } catch { return undefined; }
+}
+
+/** PUT /fs/{path} — write bytes. 201 created / 200 overwritten. */
+export async function fsPut(
+  port: number,
+  fsPath: string,
+  data: Buffer | string,
+  cap: string,
+): Promise<{ status: number; ok: boolean; created?: boolean; reason?: string }> {
+  const buf = typeof data === 'string' ? Buffer.from(data, 'utf-8') : data;
+  const res = await fsRequest(port, 'PUT', fsPath, cap, buf);
+  return { status: res.status, ok: res.status === 200 || res.status === 201, created: res.status === 201, reason: fsReason(res.body) };
+}
+
+/** GET /fs/{path} — read bytes. `data` is set only on 200. */
+export async function fsGet(
+  port: number,
+  fsPath: string,
+  cap: string,
+): Promise<{ status: number; ok: boolean; data?: Buffer; reason?: string }> {
+  const res = await fsRequest(port, 'GET', fsPath, cap);
+  if (res.status === 200) return { status: 200, ok: true, data: res.body };
+  return { status: res.status, ok: false, reason: fsReason(res.body) };
+}
+
+/** STAT (HTTP HEAD) /fs/{path} — size/mtime from headers; 404 = not a file. */
+export async function fsStat(
+  port: number,
+  fsPath: string,
+  cap: string,
+): Promise<{ status: number; exists: boolean; size?: number; mtime?: string }> {
+  const res = await fsRequest(port, 'HEAD', fsPath, cap);
+  if (res.status !== 200) return { status: res.status, exists: false };
+  return {
+    status: 200,
+    exists: true,
+    size: Number(res.headers['content-length']),
+    mtime: res.headers['last-modified'],
+  };
+}
+
+/** DELETE /fs/{path} — idempotent; `existed` says whether bytes were removed. */
+export async function fsDelete(
+  port: number,
+  fsPath: string,
+  cap: string,
+): Promise<{ status: number; ok: boolean; existed?: boolean; reason?: string }> {
+  const res = await fsRequest(port, 'DELETE', fsPath, cap);
+  if (res.status !== 200) return { status: res.status, ok: false, reason: fsReason(res.body) };
+  const parsed = JSON.parse(res.body.toString('utf-8')) as { existed?: boolean };
+  return { status: 200, ok: true, existed: parsed.existed };
+}

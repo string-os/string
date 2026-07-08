@@ -89,8 +89,8 @@ await section('describe — default (unconfigured) instance', async () => {
       'events capability advertises webhook text cap');
     assert(desc!.capabilities['exec'].max_request_body_bytes === 10 * 1024 * 1024,
       'exec capability advertises request body cap');
-    assert(!('fs' in desc!.capabilities),
-      'fs capability not advertised before the fs verbs land');
+    assert(desc!.capabilities['fs']?.max_bytes === 32 * 1024 * 1024,
+      'fs capability advertises max_bytes');
 
     // /health is pinned: liveness only, no instance/capability leakage.
     const h = await client.health(env.port);

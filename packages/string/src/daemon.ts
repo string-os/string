@@ -23,6 +23,9 @@
  *   GET    /describe          — { name, version, api, instance, capabilities }
  *   POST   /shutdown          — graceful shutdown
  *
+ *   PUT/GET/DELETE /fs/{path} — System plane fs verbs (capability-gated);
+ *   HEAD /fs/{path}           — STAT (size/mtime in headers)
+ *
  * SSE response (POST /exec):
  *   event: head
  *   data: { ok, code, cmd, request_id, agent_id, topic, topic_type, meta }
@@ -35,7 +38,7 @@
  */
 
 import http from 'http';
-import { mkdirSync, readdirSync, readFileSync, statSync } from 'fs';
+import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { Browser } from './index.js';
@@ -46,6 +49,7 @@ import { AgentRegistry, type Agent } from './agent.js';
 import { createStringServer, type McpExecFn } from './mcp.js';
 import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/streamableHttp.js';
 import { EventStore, createWebhookToken, type AgentEvent } from './events.js';
+import { CapabilityStore, type FsVerb, type VerifyFailure } from './capability.js';
 import { STRING_VERSION } from './version.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -103,6 +107,7 @@ interface SessionMeta {
 // only for tests / isolated installs.
 const STRING_DATA_DIR = process.env.STRING_DATA_DIR || join(homedir(), '.string', 'daemon');
 const agents = new AgentRegistry([], join(STRING_DATA_DIR, 'agents.json'));
+const capabilities = new CapabilityStore({ persistPath: join(STRING_DATA_DIR, 'capabilities.json') });
 const runtimes = new Map<string, RuntimeEntry>();
 const eventStreams = new Map<string, Set<http.ServerResponse>>();
 let log: Logger;
@@ -295,7 +300,9 @@ function handleListAgents(_req: http.IncomingMessage, res: http.ServerResponse):
 function handleDeleteAgent(res: http.ServerResponse, agentId: string): void {
   const existed = agents.delete(agentId);
   runtimes.delete(agentId);
-  log.info('agent.delete', { agentId, existed });
+  // Capabilities are grants INTO this agent's workspace — they die with it.
+  const revokedCaps = capabilities.revokeAllForAgent(agentId);
+  log.info('agent.delete', { agentId, existed, revokedCaps });
   sendJson(res, 200, { agent_id: agentId, deleted: existed });
 }
 
@@ -893,8 +900,212 @@ function handleDescribe(res: http.ServerResponse): void {
       'sessions': {},
       'exec': { max_request_body_bytes: MAX_REQUEST_BODY_BYTES },
       'mcp': {},
+      'fs': { max_bytes: FS_MAX_BYTES },
     },
   });
+}
+
+// ─── System plane — fs verbs (#47 item 1) ────────────────────────────────────
+//
+// PUT/GET/DELETE/STAT /fs/{workspace-path}, authenticated ONLY by capability
+// tokens (bearer header or ?cap= presigned form) — never by X-Agent-Id. The
+// capability carries the workspace root (agent id); paths are workspace-
+// relative. STAT maps to HTTP HEAD (S3 HEAD-object precedent): stat data
+// rides in Content-Length / Last-Modified headers.
+//
+// Boundary rule: this plane moves data; it never acts. No other method is
+// routed here, and the verifier's verb universe is the four data verbs.
+
+/** Buffered v0 body cap for fs PUT/GET, advertised in /describe as fs.max_bytes. */
+const FS_MAX_BYTES = 32 * 1024 * 1024;
+
+/**
+ * Buffer a raw request body up to maxBytes. On overflow the rest of the
+ * stream is drained (so the client reliably receives the 413 instead of a
+ * socket reset mid-upload) — but only up to 2× the cap; a stream that keeps
+ * going past that is hostile and gets cut.
+ */
+function readBodyRaw(
+  req: http.IncomingMessage,
+  maxBytes: number,
+): Promise<{ data?: Buffer; tooLarge?: boolean }> {
+  return new Promise((resolve, reject) => {
+    const chunks: Buffer[] = [];
+    let size = 0;
+    let tooLarge = false;
+    req.on('data', c => {
+      size += c.length;
+      if (tooLarge) {
+        if (size > maxBytes * 2) req.destroy();
+        return;
+      }
+      if (size > maxBytes) {
+        tooLarge = true;
+        chunks.length = 0;
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(tooLarge ? { tooLarge: true } : { data: Buffer.concat(chunks) }));
+    req.on('error', reject);
+  });
+}
+
+function verifyFailureStatus(reason: VerifyFailure): number {
+  switch (reason) {
+    case 'unknown_token':
+    case 'expired':
+    case 'revoked':
+    case 'already_used':
+      return 401;
+    case 'verb_not_allowed':
+    case 'path_outside_scope':
+      return 403;
+    case 'invalid_path':
+      return 400;
+  }
+}
+
+/** Bearer header, else ?cap= (the presigned form). */
+function fsCapabilitySecret(req: http.IncomingMessage, url: URL): string | null {
+  const auth = req.headers['authorization'];
+  if (typeof auth === 'string' && auth.startsWith('Bearer ')) return auth.slice('Bearer '.length).trim();
+  return url.searchParams.get('cap');
+}
+
+/**
+ * Resolve a verifier-normalized workspace-relative path to an absolute path
+ * inside the agent's home. Physical half of containment (the verifier did
+ * the lexical half): symlinks are refused anywhere along the path — the
+ * system plane never follows a link, so it can never follow one out of the
+ * workspace. Missing trailing segments are allowed (PUT creates them).
+ */
+function resolveFsPath(
+  home: string,
+  relPath: string,
+): { ok: true; abs: string } | { ok: false; status: number; error: string } {
+  mkdirSync(home, { recursive: true });
+  const root = realpathSync(home);
+  const segments = relPath === '' ? [] : relPath.split('/');
+  let abs = root;
+  for (let i = 0; i < segments.length; i++) {
+    abs = join(abs, segments[i]);
+    let st;
+    try { st = lstatSync(abs); } catch { st = null; }
+    if (!st) continue; // missing suffix — created by PUT, 404 for others
+    if (st.isSymbolicLink()) {
+      return { ok: false, status: 403, error: `Symlink refused on the system plane: ${segments.slice(0, i + 1).join('/')}` };
+    }
+    if (!st.isDirectory() && i < segments.length - 1) {
+      return { ok: false, status: 409, error: `Not a directory: ${segments.slice(0, i + 1).join('/')}` };
+    }
+  }
+  return { ok: true, abs };
+}
+
+async function handleFs(req: http.IncomingMessage, res: http.ServerResponse, url: URL): Promise<void> {
+  const method = req.method ?? 'GET';
+  const verb: FsVerb | null =
+    method === 'PUT' ? 'PUT'
+    : method === 'GET' ? 'GET'
+    : method === 'DELETE' ? 'DELETE'
+    : method === 'HEAD' ? 'STAT'
+    : null;
+  if (!verb) {
+    sendJson(res, 405, { error: `Method not on the system plane: ${method}` });
+    return;
+  }
+
+  const secret = fsCapabilitySecret(req, url);
+  if (!secret) {
+    sendJson(res, 401, { error: 'Capability required (Authorization: Bearer <secret> or ?cap=<secret>)' });
+    return;
+  }
+
+  let rawPath: string;
+  try {
+    rawPath = decodeURIComponent(url.pathname.slice('/fs'.length));
+  } catch {
+    sendJson(res, 400, { error: 'Malformed percent-encoding in path' });
+    return;
+  }
+
+  const verdict = capabilities.verify(secret, { verb, path: rawPath });
+  if (!verdict.ok) {
+    log.info('fs.refused', { verb, reason: verdict.reason });
+    if (verb === 'STAT') { res.writeHead(verifyFailureStatus(verdict.reason)); res.end(); return; }
+    sendJson(res, verifyFailureStatus(verdict.reason), { error: `Capability refused: ${verdict.reason}`, reason: verdict.reason });
+    return;
+  }
+
+  const agent = agents.get(verdict.record.agentId);
+  if (!agent) {
+    // The workspace is gone; treat exactly like a revoked grant.
+    if (verb === 'STAT') { res.writeHead(401); res.end(); return; }
+    sendJson(res, 401, { error: 'Capability refused: workspace agent no longer exists', reason: 'revoked' });
+    return;
+  }
+
+  const resolved = resolveFsPath(agent.home, verdict.path);
+  if (!resolved.ok) {
+    if (verb === 'STAT') { res.writeHead(resolved.status); res.end(); return; }
+    sendJson(res, resolved.status, { error: resolved.error });
+    return;
+  }
+  const abs = resolved.abs;
+
+  let st;
+  try { st = lstatSync(abs); } catch { st = null; }
+
+  if (verb === 'PUT') {
+    if (st?.isDirectory()) {
+      sendJson(res, 409, { error: `Path is a directory: ${verdict.path}` });
+      return;
+    }
+    const body = await readBodyRaw(req, FS_MAX_BYTES);
+    if (body.tooLarge) {
+      sendJson(res, 413, { error: `Body exceeds fs.max_bytes (${FS_MAX_BYTES})` });
+      return;
+    }
+    mkdirSync(join(abs, '..'), { recursive: true });
+    writeFileSync(abs, body.data!);
+    log.info('fs.put', { agentId: agent.id, path: verdict.path, size: body.data!.length });
+    sendJson(res, st ? 200 : 201, { ok: true, path: verdict.path, size: body.data!.length });
+    return;
+  }
+
+  if (verb === 'GET') {
+    if (!st) { sendJson(res, 404, { error: `Not found: ${verdict.path}` }); return; }
+    if (st.isDirectory()) { sendJson(res, 409, { error: `Path is a directory: ${verdict.path}` }); return; }
+    const data = readFileSync(abs);
+    log.info('fs.get', { agentId: agent.id, path: verdict.path, size: data.length });
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': data.length,
+      'Last-Modified': st.mtime.toUTCString(),
+    });
+    res.end(data);
+    return;
+  }
+
+  if (verb === 'STAT') {
+    // HEAD: stat data in headers, never a body.
+    if (!st || st.isDirectory()) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, {
+      'Content-Type': 'application/octet-stream',
+      'Content-Length': st.size,
+      'Last-Modified': st.mtime.toUTCString(),
+    });
+    res.end();
+    return;
+  }
+
+  // DELETE — idempotent: deleting the absent is success, not 404.
+  if (st?.isDirectory()) { sendJson(res, 409, { error: `Path is a directory: ${verdict.path}` }); return; }
+  const existed = !!st;
+  if (existed) rmSync(abs);
+  log.info('fs.delete', { agentId: agent.id, path: verdict.path, existed });
+  sendJson(res, 200, { ok: true, path: verdict.path, existed });
 }
 
 // ─── Router ───────────────────────────────────────────────────────────────────
@@ -902,7 +1113,7 @@ function handleDescribe(res: http.ServerResponse): void {
 function createServer(): http.Server {
   return http.createServer(async (req, res) => {
     res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Agent-Id');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Agent-Id, Authorization');
 
     if (req.method === 'OPTIONS') {
       res.writeHead(204);
@@ -918,8 +1129,12 @@ function createServer(): http.Server {
     log.info('request', { method, path: pathname, agentId: reqUserId ?? '' });
 
     try {
+      // ── System plane: fs verbs (capability-gated) ──
+      if (pathname === '/fs' || pathname.startsWith('/fs/')) {
+        await handleFs(req, res, url);
+
       // ── Agent routes ──
-      if (method === 'GET' && pathname === '/agents') {
+      } else if (method === 'GET' && pathname === '/agents') {
         handleListAgents(req, res);
       } else if (method === 'POST' && pathname === '/agents') {
         await handleRegisterAgent(req, res);
