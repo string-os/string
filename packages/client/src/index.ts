@@ -415,3 +415,29 @@ export async function health(port: number): Promise<{ ok: boolean; version?: str
   }
   return JSON.parse(res.body);
 }
+
+/** GET /describe — daemon self-description (version + capability handshake). */
+export interface DaemonDescription {
+  name: string;
+  version: string;
+  /** API surface version, e.g. "string-daemon/v2". */
+  api: string;
+  /** Self-declared identity — clients refuse production daemons by role, not port. */
+  instance: { instance_label: string; role: 'production' | 'dev' | 'test' };
+  /** Feature id → operational limits. Presence of a key = feature supported. */
+  capabilities: Record<string, Record<string, number | string | boolean>>;
+}
+
+/**
+ * Describe a daemon. Returns null when the daemon predates the /describe
+ * endpoint (pre-v2 surfaces answer 404 here while /health still works) —
+ * callers treat null as "unknown surface, probe before use".
+ */
+export async function describe(port: number): Promise<DaemonDescription | null> {
+  const res = await request(port, 'GET', '/describe');
+  if (res.status === 404) return null;
+  if (res.status !== 200) {
+    throw new Error(`describe failed (${res.status}): ${res.body}`);
+  }
+  return JSON.parse(res.body) as DaemonDescription;
+}

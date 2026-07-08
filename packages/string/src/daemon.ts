@@ -20,6 +20,7 @@
  *     body:    { cmd: string, topic?: string, request_id?: string }
  *
  *   GET    /health            — { ok, agents, sessions }
+ *   GET    /describe          — { name, version, api, instance, capabilities }
  *   POST   /shutdown          — graceful shutdown
  *
  * SSE response (POST /exec):
@@ -34,7 +35,7 @@
  */
 
 import http from 'http';
-import { mkdirSync, readdirSync, statSync } from 'fs';
+import { mkdirSync, readdirSync, readFileSync, statSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { Browser } from './index.js';
@@ -830,6 +831,69 @@ async function handleMcp(req: http.IncomingMessage, res: http.ServerResponse): P
   }
 }
 
+// ─── Self-describe ────────────────────────────────────────────────────────────
+
+/** Daemon API surface version. Bump when routes/semantics change incompatibly. */
+const STRING_DAEMON_API = 'string-daemon/v2';
+
+type InstanceRole = 'production' | 'dev' | 'test';
+
+/**
+ * Instance identity, sourced from `${STRING_DATA_DIR}/daemon.json`:
+ *   { "instance_label": "main", "role": "production" | "dev" | "test" }
+ *
+ * Lets clients refuse (or require) a production daemon by self-declaration
+ * instead of hardcoded port checks. An unconfigured instance defaults to
+ * role "dev" — production deployments MUST set daemon.json explicitly.
+ * Read per request so operators can (re)label a running daemon.
+ */
+function loadInstanceIdentity(): { instance_label: string; role: InstanceRole } {
+  let instanceLabel = 'stringd';
+  let role: InstanceRole = 'dev';
+  try {
+    const raw = JSON.parse(readFileSync(join(STRING_DATA_DIR, 'daemon.json'), 'utf-8')) as {
+      instance_label?: unknown;
+      role?: unknown;
+    };
+    if (typeof raw.instance_label === 'string' && raw.instance_label.trim()) {
+      instanceLabel = raw.instance_label.trim();
+    }
+    if (raw.role === 'production' || raw.role === 'dev' || raw.role === 'test') {
+      role = raw.role;
+    }
+  } catch {
+    // No daemon.json (or unreadable/corrupt) — unconfigured instance, defaults apply.
+  }
+  return { instance_label: instanceLabel, role };
+}
+
+/**
+ * GET /describe — version + capability handshake.
+ *
+ * Clients MUST NOT assume the API surface from the port a daemon answers on;
+ * they probe this endpoint and key off `capabilities` (presence = supported)
+ * and the advertised limits (never hardcode them client-side). `/health`
+ * stays a minimal liveness check and is intentionally untouched.
+ */
+function handleDescribe(res: http.ServerResponse): void {
+  sendJson(res, 200, {
+    name: 'stringd',
+    version: STRING_VERSION,
+    api: STRING_DAEMON_API,
+    instance: loadInstanceIdentity(),
+    capabilities: {
+      'describe': {},
+      'agents': {},
+      'agent-webhooks': {},
+      'events': { max_webhook_text_bytes: MAX_WEBHOOK_TEXT_BYTES },
+      'event-stream': {},
+      'sessions': {},
+      'exec': { max_request_body_bytes: MAX_REQUEST_BODY_BYTES },
+      'mcp': {},
+    },
+  });
+}
+
 // ─── Router ───────────────────────────────────────────────────────────────────
 
 function createServer(): http.Server {
@@ -904,6 +968,8 @@ function createServer(): http.Server {
       } else if (method === 'POST' && pathname === '/shutdown') {
         sendJson(res, 200, { ok: true, message: 'stringd shutting down' });
         setTimeout(() => process.exit(0), 50);
+      } else if (method === 'GET' && pathname === '/describe') {
+        handleDescribe(res);
       } else if (method === 'GET' && pathname === '/health') {
         let totalTopics = 0;
         for (const r of runtimes.values()) totalTopics += r.topics.size;
@@ -964,7 +1030,7 @@ export function startDaemon(port = 3923, opts?: { log?: boolean }): void {
   // explicit `--bind` + auth layer, planned for a later milestone.
   server.listen(port, '127.0.0.1', () => {
     console.log(`stringd listening on http://127.0.0.1:${port}`);
-    console.log('Endpoints: POST/GET/DELETE /agents  GET/POST /agents/:id/webhook  POST /webhook/:token  GET /events/stream  GET/POST/DELETE /sessions  POST /exec  /mcp');
+    console.log('Endpoints: GET /describe  POST/GET/DELETE /agents  GET/POST /agents/:id/webhook  POST /webhook/:token  GET /events/stream  GET/POST/DELETE /sessions  POST /exec  /mcp');
     log.info('server.start', { port, version: STRING_VERSION, dataDir: STRING_DATA_DIR, logEnabled });
   });
 
