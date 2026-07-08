@@ -617,3 +617,46 @@ export async function revokeCapability(port: number, tokenId: string): Promise<b
   }
   return (JSON.parse(res.body) as { revoked?: boolean }).revoked ?? false;
 }
+
+/**
+ * POST /agents with the one-call provisioning extras — pairing in a single
+ * request: ensure the agent exists, get its webhook URL, and mint an initial
+ * scoped capability. Built for disposable test agents:
+ * provision → use → deleteAgent() (which revokes everything with it).
+ */
+export interface ProvisionedAgent {
+  agent_id: string;
+  home: string;
+  created: boolean;
+  webhook_url?: string;
+  capability?: Omit<MintedCapability, 'agent_id'>;
+}
+
+export async function provisionAgent(
+  port: number,
+  spec: {
+    id: string;
+    home?: string;
+    allowedPaths?: string[];
+    webhook?: boolean;
+    capability?: { pathPrefix: string; verbs: CapabilityVerb[]; ttlMs: number; singleUse?: boolean };
+  },
+): Promise<ProvisionedAgent> {
+  const payload: Record<string, unknown> = { agent_id: spec.id };
+  if (spec.home !== undefined) payload.home = spec.home;
+  if (spec.allowedPaths !== undefined) payload.allowed_paths = spec.allowedPaths;
+  if (spec.webhook !== undefined) payload.webhook = spec.webhook;
+  if (spec.capability !== undefined) {
+    payload.capability = {
+      path_prefix: spec.capability.pathPrefix,
+      verbs: spec.capability.verbs,
+      ttl_ms: spec.capability.ttlMs,
+      single_use: spec.capability.singleUse ?? false,
+    };
+  }
+  const res = await request(port, 'POST', '/agents', JSON.stringify(payload));
+  if (res.status !== 200) {
+    throw new Error(`provisionAgent failed (${res.status}): ${res.body}`);
+  }
+  return JSON.parse(res.body) as ProvisionedAgent;
+}
