@@ -901,8 +901,93 @@ function handleDescribe(res: http.ServerResponse): void {
       'exec': { max_request_body_bytes: MAX_REQUEST_BODY_BYTES },
       'mcp': {},
       'fs': { max_bytes: FS_MAX_BYTES },
+      'capability-tokens': {},
     },
   });
+}
+
+// ─── Capability issuance (#47 item 3) ────────────────────────────────────────
+//
+// Minting lives on the local trust plane (like POST /agents): components get
+// their capability at pairing time, and the agent mints ad-hoc grants from
+// the shell — both land here, one code path. The secret appears exactly once,
+// in the mint response; list/revoke work on the public token id.
+
+async function handleMintCapability(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const body = await readBody(req);
+  let data: {
+    agent_id?: string;
+    path_prefix?: string;
+    verbs?: string[];
+    ttl_ms?: number;
+    single_use?: boolean;
+  } = {};
+  try { data = JSON.parse(body); } catch { /* handled below */ }
+
+  const agentId = data.agent_id?.trim();
+  if (!agentId) {
+    sendJson(res, 400, { error: 'agent_id required' });
+    return;
+  }
+  if (!agents.get(agentId)) {
+    sendJson(res, 404, { error: `Unknown agent: ${agentId} — a capability must target an existing workspace` });
+    return;
+  }
+  if (!Array.isArray(data.verbs) || data.verbs.length === 0) {
+    sendJson(res, 400, { error: 'verbs required (array of PUT|GET|DELETE|STAT)' });
+    return;
+  }
+
+  let record;
+  try {
+    record = capabilities.mint({
+      agentId,
+      pathPrefix: data.path_prefix ?? '',
+      verbs: data.verbs.map(v => String(v).toUpperCase()) as FsVerb[],
+      ttlMs: data.ttl_ms ?? 0,
+      singleUse: data.single_use ?? false,
+    });
+  } catch (e) {
+    sendJson(res, 400, { error: String((e as Error).message ?? e) });
+    return;
+  }
+
+  log.info('capability.mint', {
+    tokenId: record.tokenId, agentId, pathPrefix: record.pathPrefix,
+    verbs: record.verbs.join(','), expiresAt: record.expiresAt, singleUse: record.singleUse,
+  });
+  sendJson(res, 201, {
+    token_id: record.tokenId,
+    secret: record.secret, // shown exactly once
+    agent_id: record.agentId,
+    path_prefix: record.pathPrefix,
+    verbs: record.verbs,
+    expires_at: record.expiresAt,
+    single_use: record.singleUse,
+  });
+}
+
+function handleListCapabilities(res: http.ServerResponse, agentFilter: string | null): void {
+  const records = capabilities.list()
+    .filter(r => !agentFilter || r.agentId === agentFilter)
+    .map(r => ({
+      token_id: r.tokenId,
+      agent_id: r.agentId,
+      path_prefix: r.pathPrefix,
+      verbs: r.verbs,
+      expires_at: r.expiresAt,
+      single_use: r.singleUse,
+      created_at: r.createdAt,
+      used_at: r.usedAt ?? null,
+      revoked_at: r.revokedAt ?? null,
+    }));
+  sendJson(res, 200, { capabilities: records });
+}
+
+function handleRevokeCapability(res: http.ServerResponse, tokenId: string): void {
+  const revoked = capabilities.revoke(tokenId);
+  log.info('capability.revoke', { tokenId, revoked });
+  sendJson(res, 200, { token_id: tokenId, revoked });
 }
 
 // ─── System plane — fs verbs (#47 item 1) ────────────────────────────────────
@@ -1132,6 +1217,14 @@ function createServer(): http.Server {
       // ── System plane: fs verbs (capability-gated) ──
       if (pathname === '/fs' || pathname.startsWith('/fs/')) {
         await handleFs(req, res, url);
+
+      // ── Capability issuance ──
+      } else if (method === 'POST' && pathname === '/capabilities') {
+        await handleMintCapability(req, res);
+      } else if (method === 'GET' && pathname === '/capabilities') {
+        handleListCapabilities(res, url.searchParams.get('agent_id'));
+      } else if (method === 'DELETE' && pathname.startsWith('/capabilities/')) {
+        handleRevokeCapability(res, decodeURIComponent(pathname.slice('/capabilities/'.length)));
 
       // ── Agent routes ──
       } else if (method === 'GET' && pathname === '/agents') {

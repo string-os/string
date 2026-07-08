@@ -22,7 +22,7 @@ import { cmdExec, dispatchBash } from './exec.js';
 import { cmdTool } from './tool.js';
 import { cmdInstall, cmdUninstall } from './packages.js';
 import { cmdEvents } from './events.js';
-import { cmdAgentHub, cmdEventWebhook, cmdSystemHub } from './management.js';
+import { cmdAgentCapability, cmdAgentHub, cmdEventWebhook, cmdSystemHub } from './management.js';
 import { GLOBAL_COMMANDS, actionCommand } from './builtins.js';
 
 // ─── Command Parser ──────────────────────────────────────────────────────────
@@ -124,6 +124,9 @@ export async function dispatch(
   if (topicType === 'hub') {
     if (session.name === 'agent' && ['help', 'list', 'add', 'use', 'current', 'set-home', 'rm', 'remove'].includes(cmd)) {
       return cmdAgentHub(`${cmd} ${actionArgs}`.trim(), loader);
+    }
+    if (session.name === 'agent' && cmd === 'capability') {
+      return cmdAgentCapability(actionArgs, loader);
     }
     if (session.name === 'system' && ['help', 'status', 'stop', 'restart'].includes(cmd)) {
       return cmdSystemHub(`${cmd} ${actionArgs}`.trim(), loader);

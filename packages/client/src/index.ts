@@ -546,3 +546,74 @@ export async function fsDelete(
   const parsed = JSON.parse(res.body.toString('utf-8')) as { existed?: boolean };
   return { status: 200, ok: true, existed: parsed.existed };
 }
+
+// ─── Capability issuance ─────────────────────────────────────────────────────
+
+export type CapabilityVerb = 'PUT' | 'GET' | 'DELETE' | 'STAT';
+
+/** Returned by mint — the only place the secret ever appears. */
+export interface MintedCapability {
+  token_id: string;
+  secret: string;
+  agent_id: string;
+  path_prefix: string;
+  verbs: CapabilityVerb[];
+  expires_at: string;
+  single_use: boolean;
+}
+
+/** Public capability record — no secret. */
+export interface CapabilityInfo {
+  token_id: string;
+  agent_id: string;
+  path_prefix: string;
+  verbs: CapabilityVerb[];
+  expires_at: string;
+  single_use: boolean;
+  created_at: string;
+  used_at: string | null;
+  revoked_at: string | null;
+}
+
+/** POST /capabilities — mint a scoped fs capability into an agent's workspace. */
+export async function mintCapability(
+  port: number,
+  spec: {
+    agentId: string;
+    pathPrefix: string;
+    verbs: CapabilityVerb[];
+    ttlMs: number;
+    singleUse?: boolean;
+  },
+): Promise<MintedCapability> {
+  const res = await request(port, 'POST', '/capabilities', JSON.stringify({
+    agent_id: spec.agentId,
+    path_prefix: spec.pathPrefix,
+    verbs: spec.verbs,
+    ttl_ms: spec.ttlMs,
+    single_use: spec.singleUse ?? false,
+  }));
+  if (res.status !== 201) {
+    throw new Error(`mintCapability failed (${res.status}): ${res.body}`);
+  }
+  return JSON.parse(res.body) as MintedCapability;
+}
+
+/** GET /capabilities[?agent_id=] — list public capability records. */
+export async function listCapabilities(port: number, agentId?: string): Promise<CapabilityInfo[]> {
+  const query = agentId ? `?agent_id=${encodeURIComponent(agentId)}` : '';
+  const res = await request(port, 'GET', `/capabilities${query}`);
+  if (res.status !== 200) {
+    throw new Error(`listCapabilities failed (${res.status}): ${res.body}`);
+  }
+  return (JSON.parse(res.body) as { capabilities: CapabilityInfo[] }).capabilities ?? [];
+}
+
+/** DELETE /capabilities/:tokenId — revoke by public token id. */
+export async function revokeCapability(port: number, tokenId: string): Promise<boolean> {
+  const res = await request(port, 'DELETE', `/capabilities/${encodeURIComponent(tokenId)}`);
+  if (res.status !== 200) {
+    throw new Error(`revokeCapability failed (${res.status}): ${res.body}`);
+  }
+  return (JSON.parse(res.body) as { revoked?: boolean }).revoked ?? false;
+}
