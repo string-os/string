@@ -155,6 +155,21 @@ await section('agent CLI — add/use/current + clobber fix (e2e)', async () => {
     assert(readConfig(env).currentAgent === 'leo',
       'STRING_AGENT_ID call does not change config.currentAgent');
 
+    // `agent current` must report the RESOLVED agent (honoring STRING_AGENT_ID /
+    // --agent), NOT the raw global config.currentAgent. Regression: it used to
+    // print the config value, masking an agent mix-up (config=leo above).
+    const currentAsMaya = runCli(env, ['agent', 'current'], { STRING_AGENT_ID: 'maya' });
+    assert(/\nmaya\t/.test(currentAsMaya.stdout),
+      'agent current honors STRING_AGENT_ID (reports maya, not config leo)');
+    assert(!/\nleo\t/.test(currentAsMaya.stdout),
+      'agent current does not misreport config leo under STRING_AGENT_ID');
+    assert(currentAsMaya.stdout.includes(mayaHome), 'agent current shows the resolved agent home');
+    const currentAsFlag = runCli(env, ['--agent', 'maya', 'agent', 'current']);
+    assert(/\nmaya\t/.test(currentAsFlag.stdout),
+      'agent current honors the --agent flag');
+    assert(readConfig(env).currentAgent === 'leo',
+      'agent current is read-through — does not mutate config');
+
     const localRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'string-agent-local-'));
     const localConfig = path.join(localRoot, '.string', 'config.json');
     const localUse = runCli(env, ['agent', 'use', 'maya', '--local'], { STRING_PROJECT_DIR: localRoot });
