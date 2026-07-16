@@ -12,6 +12,12 @@ import { assert, section } from './runner.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(__dirname, '../cli.ts');
 
+// Spawning `npx tsx CLI --mcp` cold-starts a whole tsx/Node process; under CI
+// load that can take well over 5s before the MCP `initialize`/`tools/list`
+// responses appear. Give those subprocess-handshake waits generous headroom so
+// the suite doesn't flake on slow runners (the assertions still gate correctness).
+const MCP_INIT_TIMEOUT_MS = 20_000;
+
 interface Env {
   root: string;
   dataDir: string;
@@ -197,6 +203,10 @@ await section('events — delivered/acked lifecycle + grace-gated deliverable', 
   try {
     const store = new EventStore(home);
     const a = await store.append('agent-a', 'first');
+    // Space the appends so receivedAt (ms precision) is strictly ordered — two
+    // same-ms events tie and `deliverable`'s sort would fall back to readdir order,
+    // making the oldest-first assertion below non-deterministic.
+    await wait(5);
     const b = await store.append('agent-a', 'second');
 
     // Pending events are always deliverable, regardless of grace, oldest-first.
@@ -360,7 +370,7 @@ await section('events — local webhook appends text to current agent inbox', as
         clientInfo: { name: 'string-test', version: '0.0.0' },
       },
     }) + '\n');
-    await waitFor(() => channelOut.includes('"id":1'), 5000);
+    await waitFor(() => channelOut.includes('"id":1'), MCP_INIT_TIMEOUT_MS);
     assert(channelOut.includes('"claude/channel"'), 'combined MCP server advertises Claude channel capability');
 
     channel.stdin.write(JSON.stringify({
@@ -376,7 +386,7 @@ await section('events — local webhook appends text to current agent inbox', as
       method: 'tools/list',
       params: {},
     }) + '\n');
-    await waitFor(() => channelOut.includes('"id":2'), 5000);
+    await waitFor(() => channelOut.includes('"id":2'), MCP_INIT_TIMEOUT_MS);
     assert(channelOut.includes('"name":"string"'), 'combined MCP server still exposes string tool');
 
     const channelPosted = await postText(webhookUrl!, 'claude channel delivery test');
@@ -385,7 +395,7 @@ await section('events — local webhook appends text to current agent inbox', as
       () => channelOut.includes('notifications/claude/channel')
         && channelOut.includes('"content":"claude channel delivery test"')
         && channelOut.includes('"source":"string"'),
-      5000,
+      MCP_INIT_TIMEOUT_MS,
     ).catch(e => {
       throw new Error(`${e.message}. stdout: ${channelOut} stderr: ${channelErr}`);
     });
@@ -533,7 +543,7 @@ await section('events — MCP channel backfills pending webhook on startup', asy
         clientInfo: { name: 'string-test', version: '0.0.0' },
       },
     }) + '\n');
-    await waitFor(() => channelOut.includes('"id":1'), 5000);
+    await waitFor(() => channelOut.includes('"id":1'), MCP_INIT_TIMEOUT_MS);
 
     channel.stdin.write(JSON.stringify({
       jsonrpc: '2.0',
@@ -545,7 +555,7 @@ await section('events — MCP channel backfills pending webhook on startup', asy
       () => channelOut.includes('notifications/claude/channel')
         && channelOut.includes('"content":"offline channel wake"')
         && channelOut.includes('"source":"string"'),
-      5000,
+      MCP_INIT_TIMEOUT_MS,
     ).catch(e => {
       throw new Error(`${e.message}. stdout: ${channelOut} stderr: ${channelErr}`);
     });
