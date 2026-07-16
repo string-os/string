@@ -26,7 +26,7 @@ export async function cmdEvents(args: string, loader: Loader): Promise<CommandRe
 export async function renderEvents(loader: Loader, opts: { includeAck?: boolean } = {}): Promise<CommandResult> {
   const store = new EventStore(loader.home);
   const events = await store.list({ includeAck: opts.includeAck, limit: 50 });
-  const title = opts.includeAck ? 'Recent events' : 'Pending events';
+  const title = opts.includeAck ? 'Recent events' : 'Unacked events';
   const parts: string[] = [
     '# event inbox',
     '',

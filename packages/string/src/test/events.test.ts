@@ -55,9 +55,9 @@ function runCli(
   return { code: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
-async function startDaemon(env: Env): Promise<{ stop: () => void }> {
+async function startDaemon(env: Env, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ stop: () => void }> {
   const child = spawn('npx', ['tsx', CLI, '--daemon', 'foreground', String(env.port)], {
-    env: env.base,
+    env: { ...env.base, ...extraEnv },
     detached: true,
     stdio: 'ignore',
   });
@@ -112,6 +112,42 @@ function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Open a raw SSE connection to /events/stream and collect `event` frames for a
+ * fixed window, then close. Deliberately bypasses the client watcher's
+ * process-local dedup cache so each call models a FRESH consumer process
+ * (session resume / compact / second same-agent session).
+ */
+function collectSSE(port: number, agentId: string, windowMs: number): Promise<Array<{ text?: string }>> {
+  return new Promise(resolve => {
+    const events: Array<{ text?: string }> = [];
+    const req = http.request(
+      { hostname: '127.0.0.1', port, path: '/events/stream', method: 'GET', headers: { 'X-Agent-Id': agentId }, agent: false },
+      res => {
+        let buf = '';
+        res.setEncoding('utf-8');
+        res.on('data', chunk => {
+          buf += chunk;
+          let idx: number;
+          while ((idx = buf.indexOf('\n\n')) !== -1) {
+            const frame = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            const lines = frame.split('\n');
+            const isEvent = lines.some(l => l.startsWith('event: ') && l.slice(7).trim() === 'event');
+            const dataLine = lines.find(l => l.startsWith('data: '));
+            if (isEvent && dataLine) {
+              try { events.push(JSON.parse(dataLine.slice(6))); } catch { /* ignore */ }
+            }
+          }
+        });
+      },
+    );
+    req.on('error', () => { /* destroyed on window close */ });
+    req.end();
+    setTimeout(() => { req.destroy(); resolve(events); }, windowMs);
+  });
+}
+
 function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
   const started = Date.now();
   return new Promise((resolve, reject) => {
@@ -151,6 +187,49 @@ await section('events — EventStore list/read/ack/clear', async () => {
 
     const cleared = await store.clear();
     assert(cleared === 1, 'clear removes acked event');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+await section('events — delivered/acked lifecycle + grace-gated deliverable', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'string-event-deliver-'));
+  try {
+    const store = new EventStore(home);
+    const a = await store.append('agent-a', 'first');
+    const b = await store.append('agent-a', 'second');
+
+    // Pending events are always deliverable, regardless of grace, oldest-first.
+    let d = await store.deliverable(0);
+    assert(d.length === 2 && d[0].id === a.id, 'both pending events deliverable, oldest-first');
+
+    // Mark `a` delivered → with grace 0 it must NOT be redelivered; `b` still flows.
+    const marked = await store.markDelivered(a.id);
+    assert(marked?.status === 'delivered' && !!marked.deliveredAt, 'markDelivered sets status + deliveredAt');
+    d = await store.deliverable(0);
+    assert(d.length === 1 && d[0].id === b.id, 'grace=0 suppresses a delivered event; pending still flows');
+
+    // Within a wide grace, the just-delivered event is redeliverable (crash window).
+    assert((await store.deliverable(60_000)).some(e => e.id === a.id), 'within grace, delivered event is redeliverable');
+
+    // markDelivered is idempotent — deliveredAt must not slide forward on reconnect churn.
+    const again = await store.markDelivered(a.id);
+    assert(again?.deliveredAt === marked!.deliveredAt, 'markDelivered idempotent: deliveredAt unchanged');
+
+    // Ack removes it from deliverable even with an unbounded grace.
+    await store.ack(a.id);
+    assert(!(await store.deliverable(Number.MAX_SAFE_INTEGER)).some(e => e.id === a.id), 'acked event never redelivered, even within grace');
+
+    // deliverable() honours an injected clock — push deliveredAt past the grace.
+    await store.markDelivered(b.id);
+    const bEvent = await store.read(b.id);
+    const future = Date.parse(bEvent!.deliveredAt!) + 10_000;
+    assert((await store.deliverable(5_000, future)).length === 0, 'delivered event past grace (injected now) is suppressed');
+    assert((await store.deliverable(60_000, future)).some(e => e.id === b.id), 'same event within a wider grace still flows');
+
+    // Default list shows unacked (pending + delivered), hides ack.
+    const listed = await store.list();
+    assert(listed.length === 1 && listed[0].id === b.id, 'list default shows delivered (unacked), hides acked');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -309,8 +388,10 @@ await section('events — stream backfills pending events that arrived while dis
     await waitFor(() => received.some(e => e.text === 'missed while offline'), 5000);
     assert(received.some(e => e.text === 'missed while offline'), 'backfill replayed the pending event on connect');
 
-    // A second connect must NOT re-deliver it — still pending (unacked), but de-duped
-    // within this daemon session so reconnect churn can't re-flood the agent.
+    // A second connect must NOT re-deliver it. The first backfill marked it
+    // `delivered` server-side, so within the (default 5-min) grace the daemon
+    // suppresses it for a fresh consumer; the client's process-local cache also
+    // dedups in-process. Either way, reconnect churn can't re-flood the agent.
     const received2: client.AgentEvent[] = [];
     const watcher2 = client.watchAgentEvents(env.port, 'lonely', e => received2.push(e));
     await wait(600);
@@ -318,6 +399,40 @@ await section('events — stream backfills pending events that arrived while dis
     assert(received2.length === 0, 'already-delivered pending event is not re-flooded on reconnect');
   } finally {
     watcher?.close();
+    daemon.stop();
+    fs.rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+await section('events — a fresh consumer past grace is not re-flooded (server-side)', async () => {
+  // The regression this ticket is about: a resume/compact/second session starts a
+  // NEW process with an empty client-side dedup cache, and the old backfill
+  // re-drained the entire pending history. With grace=0 every delivered event is
+  // immediately past-grace, so a second fresh consumer must receive nothing.
+  const env = makeEnv();
+  const daemon = await startDaemon(env, { STRING_EVENT_REDELIVER_GRACE_MS: '0' });
+  const home = path.join(env.root, 'agent-home-grace');
+  try {
+    assert(await client.ping(env.port), 'daemon up for grace test');
+    assert(runCli(env, ['agent', 'add', 'grace', '--home', home]).code === 0, 'agent add ok');
+    assert(runCli(env, ['agent', 'use', 'grace']).code === 0, 'agent use ok');
+    const show = runCli(env, ['event', 'webhook', 'show']);
+    const webhookUrl = show.stdout.split('\n').find(line => line.startsWith('http://127.0.0.1:'));
+    assert(!!webhookUrl, 'webhook URL printed');
+
+    // Event arrives with no stream connected → persisted pending.
+    assert((await postText(webhookUrl!, 'cron tick during downtime')).status === 202, 'webhook accepted');
+
+    // First fresh consumer connects: the pending event is backfilled once, then
+    // marked delivered server-side.
+    const first = await collectSSE(env.port, 'grace', 900);
+    assert(first.some(e => e.text === 'cron tick during downtime'), 'first fresh connect backfills the pending event');
+
+    // Second fresh consumer (a different process — no shared cache). grace=0 means
+    // the now-delivered event is past-grace → it must NOT be replayed.
+    const second = await collectSSE(env.port, 'grace', 900);
+    assert(second.length === 0, 'second fresh connect is NOT re-flooded (delivered + past grace)');
+  } finally {
     daemon.stop();
     fs.rmSync(env.root, { recursive: true, force: true });
   }

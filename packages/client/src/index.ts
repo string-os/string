@@ -33,7 +33,8 @@ export interface AgentEvent {
   receivedAt: string;
   source: 'local-webhook';
   text: string;
-  status: 'pending' | 'ack';
+  status: 'pending' | 'delivered' | 'ack';
+  deliveredAt?: string;
   ackedAt?: string;
 }
 

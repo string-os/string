@@ -2,7 +2,11 @@ import { randomBytes } from 'crypto';
 import fs from 'fs/promises';
 import path from 'path';
 
-export type AgentEventStatus = 'pending' | 'ack';
+// Lifecycle: pending → delivered → ack.
+//  - pending:   appended, never yet flushed to any live stream (missed work).
+//  - delivered: flushed to ≥1 stream at least once; deliveredAt set. Awaiting ack.
+//  - ack:       consumer confirmed handled. Only these are retention-purgeable.
+export type AgentEventStatus = 'pending' | 'delivered' | 'ack';
 
 export interface AgentEvent {
   id: string;
@@ -11,6 +15,7 @@ export interface AgentEvent {
   source: 'local-webhook';
   text: string;
   status: AgentEventStatus;
+  deliveredAt?: string;
   ackedAt?: string;
 }
 
@@ -53,7 +58,9 @@ export class EventStore {
 
   async list(opts: { includeAck?: boolean; limit?: number } = {}): Promise<EventSummary[]> {
     const events = await this.readAll();
-    const filtered = opts.includeAck ? events : events.filter(e => e.status === 'pending');
+    // Default view is "unacked" — both pending and delivered are still open work
+    // for the agent; only ack hides an event.
+    const filtered = opts.includeAck ? events : events.filter(e => e.status !== 'ack');
     const limit = opts.limit ?? 50;
     return filtered
       .sort((a, b) => b.receivedAt.localeCompare(a.receivedAt))
@@ -68,17 +75,48 @@ export class EventStore {
   }
 
   /**
-   * Pending (unacked) events, oldest-first — for replay to a (re)connecting
-   * event stream. Live push (`notifyEventStreams`) only reaches streams connected
-   * at fire time; anything that arrived during a disconnect is persisted here as
-   * `pending` and would otherwise never be delivered. Replaying these on connect
-   * is what lets a reconnecting agent catch up on cron ticks / handoffs it missed.
+   * Events to replay to a (re)connecting stream, oldest-first. Live push
+   * (`notifyEventStreams`) only reaches streams connected at fire time; the
+   * backfill catches a consumer up on what it missed. The set is:
+   *
+   *   - every `pending` event (never flushed to any stream — genuinely missed,
+   *     e.g. a cron tick during downtime); always replayed → at-least-once.
+   *   - `delivered` events still within `graceMs` of their first delivery — a
+   *     crash-mid-turn redelivery window. Delivered events OLDER than the grace
+   *     are assumed handled and NOT replayed, so a later resume / compact / second
+   *     session does not re-flood the agent with its whole history.
+   *
+   * `graceMs = 0` degenerates to "deliver each event exactly once, never redeliver
+   * a delivered event"; a large grace approaches "redeliver until acked".
+   * `nowMs` is injectable for deterministic tests.
    */
-  async pending(): Promise<AgentEvent[]> {
+  async deliverable(graceMs: number, nowMs: number = Date.now()): Promise<AgentEvent[]> {
     const events = await this.readAll();
     return events
-      .filter(e => e.status === 'pending')
+      .filter(e => {
+        if (e.status === 'pending') return true;
+        if (e.status !== 'delivered') return false; // ack → never
+        if (!e.deliveredAt) return true; // delivered but unstamped → replay (safe)
+        return nowMs - Date.parse(e.deliveredAt) < graceMs;
+      })
       .sort((a, b) => a.receivedAt.localeCompare(b.receivedAt));
+  }
+
+  /**
+   * Mark an event delivered (idempotent): pending → delivered, stamping
+   * `deliveredAt` once. A no-op for already-delivered or acked events, so the
+   * grace window is measured from FIRST delivery and never slides forward on
+   * reconnect churn.
+   */
+  async markDelivered(id: string): Promise<AgentEvent | null> {
+    const event = await this.read(id);
+    if (!event) return null;
+    if (event.status === 'pending') {
+      event.status = 'delivered';
+      event.deliveredAt = new Date().toISOString();
+      await fs.writeFile(this.eventPath(id), JSON.stringify(event, null, 2) + '\n', { mode: 0o600 });
+    }
+    return event;
   }
 
   async read(id: string): Promise<AgentEvent | null> {

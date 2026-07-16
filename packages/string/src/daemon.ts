@@ -118,6 +118,16 @@ let log: Logger;
 const MAX_REQUEST_BODY_BYTES = 10 * 1024 * 1024;
 const MAX_WEBHOOK_TEXT_BYTES = 64 * 1024;
 
+// How long after an event's first delivery the backfill will still redeliver it
+// to a (re)connecting stream — a crash-mid-turn recovery window. Past this, a
+// delivered-but-unacked event is assumed handled and is not re-sent, so a resume
+// / compact / second session doesn't re-flood the agent with its full history.
+// 0 → deliver exactly once; large → redeliver until acked. Override via env.
+const EVENT_REDELIVER_GRACE_MS = (() => {
+  const v = Number(process.env.STRING_EVENT_REDELIVER_GRACE_MS);
+  return Number.isFinite(v) && v >= 0 ? v : 5 * 60 * 1000;
+})();
+
 async function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -160,9 +170,11 @@ function sseEvent(res: http.ServerResponse, event: string, data: unknown): void 
   }
 }
 
-function notifyEventStreams(agentId: string, event: AgentEvent): void {
+/** Push an event to every live stream for the agent. Returns true if it reached
+ *  at least one stream (so the caller can mark it delivered). */
+function notifyEventStreams(agentId: string, event: AgentEvent): boolean {
   const streams = eventStreams.get(agentId);
-  if (!streams || streams.size === 0) return;
+  if (!streams || streams.size === 0) return false;
   let pushed = false;
   for (const stream of [...streams]) {
     if (stream.writableEnded || stream.destroyed) {
@@ -173,6 +185,7 @@ function notifyEventStreams(agentId: string, event: AgentEvent): void {
     pushed = true;
   }
   if (pushed) log.info('events.stream.push', { agentId, eventId: event.id, streams: streams.size });
+  return pushed;
 }
 
 function buildMeta(browser: Browser, topic: string): SessionMeta | null {
@@ -476,8 +489,15 @@ async function handleWebhook(token: string, req: http.IncomingMessage, res: http
     return;
   }
 
-  const event = await new EventStore(agent.home).append(agent.id, text, 'local-webhook');
-  notifyEventStreams(agent.id, event);
+  const store = new EventStore(agent.home);
+  const event = await store.append(agent.id, text, 'local-webhook');
+  if (notifyEventStreams(agent.id, event)) {
+    // Reached a live consumer → record delivery so the backfill won't re-flood it
+    // past the grace window. Best-effort: on failure the event stays pending and
+    // is simply replayed later (at-least-once), so we don't block the 202 on it.
+    void store.markDelivered(event.id).catch(err =>
+      log.error('events.mark_delivered_failed', { agentId: agent.id, eventId: event.id, err: String(err) }));
+  }
   log.info('webhook.event', { agentId: agent.id, eventId: event.id, bytes: byteLength });
   sendJson(res, 202, {
     ok: true,
@@ -516,25 +536,31 @@ function handleEventStream(req: http.IncomingMessage, res: http.ServerResponse):
   log.info('events.stream.open', { agentId, count: streams.size });
   sseEvent(res, 'ready', { agent_id: agentId });
 
-  // Backfill: replay every pending event on connect. Events are not considered
-  // handled until the agent explicitly acks them, so daemon-memory "delivered"
-  // flags must never hide unacked work from a restarted channel. Client watchers
-  // suppress duplicate callbacks inside one process to avoid reconnect storms.
+  // Backfill on connect: replay what this consumer may have missed — every
+  // `pending` event (never delivered), plus `delivered` events still inside the
+  // redelivery grace (crash-mid-turn recovery). Delivered-and-past-grace events
+  // are assumed handled and are NOT replayed, so a resume / compact / second
+  // session can't re-flood the agent with its whole history. Each replayed event
+  // is marked delivered so it ages out of the grace window from here. Durable
+  // server-side state — the client's process-local dedup only covers one process.
   void (async () => {
     const agent = agents.get(agentId);
     if (!agent) return;
-    let pending: AgentEvent[];
+    const store = new EventStore(agent.home);
+    let deliverable: AgentEvent[];
     try {
-      pending = await new EventStore(agent.home).pending();
+      deliverable = await store.deliverable(EVENT_REDELIVER_GRACE_MS);
     } catch (err) {
       log.error('events.stream.backfill_failed', { agentId, err: String(err) });
       return;
     }
     let replayed = 0;
-    for (const ev of pending) {
+    for (const ev of deliverable) {
       if (res.writableEnded || res.destroyed) break;
       sseEvent(res, 'event', ev);
       replayed++;
+      await store.markDelivered(ev.id).catch(err =>
+        log.error('events.mark_delivered_failed', { agentId, eventId: ev.id, err: String(err) }));
     }
     if (replayed > 0) log.info('events.stream.backfill', { agentId, replayed });
   })();
