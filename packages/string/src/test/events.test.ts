@@ -235,6 +235,37 @@ await section('events — delivered/acked lifecycle + grace-gated deliverable', 
   }
 });
 
+await section('events — retention sweep: acked past retention + stale un-acked past cap', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'string-event-sweep-'));
+  try {
+    const store = new EventStore(home);
+    const handled = await store.append('agent-a', 'handled');
+    await store.ack(handled.id);
+    const fresh = await store.append('agent-a', 'fresh pending');
+    const stale = await store.append('agent-a', 'stale never delivered');
+
+    // 5s after ack, retention 1s, max-age huge → only the acked event is due.
+    const ackedAt = Date.parse((await store.read(handled.id))!.ackedAt!);
+    let r = await store.sweep({ retentionMs: 1000, maxAgeMs: 999_999_999, now: ackedAt + 5000 });
+    assert(r.purgedAcked === 1 && r.purgedStale === 0, 'sweep purges acked past retention only');
+    assert((await store.read(handled.id)) === null, 'acked event removed');
+    assert((await store.read(fresh.id)) !== null, 'un-acked event kept under huge max-age');
+
+    // max-age 1s now catches both surviving un-acked events (safety cap).
+    const base = Date.parse((await store.read(fresh.id))!.receivedAt);
+    r = await store.sweep({ retentionMs: 999_999_999, maxAgeMs: 1000, now: base + 5000 });
+    assert(r.purgedStale === 2, 'sweep purges un-acked events past the max-age safety cap');
+    assert((await store.list({ includeAck: true })).length === 0, 'inbox emptied');
+    void stale;
+
+    // Nothing due → no-op.
+    const empty = await store.sweep({ retentionMs: 1000, maxAgeMs: 1000, now: ackedAt + 5000 });
+    assert(empty.purgedAcked === 0 && empty.purgedStale === 0, 'sweep is a no-op when nothing is due');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
 await section('events — Browser commands list/read/ack', async () => {
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'string-event-browser-'));
   try {
@@ -432,6 +463,32 @@ await section('events — a fresh consumer past grace is not re-flooded (server-
     // the now-delivered event is past-grace → it must NOT be replayed.
     const second = await collectSSE(env.port, 'grace', 900);
     assert(second.length === 0, 'second fresh connect is NOT re-flooded (delivered + past grace)');
+  } finally {
+    daemon.stop();
+    fs.rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+await section('events — daemon periodically sweeps acked events (retention)', async () => {
+  const env = makeEnv();
+  // retention 0 days → an acked event is due immediately; sweep every 300ms.
+  const daemon = await startDaemon(env, { STRING_EVENT_RETENTION_DAYS: '0', STRING_EVENT_SWEEP_INTERVAL_MS: '300' });
+  const home = path.join(env.root, 'agent-home-retention');
+  try {
+    assert(await client.ping(env.port), 'daemon up for retention test');
+    assert(runCli(env, ['agent', 'add', 'reten', '--home', home]).code === 0, 'agent add ok');
+    assert(runCli(env, ['agent', 'use', 'reten']).code === 0, 'agent use ok');
+
+    const store = new EventStore(home);
+    const keep = await store.append('reten', 'still open');
+    const gone = await store.append('reten', 'already handled');
+    await store.ack(gone.id);
+    assert((await store.read(gone.id)) !== null, 'acked event present before sweep');
+
+    // The daemon's interval sweep (separate process, via disk) must purge it.
+    await waitFor(() => !fs.existsSync(path.join(home, 'events', `${gone.id}.json`)), 5000);
+    assert((await store.read(gone.id)) === null, 'daemon swept the acked event past retention');
+    assert((await store.read(keep.id)) !== null, 'un-acked event retained (within max-age)');
   } finally {
     daemon.stop();
     fs.rmSync(env.root, { recursive: true, force: true });

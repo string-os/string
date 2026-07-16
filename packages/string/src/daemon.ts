@@ -128,6 +128,20 @@ const EVENT_REDELIVER_GRACE_MS = (() => {
   return Number.isFinite(v) && v >= 0 ? v : 5 * 60 * 1000;
 })();
 
+// Event retention. Acked events are purged after RETENTION; any non-acked event
+// is purged after MAX_AGE (a hard safety cap so an un-acked backlog can't grow
+// forever if nothing acks). SWEEP_INTERVAL controls how often the daemon runs it.
+function envDaysMs(name: string, defaultDays: number): number {
+  const v = Number(process.env[name]);
+  return (Number.isFinite(v) && v >= 0 ? v : defaultDays) * 24 * 60 * 60 * 1000;
+}
+const EVENT_RETENTION_MS = envDaysMs('STRING_EVENT_RETENTION_DAYS', 7);
+const EVENT_MAX_AGE_MS = envDaysMs('STRING_EVENT_MAX_AGE_DAYS', 30);
+const EVENT_SWEEP_INTERVAL_MS = (() => {
+  const v = Number(process.env.STRING_EVENT_SWEEP_INTERVAL_MS);
+  return Number.isFinite(v) && v > 0 ? v : 60 * 60 * 1000; // hourly
+})();
+
 async function readBody(req: http.IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
@@ -1431,6 +1445,31 @@ function createServer(): http.Server {
 
 // ─── Public API ───────────────────────────────────────────────────────────────
 
+// Sweep event retention across every registered agent's inbox. Best-effort per
+// home; failures are logged and don't abort the pass. Stale (un-acked) purges are
+// a bounded-growth safety valve, so they're surfaced to stdout — never silent.
+async function sweepAllAgentEvents(): Promise<void> {
+  let purgedAcked = 0;
+  let purgedStale = 0;
+  let homes = 0;
+  for (const agent of agents.list()) {
+    try {
+      const r = await new EventStore(agent.home).sweep({ retentionMs: EVENT_RETENTION_MS, maxAgeMs: EVENT_MAX_AGE_MS });
+      purgedAcked += r.purgedAcked;
+      purgedStale += r.purgedStale;
+      homes++;
+    } catch (err) {
+      log.error('events.sweep_failed', { agentId: agent.id, err: String(err) });
+    }
+  }
+  if (purgedAcked > 0 || purgedStale > 0) {
+    log.info('events.sweep', { homes, purgedAcked, purgedStale });
+  }
+  if (purgedStale > 0) {
+    console.log(`event retention: purged ${purgedStale} un-acked event(s) older than ${EVENT_MAX_AGE_MS / 86_400_000}d (safety cap — nothing acked them)`);
+  }
+}
+
 export function startDaemon(port = 3923, opts?: { log?: boolean }): void {
   const logEnabled = opts?.log || process.env.STRING_LOG === '1';
   log = createLogger({
@@ -1487,8 +1526,15 @@ export function startDaemon(port = 3923, opts?: { log?: boolean }): void {
     log.info('server.start', { port, version: STRING_VERSION, dataDir: STRING_DATA_DIR, logEnabled });
   });
 
+  // Event retention: sweep once at boot, then on an interval. Unref'd so it never
+  // keeps the process alive on its own.
+  void sweepAllAgentEvents();
+  const sweepTimer = setInterval(() => void sweepAllAgentEvents(), EVENT_SWEEP_INTERVAL_MS);
+  sweepTimer.unref();
+
   const shutdown = (signal: string) => {
     log.info('server.stop', { signal });
+    clearInterval(sweepTimer);
     log.close();
     server.close();
     process.exit(0);
