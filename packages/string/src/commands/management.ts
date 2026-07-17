@@ -48,7 +48,7 @@ export async function cmdAgentHub(args: string, loader: Loader): Promise<Command
     case 'use':
       return useAgent(rest, parsed.flags);
     case 'current':
-      return currentAgent();
+      return currentAgent(loader, parsed.flags);
     case 'set-home':
       return setAgentHome(rest);
     case 'rm':
@@ -172,8 +172,12 @@ async function useAgent(rest: string[], flags: Record<string, string>): Promise<
   ].join('\n'));
 }
 
-async function currentAgent(): Promise<CommandResult> {
-  const current = getCurrentAgent() ?? 'default';
+async function currentAgent(loader: Loader, flags: Record<string, string>): Promise<CommandResult> {
+  // Report the RESOLVED agent (--agent > STRING_AGENT_ID > config > default),
+  // not the raw config value — otherwise `string --agent X agent current` (and
+  // any STRING_AGENT_ID-scoped call) misreports the global currentAgent, which
+  // masks exactly the kind of agent mix-up this command exists to diagnose.
+  const current = flags.agent || currentAgentId(loader);
   const agent = (await client.listAgents(port())).find(a => a.id === current);
   const home = agent ? agent.home : '(not registered)';
   return ok(`${current}\t${home}\tconfig: ${configPath()}`);
