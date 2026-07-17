@@ -379,6 +379,10 @@ Environment:
                   (normal setup: string agent add <id> --home <path>)
   STRING_CONFIG      Client config path override
                   (default: nearest .string/config.json, then ~/.string/config.json)
+  STRING_ROOT        Relocate ALL persistent state — config, daemon registry,
+                  agent homes, tools (default base: ~/.string). One switch for a
+                  hermetic/throwaway instance; STRING_CONFIG/STRING_DATA_DIR still
+                  override individually.
 `);
 }
 

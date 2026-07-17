@@ -3,11 +3,11 @@
  */
 
 import fsPromises from 'fs/promises';
-import os from 'os';
 import path from 'path';
 import type { Loader } from '../loader.js';
 import { resolve } from '../resolver.js';
 import type { Session } from '../session.js';
+import { stringRoot } from '../config.js';
 import type { CommandResult, LoadedDocument } from '../types.js';
 import { deriveEnvScope } from '../env-store.js';
 import type { EnvScope } from '../env-store.js';
@@ -28,7 +28,7 @@ export async function resolveTool(name: string, loader: Loader): Promise<LoadedD
   } catch { /* not found */ }
 
   // 2. Global: ~/.string/tools/{name}.md
-  const globalPath = path.join(os.homedir(), '.string', 'tools', `${name}.md`);
+  const globalPath = path.join(stringRoot(), 'tools', `${name}.md`);
   try {
     const loaded = await loader.load(globalPath);
     return resolve(loaded.uri, loaded.source, loader);
