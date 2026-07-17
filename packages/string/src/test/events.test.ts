@@ -12,6 +12,12 @@ import { assert, section } from './runner.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(__dirname, '../cli.ts');
 
+// Spawning `npx tsx CLI --mcp` cold-starts a whole tsx/Node process; under CI
+// load that can take well over 5s before the MCP `initialize`/`tools/list`
+// responses appear. Give those subprocess-handshake waits generous headroom so
+// the suite doesn't flake on slow runners (the assertions still gate correctness).
+const MCP_INIT_TIMEOUT_MS = 20_000;
+
 interface Env {
   root: string;
   dataDir: string;
@@ -197,6 +203,10 @@ await section('events — delivered/acked lifecycle + grace-gated deliverable', 
   try {
     const store = new EventStore(home);
     const a = await store.append('agent-a', 'first');
+    // Space the appends so receivedAt (ms precision) is strictly ordered — two
+    // same-ms events tie and `deliverable`'s sort would fall back to readdir order,
+    // making the oldest-first assertion below non-deterministic.
+    await wait(5);
     const b = await store.append('agent-a', 'second');
 
     // Pending events are always deliverable, regardless of grace, oldest-first.
@@ -230,6 +240,37 @@ await section('events — delivered/acked lifecycle + grace-gated deliverable', 
     // Default list shows unacked (pending + delivered), hides ack.
     const listed = await store.list();
     assert(listed.length === 1 && listed[0].id === b.id, 'list default shows delivered (unacked), hides acked');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+await section('events — retention sweep: acked past retention + stale un-acked past cap', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'string-event-sweep-'));
+  try {
+    const store = new EventStore(home);
+    const handled = await store.append('agent-a', 'handled');
+    await store.ack(handled.id);
+    const fresh = await store.append('agent-a', 'fresh pending');
+    const stale = await store.append('agent-a', 'stale never delivered');
+
+    // 5s after ack, retention 1s, max-age huge → only the acked event is due.
+    const ackedAt = Date.parse((await store.read(handled.id))!.ackedAt!);
+    let r = await store.sweep({ retentionMs: 1000, maxAgeMs: 999_999_999, now: ackedAt + 5000 });
+    assert(r.purgedAcked === 1 && r.purgedStale === 0, 'sweep purges acked past retention only');
+    assert((await store.read(handled.id)) === null, 'acked event removed');
+    assert((await store.read(fresh.id)) !== null, 'un-acked event kept under huge max-age');
+
+    // max-age 1s now catches both surviving un-acked events (safety cap).
+    const base = Date.parse((await store.read(fresh.id))!.receivedAt);
+    r = await store.sweep({ retentionMs: 999_999_999, maxAgeMs: 1000, now: base + 5000 });
+    assert(r.purgedStale === 2, 'sweep purges un-acked events past the max-age safety cap');
+    assert((await store.list({ includeAck: true })).length === 0, 'inbox emptied');
+    void stale;
+
+    // Nothing due → no-op.
+    const empty = await store.sweep({ retentionMs: 1000, maxAgeMs: 1000, now: ackedAt + 5000 });
+    assert(empty.purgedAcked === 0 && empty.purgedStale === 0, 'sweep is a no-op when nothing is due');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -329,7 +370,7 @@ await section('events — local webhook appends text to current agent inbox', as
         clientInfo: { name: 'string-test', version: '0.0.0' },
       },
     }) + '\n');
-    await waitFor(() => channelOut.includes('"id":1'), 5000);
+    await waitFor(() => channelOut.includes('"id":1'), MCP_INIT_TIMEOUT_MS);
     assert(channelOut.includes('"claude/channel"'), 'combined MCP server advertises Claude channel capability');
 
     channel.stdin.write(JSON.stringify({
@@ -345,7 +386,7 @@ await section('events — local webhook appends text to current agent inbox', as
       method: 'tools/list',
       params: {},
     }) + '\n');
-    await waitFor(() => channelOut.includes('"id":2'), 5000);
+    await waitFor(() => channelOut.includes('"id":2'), MCP_INIT_TIMEOUT_MS);
     assert(channelOut.includes('"name":"string"'), 'combined MCP server still exposes string tool');
 
     const channelPosted = await postText(webhookUrl!, 'claude channel delivery test');
@@ -354,7 +395,7 @@ await section('events — local webhook appends text to current agent inbox', as
       () => channelOut.includes('notifications/claude/channel')
         && channelOut.includes('"content":"claude channel delivery test"')
         && channelOut.includes('"source":"string"'),
-      5000,
+      MCP_INIT_TIMEOUT_MS,
     ).catch(e => {
       throw new Error(`${e.message}. stdout: ${channelOut} stderr: ${channelErr}`);
     });
@@ -438,6 +479,32 @@ await section('events — a fresh consumer past grace is not re-flooded (server-
   }
 });
 
+await section('events — daemon periodically sweeps acked events (retention)', async () => {
+  const env = makeEnv();
+  // retention 0 days → an acked event is due immediately; sweep every 300ms.
+  const daemon = await startDaemon(env, { STRING_EVENT_RETENTION_DAYS: '0', STRING_EVENT_SWEEP_INTERVAL_MS: '300' });
+  const home = path.join(env.root, 'agent-home-retention');
+  try {
+    assert(await client.ping(env.port), 'daemon up for retention test');
+    assert(runCli(env, ['agent', 'add', 'reten', '--home', home]).code === 0, 'agent add ok');
+    assert(runCli(env, ['agent', 'use', 'reten']).code === 0, 'agent use ok');
+
+    const store = new EventStore(home);
+    const keep = await store.append('reten', 'still open');
+    const gone = await store.append('reten', 'already handled');
+    await store.ack(gone.id);
+    assert((await store.read(gone.id)) !== null, 'acked event present before sweep');
+
+    // The daemon's interval sweep (separate process, via disk) must purge it.
+    await waitFor(() => !fs.existsSync(path.join(home, 'events', `${gone.id}.json`)), 5000);
+    assert((await store.read(gone.id)) === null, 'daemon swept the acked event past retention');
+    assert((await store.read(keep.id)) !== null, 'un-acked event retained (within max-age)');
+  } finally {
+    daemon.stop();
+    fs.rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
 await section('events — MCP channel backfills pending webhook on startup', async () => {
   const env = makeEnv();
   const daemon = await startDaemon(env);
@@ -476,7 +543,7 @@ await section('events — MCP channel backfills pending webhook on startup', asy
         clientInfo: { name: 'string-test', version: '0.0.0' },
       },
     }) + '\n');
-    await waitFor(() => channelOut.includes('"id":1'), 5000);
+    await waitFor(() => channelOut.includes('"id":1'), MCP_INIT_TIMEOUT_MS);
 
     channel.stdin.write(JSON.stringify({
       jsonrpc: '2.0',
@@ -488,7 +555,7 @@ await section('events — MCP channel backfills pending webhook on startup', asy
       () => channelOut.includes('notifications/claude/channel')
         && channelOut.includes('"content":"offline channel wake"')
         && channelOut.includes('"source":"string"'),
-      5000,
+      MCP_INIT_TIMEOUT_MS,
     ).catch(e => {
       throw new Error(`${e.message}. stdout: ${channelOut} stderr: ${channelErr}`);
     });

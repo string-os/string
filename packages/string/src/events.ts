@@ -151,6 +151,37 @@ export class EventStore {
     return count;
   }
 
+  /**
+   * Retention sweep. Removes:
+   *   - `ack`ed events older than `retentionMs` (aged from ackedAt) — the normal
+   *     path; handled events don't need to live forever.
+   *   - any non-acked event older than `maxAgeMs` (aged from receivedAt) — a hard
+   *     safety cap so an un-acked backlog can't grow without bound if no consumer
+   *     ever acks. `maxAgeMs` should be >> `retentionMs`; stale purges are surfaced
+   *     by the caller, never silent.
+   *
+   * `now` is injectable for deterministic tests.
+   */
+  async sweep(opts: { retentionMs: number; maxAgeMs: number; now?: number }): Promise<{ purgedAcked: number; purgedStale: number }> {
+    const now = opts.now ?? Date.now();
+    const events = await this.readAll();
+    let purgedAcked = 0;
+    let purgedStale = 0;
+    for (const e of events) {
+      if (e.status === 'ack') {
+        const acked = Date.parse(e.ackedAt ?? e.receivedAt);
+        if (now - acked >= opts.retentionMs) {
+          await fs.rm(this.eventPath(e.id), { force: true });
+          purgedAcked++;
+        }
+      } else if (now - Date.parse(e.receivedAt) >= opts.maxAgeMs) {
+        await fs.rm(this.eventPath(e.id), { force: true });
+        purgedStale++;
+      }
+    }
+    return { purgedAcked, purgedStale };
+  }
+
   private eventPath(id: string): string {
     return path.join(this.dir, `${id}.json`);
   }
