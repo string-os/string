@@ -1,4 +1,3 @@
-import os from 'os';
 import path from 'path';
 import * as client from '@string-os/client';
 import type { Loader } from '../loader.js';
@@ -11,6 +10,7 @@ import {
   projectConfigPathForWrite,
   setCurrentAgentInFile,
   setCurrentAgent,
+  stringRoot,
 } from '../config.js';
 import { err, ok, parsePosixFlags } from './helpers.js';
 
@@ -19,7 +19,7 @@ function port(): number {
 }
 
 function deriveHome(agentId: string): string {
-  return path.join(os.homedir(), '.string', 'agents', agentId);
+  return path.join(stringRoot(), 'agents', agentId);
 }
 
 function splitAllow(val?: string): string[] {

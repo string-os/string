@@ -63,9 +63,23 @@ export interface ClientConfig {
   currentAgent?: string;
 }
 
+/**
+ * Root of all persistent String state (config, daemon registry, agent homes,
+ * global tools). Defaults to `~/.string`; override with STRING_ROOT to relocate
+ * the ENTIRE tree in one switch — the hermetic-isolation primitive for tests and
+ * throwaway daemons. The finer-grained STRING_CONFIG / STRING_DATA_DIR still win
+ * when set; STRING_ROOT only moves the base those default off of. Isolating just
+ * STRING_DATA_DIR (a daemon-only var) does NOT isolate the client config, which
+ * is how a mis-isolated smoke can clobber the global currentAgent — STRING_ROOT
+ * closes that whole class.
+ */
+export function stringRoot(): string {
+  return process.env.STRING_ROOT?.trim() || join(homedir(), '.string');
+}
+
 /** Global client config path. */
 export function globalConfigPath(): string {
-  return join(homedir(), '.string', 'config.json');
+  return join(stringRoot(), 'config.json');
 }
 
 function normalizeStartDir(value: string, baseDir = process.cwd()): string {

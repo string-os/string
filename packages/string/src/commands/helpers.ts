@@ -589,7 +589,13 @@ function safeUndoSegment(value: string): string {
 }
 
 export function undoDataDir(): string {
-  return process.env.STRING_DATA_DIR || path.join(os.homedir(), '.stringd');
+  if (process.env.STRING_DATA_DIR) return process.env.STRING_DATA_DIR;
+  // STRING_ROOT relocates all persistent state (isolation switch); keep undo
+  // records under it too. Legacy default stays `~/.stringd` when neither is set,
+  // so existing installs don't migrate.
+  const root = process.env.STRING_ROOT?.trim();
+  if (root) return path.join(root, 'undo-data');
+  return path.join(os.homedir(), '.stringd');
 }
 
 export function undoRecordPath(loader: Loader, session: Session): string {

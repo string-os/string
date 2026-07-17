@@ -39,7 +39,6 @@
 
 import http from 'http';
 import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'fs';
-import { homedir } from 'os';
 import { join } from 'path';
 import { Browser } from './index.js';
 import { createHtmlToMarkdown } from './html-to-md.js';
@@ -51,6 +50,7 @@ import { StreamableHTTPServerTransport } from '@modelcontextprotocol/sdk/server/
 import { EventStore, createWebhookToken, type AgentEvent } from './events.js';
 import { CapabilityStore, FS_VERBS, normalizeFsPath, type FsVerb, type VerifyFailure } from './capability.js';
 import { STRING_VERSION } from './version.js';
+import { stringRoot } from './config.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -105,7 +105,7 @@ interface SessionMeta {
 // Daemon data dir is per-OS-agent and cwd-independent: a daemon started from
 // any directory must see the same agent registry. Override with STRING_DATA_DIR
 // only for tests / isolated installs.
-const STRING_DATA_DIR = process.env.STRING_DATA_DIR || join(homedir(), '.string', 'daemon');
+const STRING_DATA_DIR = process.env.STRING_DATA_DIR || join(stringRoot(), 'daemon');
 const agents = new AgentRegistry([], join(STRING_DATA_DIR, 'agents.json'));
 const capabilities = new CapabilityStore({ persistPath: join(STRING_DATA_DIR, 'capabilities.json') });
 const runtimes = new Map<string, RuntimeEntry>();
@@ -614,7 +614,7 @@ function ensureAgentAuto(agentId: string): Agent {
   const existing = agents.get(agentId);
   if (existing) return existing;
 
-  const home = join(homedir(), '.string', 'agents', agentId);
+  const home = join(stringRoot(), 'agents', agentId);
   try {
     mkdirSync(home, { recursive: true, mode: 0o700 });
   } catch (e) {
@@ -1488,7 +1488,7 @@ export function startDaemon(port = 3923, opts?: { log?: boolean }): void {
   if (process.env.STRING_NO_AGENT_RECOVERY === '1') {
     console.log('Agent recovery disabled (STRING_NO_AGENT_RECOVERY=1) — registry starts from agents.json only');
   } else {
-    const agentsRoot = join(homedir(), '.string', 'agents');
+    const agentsRoot = join(stringRoot(), 'agents');
     try {
       for (const entry of readdirSync(agentsRoot)) {
         const home = join(agentsRoot, entry);
