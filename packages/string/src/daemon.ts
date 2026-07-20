@@ -603,6 +603,56 @@ function handleEventStream(req: http.IncomingMessage, res: http.ServerResponse):
 }
 
 /**
+ * POST /events/{id}/ack — mark an event handled (delivered/pending → ack).
+ *
+ * The consumer-side close of the lifecycle: `delivered` means the daemon flushed
+ * the event to a stream (a transport fact); `ack` means the consumer confirmed it
+ * handled the event (a handling fact), and only acked events are retention-purgeable.
+ * Until now ack was CLI-only; the `--mcp` consumer needs a wire path to close the
+ * loop after it hands an event to its channel, so delivered stops being a terminal
+ * resting state.
+ *
+ * Auth mirrors /events/stream: X-Agent-Id required, agent must exist; the event is
+ * acked in that agent's own inbox, so an agent can only ack its own events.
+ * Idempotent — re-acking an already-acked event is a 200 no-op, so an at-least-once
+ * consumer can retry a dropped ack safely.
+ *
+ * Consumer model A (competing consumers, Leo Q1): ack is agent-global — any session
+ * that acks retires the event for the whole agent. `X-Consumer-Id` is parsed here as
+ * a forward seam only (logged, no behavior yet); a future model-B per-consumer cursor
+ * would scope the ack to that consumer without changing this signature.
+ */
+async function handleEventAck(req: http.IncomingMessage, res: http.ServerResponse, id: string): Promise<void> {
+  req.resume(); // drain any body; ack carries no payload
+  const agentId = (req.headers['x-agent-id'] as string | undefined)?.trim();
+  if (!agentId) {
+    sendJson(res, 400, { error: 'X-Agent-Id header required' });
+    return;
+  }
+  const agent = agents.get(agentId);
+  if (!agent) {
+    sendJson(res, 401, { error: `Unknown agent: ${agentId}` });
+    return;
+  }
+  const consumerId = (req.headers['x-consumer-id'] as string | undefined)?.trim(); // model-B seam (unused)
+
+  const store = new EventStore(agent.home);
+  const event = await store.ack(id);
+  if (!event) {
+    sendJson(res, 404, { error: `Unknown event: ${id}` });
+    return;
+  }
+  log.info('events.ack', { agentId: agent.id, eventId: event.id, consumerId: consumerId ?? '' });
+  sendJson(res, 200, {
+    ok: true,
+    agent_id: agent.id,
+    event_id: event.id,
+    status: event.status,
+    acked_at: event.ackedAt,
+  });
+}
+
+/**
  * Get or auto-register an agent. Used by entry points (like /mcp) where the
  * client has no separate agent-provisioning step. The home is derived as
  * `~/.string/agents/{agentId}` — the same scheme the CLI uses — and created
@@ -1394,6 +1444,9 @@ function createServer(): http.Server {
       // ── Agent event stream ──
       } else if (method === 'GET' && pathname === '/events/stream') {
         handleEventStream(req, res);
+      } else if (method === 'POST' && pathname.startsWith('/events/') && pathname.endsWith('/ack')) {
+        const id = decodeURIComponent(pathname.slice('/events/'.length, -'/ack'.length));
+        await handleEventAck(req, res, id);
 
       // ── Session routes ──
       } else if (method === 'GET' && pathname === '/sessions') {

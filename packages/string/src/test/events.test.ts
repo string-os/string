@@ -118,6 +118,28 @@ function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/** Raw POST /events/{id}/ack — lets tests assert the header/agent error paths
+ *  (missing X-Agent-Id, unknown agent) that the typed client never emits. */
+function rawAck(
+  port: number,
+  eventId: string,
+  headers: Record<string, string>,
+): Promise<{ status: number; body: string }> {
+  return new Promise((resolve, reject) => {
+    const req = http.request(
+      { hostname: '127.0.0.1', port, path: `/events/${encodeURIComponent(eventId)}/ack`, method: 'POST', agent: false, headers },
+      res => {
+        const chunks: Buffer[] = [];
+        res.on('data', c => chunks.push(c));
+        res.on('end', () => resolve({ status: res.statusCode ?? 0, body: Buffer.concat(chunks).toString('utf-8') }));
+        res.on('error', reject);
+      },
+    );
+    req.on('error', reject);
+    req.end();
+  });
+}
+
 /**
  * Open a raw SSE connection to /events/stream and collect `event` frames for a
  * fixed window, then close. Deliberately bypasses the client watcher's
@@ -613,4 +635,127 @@ await section('events — watchAgentEvents self-reconnects after the stream drop
   assert(received.length === afterClose, 'close() stops reconnecting for good');
 
   server!.closeAllConnections?.(); await new Promise<void>(r => server!.close(() => r()));
+});
+
+await section('events — POST /events/{id}/ack + client.ackEvent close the lifecycle', async () => {
+  const env = makeEnv();
+  const daemon = await startDaemon(env);
+  const home = path.join(env.root, 'agent-home-ack');
+  const otherHome = path.join(env.root, 'agent-home-ack-other');
+  try {
+    assert(await client.ping(env.port), 'daemon up for ack endpoint test');
+    assert(runCli(env, ['agent', 'add', 'acker', '--home', home]).code === 0, 'agent add ok');
+    assert(runCli(env, ['agent', 'add', 'other', '--home', otherHome]).code === 0, 'second agent add ok');
+    assert(runCli(env, ['agent', 'use', 'acker']).code === 0, 'agent use ok');
+    const show = runCli(env, ['event', 'webhook', 'show']);
+    const webhookUrl = show.stdout.split('\n').find(line => line.startsWith('http://127.0.0.1:'));
+    assert(!!webhookUrl, 'webhook URL printed');
+
+    const posted = await postText(webhookUrl!, 'ack me');
+    const eventId = (JSON.parse(posted.body) as { event_id: string }).event_id;
+
+    const store = new EventStore(home);
+    assert((await store.read(eventId))!.status === 'pending', 'event starts pending');
+
+    // Happy path: client.ackEvent transitions the event to ack and stamps ackedAt.
+    assert(await client.ackEvent(env.port, 'acker', eventId) === true, 'ackEvent returns true for a live event');
+    const acked = await store.read(eventId);
+    assert(acked!.status === 'ack' && !!acked!.ackedAt, 'event is ack + ackedAt stamped server-side');
+    assert((await store.deliverable(Number.MAX_SAFE_INTEGER)).every(e => e.id !== eventId), 'acked event is never redeliverable');
+
+    // Idempotent: re-acking an already-acked event is a 200 no-op (safe retry).
+    assert(await client.ackEvent(env.port, 'acker', eventId) === true, 'ackEvent is idempotent on an acked event');
+
+    // Unknown / already-purged event → false (404), not a throw.
+    assert(await client.ackEvent(env.port, 'acker', 'evt_deadbeef_nope') === false, 'ackEvent returns false for an unknown event');
+
+    // Agent scoping: an agent can only ack events in its OWN inbox. A valid-looking
+    // id that lives in acker's home must 404 for a different agent.
+    const posted2 = await postText(webhookUrl!, 'acker-only');
+    const eventId2 = (JSON.parse(posted2.body) as { event_id: string }).event_id;
+    assert(await client.ackEvent(env.port, 'other', eventId2) === false, 'a different agent cannot ack this event (404)');
+    assert((await store.read(eventId2))!.status !== 'ack', 'cross-agent ack did not mutate the event');
+
+    // Header/agent error planes (mirrors /events/stream): missing X-Agent-Id → 400,
+    // unknown agent → 401.
+    assert((await rawAck(env.port, eventId2, {})).status === 400, 'missing X-Agent-Id → 400');
+    assert((await rawAck(env.port, eventId2, { 'X-Agent-Id': 'ghost' })).status === 401, 'unknown agent → 401');
+
+    // The X-Consumer-Id seam (model-A default) is accepted and ignored: acking with
+    // a consumer id still performs an agent-global ack.
+    const posted3 = await postText(webhookUrl!, 'consumer-seam');
+    const eventId3 = (JSON.parse(posted3.body) as { event_id: string }).event_id;
+    const seam = await rawAck(env.port, eventId3, { 'X-Agent-Id': 'acker', 'X-Consumer-Id': 'session-2' });
+    assert(seam.status === 200, 'X-Consumer-Id is accepted (parsed as a forward seam)');
+    assert((await store.read(eventId3))!.status === 'ack', 'ack with a consumer id still retires the event agent-globally (model A)');
+  } finally {
+    daemon.stop();
+    fs.rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+await section('events — watchAgentEvents autoAck retires handled events; failure preserves at-least-once', async () => {
+  const env = makeEnv();
+  const daemon = await startDaemon(env);
+  const home = path.join(env.root, 'agent-home-autoack');
+  let watcher: ReturnType<typeof client.watchAgentEvents> | null = null;
+  try {
+    assert(await client.ping(env.port), 'daemon up for autoAck test');
+    assert(runCli(env, ['agent', 'add', 'auto', '--home', home]).code === 0, 'agent add ok');
+    assert(runCli(env, ['agent', 'use', 'auto']).code === 0, 'agent use ok');
+    const show = runCli(env, ['event', 'webhook', 'show']);
+    const webhookUrl = show.stdout.split('\n').find(line => line.startsWith('http://127.0.0.1:'));
+    assert(!!webhookUrl, 'webhook URL printed');
+    const store = new EventStore(home);
+
+    // Success: the handler resolves → auto-ack fires only after the handoff settles.
+    const okPost = await postText(webhookUrl!, 'handled ok');
+    const okId = (JSON.parse(okPost.body) as { event_id: string }).event_id;
+    // Failure: the handler rejects → the event must stay unacked (replayable).
+    const failPost = await postText(webhookUrl!, 'handler explodes');
+    const failId = (JSON.parse(failPost.body) as { event_id: string }).event_id;
+
+    const handled: string[] = [];
+    watcher = client.watchAgentEvents(
+      env.port,
+      'auto',
+      async event => {
+        handled.push(event.text);
+        // Model the plugin's channel handoff: a real async step that either
+        // resolves (provable handoff → safe to ack) or rejects (no handoff → do
+        // not ack). The reject is what proves auto-ack respects at-least-once.
+        await wait(20);
+        if (event.text === 'handler explodes') throw new Error('channel push failed');
+      },
+      () => { /* swallow the expected rejection surfaced via onError */ },
+      { autoAck: true },
+    );
+
+    await waitFor(() => handled.includes('handled ok') && handled.includes('handler explodes'), 5000);
+    // The ok event auto-acks once its handler settles; the failing one never does.
+    // Poll the store directly (waitFor's predicate is synchronous, so an async
+    // status check can't ride on it).
+    let okAcked = false;
+    for (let i = 0; i < 100 && !okAcked; i++) {
+      okAcked = (await store.read(okId))?.status === 'ack';
+      if (!okAcked) await wait(50);
+    }
+    assert(okAcked, 'successfully-handled event is auto-acked');
+
+    // Give any (incorrect) ack for the failing event time to land, then assert it did NOT.
+    await wait(300);
+    assert((await store.read(failId))!.status !== 'ack', 'a rejected handler leaves its event unacked (at-least-once preserved)');
+
+    watcher.close();
+
+    // Prove the unacked event is still redeliverable to a FRESH consumer (bypassing
+    // the client's process-local dedup), while the acked one is gone for good.
+    const fresh = await collectSSE(env.port, 'auto', 900);
+    assert(fresh.some(e => e.text === 'handler explodes'), 'unacked (failed) event is redelivered to a fresh consumer');
+    assert(!fresh.some(e => e.text === 'handled ok'), 'auto-acked event is not redelivered');
+  } finally {
+    watcher?.close();
+    daemon.stop();
+    fs.rmSync(env.root, { recursive: true, force: true });
+  }
 });
