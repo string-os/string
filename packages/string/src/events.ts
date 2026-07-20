@@ -75,6 +75,30 @@ export class EventStore {
   }
 
   /**
+   * Backlog snapshot for the visibility surface (`GET /events/count`). Powers the
+   * consumer's channel-init "N unread since <ts>" summary — the mechanism that
+   * makes a hidden backlog impossible to miss (the Vera case: 9 days of unseen
+   * webhooks). `unacked = pending + delivered` is the "open work" count (mirrors
+   * `list()`'s default view, which hides only `ack`); `oldestUnackedAt` is the
+   * `receivedAt` of the oldest still-open event (the "<ts>" in the summary), or
+   * null when the inbox is clear.
+   */
+  async count(): Promise<{ pending: number; delivered: number; ack: number; unacked: number; oldestUnackedAt: string | null }> {
+    const events = await this.readAll();
+    let pending = 0;
+    let delivered = 0;
+    let ack = 0;
+    let oldestUnackedAt: string | null = null;
+    for (const e of events) {
+      if (e.status === 'pending') pending++;
+      else if (e.status === 'delivered') delivered++;
+      else if (e.status === 'ack') { ack++; continue; }
+      if (oldestUnackedAt === null || e.receivedAt < oldestUnackedAt) oldestUnackedAt = e.receivedAt;
+    }
+    return { pending, delivered, ack, unacked: pending + delivered, oldestUnackedAt };
+  }
+
+  /**
    * Events to replay to a (re)connecting stream, oldest-first. Live push
    * (`notifyEventStreams`) only reaches streams connected at fire time; the
    * backfill catches a consumer up on what it missed. The set is:

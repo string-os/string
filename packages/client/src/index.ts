@@ -423,6 +423,43 @@ export async function ackEvent(port: number, agentId: string, eventId: string): 
   throw new Error(`ackEvent failed (${res.status}): ${res.body}`);
 }
 
+/** Backlog snapshot from GET /events/count. */
+export interface EventCount {
+  /** Never flushed to any stream — genuinely missed work. */
+  pending: number;
+  /** Flushed to ≥1 stream but not yet acked. */
+  delivered: number;
+  /** Open work total (pending + delivered) — mirrors the default list view. */
+  unacked: number;
+  /** `receivedAt` of the oldest unacked event — the "<ts>" in "N unread since
+   *  <ts>" — or null when the inbox is clear. */
+  oldestUnackedAt: string | null;
+}
+
+/**
+ * GET /events/count — an agent's backlog snapshot without draining the stream.
+ *
+ * The proactive visibility primitive: a session (or the `--mcp` consumer at
+ * channel init) reads this to surface "N unread since <ts>" instead of relying on
+ * a stream backfill landing in an attended context — the direct guard against a
+ * backlog hiding unseen.
+ */
+export async function eventCount(port: number, agentId: string): Promise<EventCount> {
+  const res = await request(port, 'GET', '/events/count', undefined, { 'X-Agent-Id': agentId });
+  if (res.status !== 200) {
+    throw new Error(`eventCount failed (${res.status}): ${res.body}`);
+  }
+  const d = JSON.parse(res.body) as {
+    pending: number; delivered: number; unacked: number; oldest_unacked_at: string | null;
+  };
+  return {
+    pending: d.pending,
+    delivered: d.delivered,
+    unacked: d.unacked,
+    oldestUnackedAt: d.oldest_unacked_at,
+  };
+}
+
 /** POST /exec — execute a command, parse SSE response into ExecResult. */
 export async function exec(
   port: number,

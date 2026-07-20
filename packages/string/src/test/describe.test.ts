@@ -87,6 +87,8 @@ await section('describe — default (unconfigured) instance', async () => {
     }
     assert(desc!.capabilities['events'].max_webhook_text_bytes === 64 * 1024,
       'events capability advertises webhook text cap');
+    assert(desc!.capabilities['events'].ack === true && desc!.capabilities['events'].count === true,
+      'events capability advertises ack + count endpoints (Slice 3a/3b)');
     assert(desc!.capabilities['exec'].max_request_body_bytes === 10 * 1024 * 1024,
       'exec capability advertises request body cap');
     assert(desc!.capabilities['fs']?.max_bytes === 32 * 1024 * 1024,

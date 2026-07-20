@@ -118,16 +118,17 @@ function wait(ms: number): Promise<void> {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-/** Raw POST /events/{id}/ack — lets tests assert the header/agent error paths
- *  (missing X-Agent-Id, unknown agent) that the typed client never emits. */
-function rawAck(
+/** Raw request against an /events/* route — lets tests assert the header/agent
+ *  error paths (missing X-Agent-Id, unknown agent) that the typed client hides. */
+function rawEvents(
   port: number,
-  eventId: string,
+  method: string,
+  routePath: string,
   headers: Record<string, string>,
 ): Promise<{ status: number; body: string }> {
   return new Promise((resolve, reject) => {
     const req = http.request(
-      { hostname: '127.0.0.1', port, path: `/events/${encodeURIComponent(eventId)}/ack`, method: 'POST', agent: false, headers },
+      { hostname: '127.0.0.1', port, path: routePath, method, agent: false, headers },
       res => {
         const chunks: Buffer[] = [];
         res.on('data', c => chunks.push(c));
@@ -138,6 +139,11 @@ function rawAck(
     req.on('error', reject);
     req.end();
   });
+}
+
+/** Raw POST /events/{id}/ack. */
+function rawAck(port: number, eventId: string, headers: Record<string, string>): Promise<{ status: number; body: string }> {
+  return rawEvents(port, 'POST', `/events/${encodeURIComponent(eventId)}/ack`, headers);
 }
 
 /**
@@ -293,6 +299,39 @@ await section('events — retention sweep: acked past retention + stale un-acked
     // Nothing due → no-op.
     const empty = await store.sweep({ retentionMs: 1000, maxAgeMs: 1000, now: ackedAt + 5000 });
     assert(empty.purgedAcked === 0 && empty.purgedStale === 0, 'sweep is a no-op when nothing is due');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+await section('events — EventStore.count backlog snapshot (unacked + oldest ts)', async () => {
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'string-event-count-'));
+  try {
+    const store = new EventStore(home);
+    assert((await store.count()).unacked === 0, 'empty inbox → unacked 0');
+    assert((await store.count()).oldestUnackedAt === null, 'empty inbox → null oldest');
+
+    const first = await store.append('agent-a', 'oldest');
+    await wait(5); // strict receivedAt ordering (ms precision)
+    await store.append('agent-a', 'newer');
+    await store.append('agent-a', 'newest');
+
+    let c = await store.count();
+    assert(c.pending === 3 && c.delivered === 0 && c.unacked === 3, 'three pending → unacked 3');
+    assert(c.oldestUnackedAt === (await store.read(first.id))!.receivedAt, 'oldest unacked ts = first event receivedAt');
+
+    // Delivering keeps an event "unacked" (open work); only ack removes it.
+    await store.markDelivered(first.id);
+    c = await store.count();
+    assert(c.pending === 2 && c.delivered === 1 && c.unacked === 3, 'delivered still counts as unacked (open work)');
+    assert(c.oldestUnackedAt === (await store.read(first.id))!.receivedAt, 'delivered oldest event still sets the ts');
+
+    // Acking the oldest advances the oldest-unacked ts to the next open event.
+    await store.ack(first.id);
+    c = await store.count();
+    assert(c.ack === 1 && c.unacked === 2, 'ack reduces unacked, bumps ack count');
+    assert(c.oldestUnackedAt !== null && c.oldestUnackedAt > (await store.read(first.id))!.receivedAt,
+      'oldest-unacked ts advances past the acked event');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
@@ -688,6 +727,48 @@ await section('events — POST /events/{id}/ack + client.ackEvent close the life
     const seam = await rawAck(env.port, eventId3, { 'X-Agent-Id': 'acker', 'X-Consumer-Id': 'session-2' });
     assert(seam.status === 200, 'X-Consumer-Id is accepted (parsed as a forward seam)');
     assert((await store.read(eventId3))!.status === 'ack', 'ack with a consumer id still retires the event agent-globally (model A)');
+  } finally {
+    daemon.stop();
+    fs.rmSync(env.root, { recursive: true, force: true });
+  }
+});
+
+await section('events — GET /events/count + client.eventCount visibility surface', async () => {
+  const env = makeEnv();
+  const daemon = await startDaemon(env);
+  const home = path.join(env.root, 'agent-home-count');
+  try {
+    assert(await client.ping(env.port), 'daemon up for count endpoint test');
+    assert(runCli(env, ['agent', 'add', 'counter', '--home', home]).code === 0, 'agent add ok');
+    assert(runCli(env, ['agent', 'use', 'counter']).code === 0, 'agent use ok');
+    const show = runCli(env, ['event', 'webhook', 'show']);
+    const webhookUrl = show.stdout.split('\n').find(line => line.startsWith('http://127.0.0.1:'));
+    assert(!!webhookUrl, 'webhook URL printed');
+
+    // Clean inbox → zero backlog, null "since" ts.
+    let c = await client.eventCount(env.port, 'counter');
+    assert(c.unacked === 0 && c.pending === 0 && c.oldestUnackedAt === null, 'clean inbox → unacked 0, null ts');
+
+    // Two events arrive with no stream connected → both pending, both unread.
+    const p1 = await postText(webhookUrl!, 'first unread');
+    const firstId = (JSON.parse(p1.body) as { event_id: string }).event_id;
+    await wait(5);
+    await postText(webhookUrl!, 'second unread');
+    c = await client.eventCount(env.port, 'counter');
+    assert(c.pending === 2 && c.unacked === 2, 'two pending webhooks → unacked 2 (the "N unread")');
+    const store = new EventStore(home);
+    assert(c.oldestUnackedAt === (await store.read(firstId))!.receivedAt, 'oldest_unacked_at = first event ts (the "since <ts>")');
+
+    // Acking the oldest reduces the backlog and advances the "since" ts.
+    assert(await client.ackEvent(env.port, 'counter', firstId) === true, 'ack the oldest');
+    c = await client.eventCount(env.port, 'counter');
+    assert(c.unacked === 1, 'acking one reduces the unread count');
+    assert(c.oldestUnackedAt !== null && c.oldestUnackedAt > (await store.read(firstId))!.receivedAt,
+      'the "since" ts advances past the acked event');
+
+    // Error planes mirror the other event routes.
+    assert((await rawEvents(env.port, 'GET', '/events/count', {})).status === 400, 'missing X-Agent-Id → 400');
+    assert((await rawEvents(env.port, 'GET', '/events/count', { 'X-Agent-Id': 'ghost' })).status === 401, 'unknown agent → 401');
   } finally {
     daemon.stop();
     fs.rmSync(env.root, { recursive: true, force: true });

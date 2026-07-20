@@ -653,6 +653,39 @@ async function handleEventAck(req: http.IncomingMessage, res: http.ServerRespons
 }
 
 /**
+ * GET /events/count — backlog visibility surface (Slice 3b).
+ *
+ * The single most direct fix for "9 days blind": a session (or the `--mcp`
+ * consumer at channel init) can proactively read its unread count instead of
+ * hoping a stream backfill lands in an attended context. Returns the pending /
+ * delivered / unacked breakdown plus the oldest unacked timestamp, which the
+ * plugin renders as the required "N unread since <ts>" summary (Leo Q3). Auth
+ * mirrors /events/stream and /events/{id}/ack: X-Agent-Id required, agent must
+ * exist; the count is over that agent's own inbox.
+ */
+async function handleEventCount(req: http.IncomingMessage, res: http.ServerResponse): Promise<void> {
+  const agentId = (req.headers['x-agent-id'] as string | undefined)?.trim();
+  if (!agentId) {
+    sendJson(res, 400, { error: 'X-Agent-Id header required' });
+    return;
+  }
+  const agent = agents.get(agentId);
+  if (!agent) {
+    sendJson(res, 401, { error: `Unknown agent: ${agentId}` });
+    return;
+  }
+  const c = await new EventStore(agent.home).count();
+  sendJson(res, 200, {
+    ok: true,
+    agent_id: agent.id,
+    pending: c.pending,
+    delivered: c.delivered,
+    unacked: c.unacked,
+    oldest_unacked_at: c.oldestUnackedAt,
+  });
+}
+
+/**
  * Get or auto-register an agent. Used by entry points (like /mcp) where the
  * client has no separate agent-provisioning step. The home is derived as
  * `~/.string/agents/{agentId}` — the same scheme the CLI uses — and created
@@ -1092,7 +1125,7 @@ function handleDescribe(res: http.ServerResponse): void {
       'describe': {},
       'agents': {},
       'agent-webhooks': {},
-      'events': { max_webhook_text_bytes: MAX_WEBHOOK_TEXT_BYTES },
+      'events': { max_webhook_text_bytes: MAX_WEBHOOK_TEXT_BYTES, ack: true, count: true },
       'event-stream': {},
       'sessions': {},
       'exec': { max_request_body_bytes: MAX_REQUEST_BODY_BYTES },
@@ -1444,6 +1477,8 @@ function createServer(): http.Server {
       // ── Agent event stream ──
       } else if (method === 'GET' && pathname === '/events/stream') {
         handleEventStream(req, res);
+      } else if (method === 'GET' && pathname === '/events/count') {
+        await handleEventCount(req, res);
       } else if (method === 'POST' && pathname.startsWith('/events/') && pathname.endsWith('/ack')) {
         const id = decodeURIComponent(pathname.slice('/events/'.length, -'/ack'.length));
         await handleEventAck(req, res, id);
