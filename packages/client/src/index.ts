@@ -256,6 +256,17 @@ export interface WatchOptions {
   /** Reconnect if no data (event or heartbeat) arrives within this window (ms).
    *  The daemon sends a `ping` every 30s, so this catches silently-dead sockets. */
   idleTimeoutMs?: number;
+  /** After `onEvent` settles (its return value, or the promise it returns,
+   *  resolves), POST /events/{id}/ack to close the lifecycle loop. This makes
+   *  `delivered` a transient waypoint rather than a terminal resting state, so
+   *  retention can engage. Ack fires ONLY on a successful settle — if `onEvent`
+   *  throws or its promise rejects, the event stays unacked and is replayed on the
+   *  next connect (at-least-once preserved). Ack failures are surfaced via
+   *  `onError` and are non-fatal (the grace window + next backfill still cover it).
+   *  The ack point should therefore be a *provable handoff* (e.g. the channel
+   *  notification resolved), never a bare receipt — acking into invisibility would
+   *  re-create the missed-event failure this is meant to prevent. */
+  autoAck?: boolean;
 }
 
 /**
@@ -274,13 +285,14 @@ export interface WatchOptions {
 export function watchAgentEvents(
   port: number,
   agentId: string,
-  onEvent: (event: AgentEvent) => void,
+  onEvent: (event: AgentEvent) => void | Promise<void>,
   onError?: (error: Error) => void,
   options: WatchOptions = {},
 ): EventWatcher {
   const minReconnectMs = options.minReconnectMs ?? 2_000;
   const maxReconnectMs = options.maxReconnectMs ?? 30_000;
   const idleTimeoutMs = options.idleTimeoutMs ?? 75_000; // > 2 missed 30s heartbeats
+  const autoAck = options.autoAck ?? false;
 
   let closed = false;
   let backoff = minReconnectMs;
@@ -347,7 +359,17 @@ export function watchAgentEvents(
               const key = `${port}:${agentId}:${parsed.id}`;
               if (seenEventKeys.has(key)) return;
               seenEventKeys.add(key);
-              onEvent(parsed);
+              // `onEvent` may be sync (void) or async; normalize to a promise so
+              // auto-ack fires only once it settles successfully. A throw/reject
+              // leaves the event unacked → replayed next connect (at-least-once).
+              const settled = Promise.resolve(onEvent(parsed));
+              if (autoAck) {
+                settled
+                  .then(() => ackEvent(port, agentId, parsed.id))
+                  .catch(e => onError?.(e instanceof Error ? e : new Error(String(e))));
+              } else {
+                settled.catch(e => onError?.(e instanceof Error ? e : new Error(String(e))));
+              }
             } catch (e) {
               onError?.(e instanceof Error ? e : new Error(String(e)));
             }
@@ -372,6 +394,69 @@ export function watchAgentEvents(
       clearIdle();
       current?.destroy();
     },
+  };
+}
+
+/**
+ * POST /events/{id}/ack — mark an event handled (delivered/pending → ack).
+ *
+ * Closes the consumer side of the event lifecycle. `delivered` is a transport fact
+ * the daemon sets when it flushes an event to a stream; `ack` is the consumer's
+ * confirmation that it *handled* the event, and only acked events become
+ * retention-purgeable and stop being replayed on the next stream connect.
+ *
+ * Idempotent on the daemon (re-acking is a 200 no-op), so a consumer can safely
+ * retry a dropped ack. Returns `true` when the event was found and is now acked,
+ * `false` on 404 (unknown or already-purged event) — a 404 is not thrown because a
+ * retry racing retention is a benign outcome, not a client error.
+ */
+export async function ackEvent(port: number, agentId: string, eventId: string): Promise<boolean> {
+  const res = await request(
+    port,
+    'POST',
+    `/events/${encodeURIComponent(eventId)}/ack`,
+    '',
+    { 'X-Agent-Id': agentId },
+  );
+  if (res.status === 200) return true;
+  if (res.status === 404) return false;
+  throw new Error(`ackEvent failed (${res.status}): ${res.body}`);
+}
+
+/** Backlog snapshot from GET /events/count. */
+export interface EventCount {
+  /** Never flushed to any stream — genuinely missed work. */
+  pending: number;
+  /** Flushed to ≥1 stream but not yet acked. */
+  delivered: number;
+  /** Open work total (pending + delivered) — mirrors the default list view. */
+  unacked: number;
+  /** `receivedAt` of the oldest unacked event — the "<ts>" in "N unread since
+   *  <ts>" — or null when the inbox is clear. */
+  oldestUnackedAt: string | null;
+}
+
+/**
+ * GET /events/count — an agent's backlog snapshot without draining the stream.
+ *
+ * The proactive visibility primitive: a session (or the `--mcp` consumer at
+ * channel init) reads this to surface "N unread since <ts>" instead of relying on
+ * a stream backfill landing in an attended context — the direct guard against a
+ * backlog hiding unseen.
+ */
+export async function eventCount(port: number, agentId: string): Promise<EventCount> {
+  const res = await request(port, 'GET', '/events/count', undefined, { 'X-Agent-Id': agentId });
+  if (res.status !== 200) {
+    throw new Error(`eventCount failed (${res.status}): ${res.body}`);
+  }
+  const d = JSON.parse(res.body) as {
+    pending: number; delivered: number; unacked: number; oldest_unacked_at: string | null;
+  };
+  return {
+    pending: d.pending,
+    delivered: d.delivered,
+    unacked: d.unacked,
+    oldestUnackedAt: d.oldest_unacked_at,
   };
 }
 
