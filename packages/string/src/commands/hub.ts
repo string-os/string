@@ -157,7 +157,7 @@ function renderAppHub(loader: Loader): string {
     '',
     '  /open app:<name>                       — open / re-open an app',
     '  /install --app <path|URL>              — install from a local SFMD file or HTTPS URL',
-    '  /uninstall <name>                      — remove an installed app',
+    '  /uninstall <name> [--purge]            — deregister an app (--purge also deletes its files)',
   );
   return parts.join('\n');
 }
@@ -189,7 +189,7 @@ function renderToolHub(loader: Loader): string {
     '## Manage',
     '',
     '  /install --tool <path|URL>             — install from a local SFMD file or HTTPS URL',
-    '  /uninstall <name>                      — remove an installed tool',
+    '  /uninstall <name> [--purge]            — deregister a tool (--purge also deletes its files)',
   );
   return parts.join('\n');
 }

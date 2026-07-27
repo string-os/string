@@ -260,7 +260,8 @@ export function cmdHelp(session: Session, mode?: 'bash'): CommandResult {
   lines.push('/install <source>             Install app/tool from file or URL');
   lines.push('/install --app <source>       Install as app');
   lines.push('/install --tool <source>      Install as tool');
-  lines.push('/uninstall <name>             Uninstall a package');
+  lines.push('/uninstall <name>             Deregister a package (leaves files)');
+  lines.push('/uninstall <name> --purge     Deregister and delete its files');
 
   // Context-aware: show current document's actions
   const doc = session.currentDoc;

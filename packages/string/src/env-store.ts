@@ -30,6 +30,22 @@ export interface EnvScope {
   config?: string;
 }
 
+/**
+ * Provenance for an installed package, kept in a config section separate from
+ * the name→URI registry so the registry API stays a plain string map.
+ */
+export interface PackageMeta {
+  /** The source given to /install (a local path or a URL), for reference. */
+  source?: string;
+  /**
+   * True when the installed files ARE the author's own source directory —
+   * i.e. the package was installed in-place under {home}/packages/{name}
+   * rather than copied in from elsewhere. A `/uninstall --purge` would delete
+   * the author's source in this case, so uninstall refuses to purge it.
+   */
+  inPlace?: boolean;
+}
+
 export class EnvStore {
   private readonly baseDir: string; // String agent.home — root for config/apps
   // mtime-keyed cache: invalidates if file was edited (or deleted) outside this process.
@@ -112,7 +128,8 @@ export class EnvStore {
     this.writeJson(this.configPath, { ...config, [type]: section });
   }
 
-  /** Unregister an app/tool. Returns true if it existed. */
+  /** Unregister an app/tool. Returns true if it existed. Also drops any
+   *  provenance metadata in the same write so no orphan meta lingers. */
   deletePackage(type: 'apps' | 'tools', name: string): boolean {
     const config = this.readJson(this.configPath);
     const section = (typeof config[type] === 'object' && config[type] !== null && !Array.isArray(config[type]))
@@ -120,8 +137,45 @@ export class EnvStore {
       : {};
     if (!(name in section)) return false;
     delete section[name];
-    this.writeJson(this.configPath, { ...config, [type]: section });
+    const next: Record<string, unknown> = { ...config, [type]: section };
+    const metaRoot = this.cloneMetaRoot(config);
+    if (metaRoot[type] && name in (metaRoot[type] as Record<string, unknown>)) {
+      const metaSection = { ...(metaRoot[type] as Record<string, unknown>) };
+      delete metaSection[name];
+      metaRoot[type] = metaSection;
+      next.packageMeta = metaRoot;
+    }
+    this.writeJson(this.configPath, next);
     return true;
+  }
+
+  /** Read provenance metadata for an installed package (undefined if none). */
+  getPackageMeta(type: 'apps' | 'tools', name: string): PackageMeta | undefined {
+    const metaRoot = this.cloneMetaRoot(this.readJson(this.configPath));
+    const section = metaRoot[type];
+    if (typeof section === 'object' && section !== null && !Array.isArray(section)) {
+      const m = (section as Record<string, unknown>)[name];
+      if (typeof m === 'object' && m !== null && !Array.isArray(m)) return m as PackageMeta;
+    }
+    return undefined;
+  }
+
+  /** Record provenance metadata for an installed package. */
+  setPackageMeta(type: 'apps' | 'tools', name: string, meta: PackageMeta): void {
+    const config = this.readJson(this.configPath);
+    const metaRoot = this.cloneMetaRoot(config);
+    const section = (typeof metaRoot[type] === 'object' && metaRoot[type] !== null && !Array.isArray(metaRoot[type]))
+      ? { ...(metaRoot[type] as Record<string, unknown>) }
+      : {};
+    section[name] = meta;
+    metaRoot[type] = section;
+    this.writeJson(this.configPath, { ...config, packageMeta: metaRoot });
+  }
+
+  private cloneMetaRoot(config: Record<string, unknown>): Record<string, unknown> {
+    return (typeof config.packageMeta === 'object' && config.packageMeta !== null && !Array.isArray(config.packageMeta))
+      ? { ...(config.packageMeta as Record<string, unknown>) }
+      : {};
   }
 
   /** List all registered packages of a type. */

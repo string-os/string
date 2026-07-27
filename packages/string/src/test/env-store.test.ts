@@ -214,3 +214,28 @@ await section('EnvStore — cache and reload', async () => {
 
   fs.rmSync(tmpDir, { recursive: true });
 });
+
+await section('EnvStore — package meta roundtrip, isolated from registry, cleared on delete', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-pkgmeta-');
+  const store = new EnvStore(tmpDir);
+
+  store.setPackage('apps', 'foo', 'file:///x/foo/string.md');
+  store.setPackageMeta('apps', 'foo', { source: '/x/foo', inPlace: true });
+
+  const meta = store.getPackageMeta('apps', 'foo');
+  assert(meta?.inPlace === true && meta?.source === '/x/foo', 'meta roundtrips');
+  // Registry API is unaffected — still a plain URI string.
+  assert(store.getPackage('apps', 'foo') === 'file:///x/foo/string.md', 'registry URI intact');
+
+  // Survives a fresh store (persisted to disk).
+  const store2 = new EnvStore(tmpDir);
+  assert(store2.getPackageMeta('apps', 'foo')?.inPlace === true, 'meta reloaded from disk');
+
+  // Deleting the package clears its meta in the same write.
+  store2.deletePackage('apps', 'foo');
+  assert(store2.getPackageMeta('apps', 'foo') === undefined, 'meta cleared on deletePackage');
+  const cfg = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
+  assert(cfg.packageMeta?.apps?.foo === undefined, 'meta gone from config on disk');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
