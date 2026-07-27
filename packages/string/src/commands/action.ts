@@ -3,6 +3,7 @@
  */
 
 import fs from 'fs';
+import path from 'path';
 import type { ActionDirective } from '@string-os/core';
 import type { Loader, ActionResult } from '../loader.js';
 import type { Session } from '../session.js';
@@ -11,6 +12,7 @@ import { StringError } from '../types.js';
 import { resolve } from '../resolver.js';
 import { render, renderActions } from '../renderer.js';
 import { deriveEnvScope } from '../env-store.js';
+import { deriveCwd } from './exec.js';
 import {
   ok, err,
   parsePosixFlags,
@@ -71,6 +73,86 @@ export async function executeAction(
     return ok(`Action: ${action.id}`);
   }
 
+  // `--<field>-file <path>`: read a file's contents as the value of field
+  // <field>. Lets a long or multi-line value (a dispatch brief) come from a
+  // file instead of a shell argument; `--message-file <(cmd)` also covers the
+  // pipe case via process substitution. Resolved here (not in the CLI binary)
+  // because the rules below need the action's declared fields; the loader /
+  // HTTP layer is untouched. Loud by construction (the S1–S4 through-line):
+  // every ambiguity or failure errors with specifics instead of guessing.
+  const fieldNames = new Set(action.fields.map(f => f.name));
+  const FILE_SUFFIX = '-file';
+  const MAX_FIELD_FILE_BYTES = 1024 * 1024; // 1 MiB — a field value can be fed to a model
+  const fileValues: Record<string, string> = {};
+  for (const key of Object.keys(parsed.flags)) {
+    if (!key.endsWith(FILE_SUFFIX)) continue;
+    const base = key.slice(0, -FILE_SUFFIX.length);
+    if (!base) continue;
+    const declaresBase = fieldNames.has(base);
+    const declaresLiteral = fieldNames.has(key);
+    // `--X-file` is a file-flag ONLY when the action declares field X and does
+    // NOT itself declare a literal `X-file` field. If both exist it's ambiguous
+    // — refuse rather than guess which was meant.
+    if (declaresBase && declaresLiteral) {
+      return err(
+        `Ambiguous flag --${key}: this action declares both a "${base}" field and a "${key}" field, ` +
+        `so --${key} could mean "read a file into ${base}" or the literal "${key}" field. ` +
+        `Rename one field to disambiguate.`,
+        'INVALID_PAYLOAD',
+      );
+    }
+    // Literal `X-file` field, or neither field exists → not a file-flag; leave
+    // it for normal flag handling.
+    if (!declaresBase) continue;
+    // Passing both --X and --X-file is a conflict, not a precedence rule.
+    if (base in parsed.flags) {
+      return err(`Pass either --${base} or --${key}, not both.`, 'INVALID_PAYLOAD');
+    }
+    if (parsed.bareFlags.has(key)) {
+      return err(`--${key} requires a file path.`, 'INVALID_PAYLOAD');
+    }
+    const rawPath = parsed.flags[key];
+    const filePath = path.isAbsolute(rawPath) ? rawPath : path.resolve(deriveCwd(session, loader), rawPath);
+    let contents: string;
+    try {
+      const stat = await fs.promises.stat(filePath);
+      if (!stat.isFile()) {
+        return err(`--${key}: not a regular file: ${filePath}`, 'INVALID_PAYLOAD');
+      }
+      if (stat.size > MAX_FIELD_FILE_BYTES) {
+        return err(
+          `--${key}: file too large — ${filePath} is ${stat.size} bytes, limit is ${MAX_FIELD_FILE_BYTES} bytes (1 MiB).`,
+          'INVALID_PAYLOAD',
+        );
+      }
+      contents = await fs.promises.readFile(filePath, 'utf-8');
+    } catch (e) {
+      return err(`--${key}: cannot read ${filePath}: ${(e as Error).message}`, 'INVALID_PAYLOAD');
+    }
+    // SECURITY — command injection. A field value is interpolated into the
+    // action's command template; for CLI actions that means a `bash -c` string.
+    // File contents are the untrusted, unseen-by-a-human input D exists for, so
+    // a value carrying shell substitution would be executed. The direct-flag
+    // path rejects `$var`, but that guard matches only `$word` — NOT `$( )`,
+    // `${ }`, or backticks, all of which execute inside double quotes (verified
+    // against the reported repro). Refuse any `$` or backtick in a file value.
+    // STOPGAP: this also blocks legitimate `$`/backtick content; the complete
+    // fix (build argv + execFile, or quote on substitution) is a separate PR and
+    // closes the same residual on the direct-flag path too. It does NOT cover a
+    // `"`-breakout in an unusually-quoted template — that residual is identical
+    // on the direct path and is the step-2 fix's job, not a blocklist's.
+    if (/[$`]/.test(contents)) {
+      return err(
+        `--${key}: refusing ${filePath} — its contents contain a shell metacharacter ($ or backtick), ` +
+        `which would be interpreted when the value is placed in the action command (command-injection risk). ` +
+        `Remove it, or pass the value inline once shell-safe substitution lands.`,
+        'INVALID_PAYLOAD',
+      );
+    }
+    fileValues[base] = contents;
+    delete parsed.flags[key];
+  }
+
   // Bind positional operands to fields in declaration order
   // (GNU/POSIX-style: `/act.forecast Seoul 1` is equivalent to
   // `/act.forecast --city Seoul --days 1`). Both required and optional
@@ -82,7 +164,7 @@ export async function executeAction(
   // like `CLI echo $ARGS` rely on the raw arg string passing through, and
   // positional binding would steal those tokens.
   if (parsed.rest.length > 0 && action.fields.length > 0) {
-    const unfilled = action.fields.filter(f => !(f.name in parsed.flags));
+    const unfilled = action.fields.filter(f => !(f.name in parsed.flags) && !(f.name in fileValues));
     if (parsed.rest.length > unfilled.length) {
       const names = action.fields.map(f => f.name).join(', ');
       return err(
@@ -123,6 +205,12 @@ export async function executeAction(
     const sub = substituteVars(val, session);
     if (sub.error) return err(sub.error, 'INVALID_PAYLOAD');
     payload[key] = sub.result;
+  }
+  // File-loaded values are literal DATA, not command templates: inject them
+  // after substitution so a brief containing {curly} or $var text passes
+  // through verbatim (and isn't rejected by the $var guard).
+  for (const [field, contents] of Object.entries(fileValues)) {
+    payload[field] = contents;
   }
 
   // Resolve @shortcut in flag values. Value shortcuts (from {@var}=expr in
