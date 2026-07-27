@@ -10,6 +10,7 @@ import './topics-shell.test.js';
 import './editing.test.js';
 import './env-store.test.js';
 import './packages.test.js';
+import './cli-args.test.js';
 import './references.test.js';
 import './client.test.js';
 import './agent-config.test.js';
