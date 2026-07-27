@@ -250,12 +250,25 @@ export async function cmdUninstall(
       ? `  Files left in place at ${packagesDir}\n` +
         `  (run /uninstall ${name} --purge to delete them)`
       : `  No local files to remove.`;
-  } else if (meta?.inPlace) {
-    // The installed files ARE the author's source — deleting them is data loss,
-    // never what "uninstall" means, flag or not. Refuse and point them at it.
+  } else if (!meta || meta.inPlace) {
+    // Refuse to delete unless we can PROVE it's safe (a copied install:
+    // meta.inPlace === false). Two refusal cases, both deterministic — not the
+    // writability heuristic we rejected, but "don't delete what we can't prove
+    // is a copy":
+    //   - meta.inPlace === true: the files ARE the author's in-place source.
+    //   - meta === undefined: unknown provenance — installed before this fix
+    //     (e.g. the very agent-message that motivated S1), or metadata missing.
+    // /uninstall is never how anyone intends to delete an author's source, so
+    // refusing costs at most one `rm` the user types with the path we print,
+    // while deleting costs something unrecoverable. Self-heals: post-fix
+    // reinstalls record provenance, shrinking the refusal set toward empty.
+    const why = meta?.inPlace
+      ? `${packagesDir} is this app's live in-place source.\n` +
+        `  You authored the app there; deleting it would destroy your source.`
+      : `provenance for "${name}" is unknown (installed before safe-uninstall, or\n` +
+        `  metadata missing), so deletion cannot be proven safe.`;
     fileLine =
-      `  Refused to --purge: ${packagesDir} is this app's live in-place source.\n` +
-      `  You authored the app there; deleting it would destroy your source.\n` +
+      `  Refused to --purge: ${why}\n` +
       `  Left the files untouched. If you are certain, remove them yourself:\n` +
       `    rm -rf ${packagesDir}`;
   } else if (dirExists) {

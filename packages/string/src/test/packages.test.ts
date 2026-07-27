@@ -461,6 +461,33 @@ await section('/uninstall --purge — REFUSES to delete an in-place app source (
   fs.rmSync(home, { recursive: true, force: true });
 });
 
+await section('/uninstall --purge — REFUSES when provenance is unknown (legacy install, no meta)', async () => {
+  // Every app installed before this fix has no packageMeta — including the
+  // agent-message that motivated S1. --purge must refuse rather than delete
+  // when it cannot PROVE the files are a copy (deterministic, not a heuristic).
+  const tmpDir = fs.mkdtempSync('/tmp/string-uninstall-nometa-');
+  const toolSource = path.join(tmpDir, 'legacy.md');
+  fs.writeFileSync(toolSource, ['---', 'name: legacy', 'type: tool', '---', '```act.hi', 'CLI echo hi', '```'].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  assert((await b.exec(`/install --tool ${toolSource}`)).ok, 'install ok');
+
+  // Simulate a pre-fix install by stripping the provenance metadata on disk.
+  const cfgPath = path.join(tmpDir, 'config.json');
+  const cfg = JSON.parse(fs.readFileSync(cfgPath, 'utf-8'));
+  delete cfg.packageMeta;
+  fs.writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+
+  const packagesDir = path.join(tmpDir, 'packages', 'legacy');
+  const r = await b.exec('/uninstall legacy --purge');
+  assert(r.ok, 'uninstall succeeds (deregisters)');
+  assert(r.content.includes('Refused to --purge') && r.content.includes('provenance'),
+    `--purge refused on unknown provenance: ${r.content}`);
+  assert(fs.existsSync(packagesDir), 'files NOT deleted when provenance unknown');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
 await section('/uninstall — closes zombie sessions (Round 2 #3a)', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-uninstall-zombie-');
   const appSource = path.join(tmpDir, 'translate.md');
