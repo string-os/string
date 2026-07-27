@@ -44,6 +44,10 @@ const INSTALL_HELP = [
   '',
   'When the source returns a JSON install manifest (`{files:[...], delivery:...}`), the daemon picks',
   'mode (link/local) and stages files automatically — no flags needed.',
+  '',
+  'Re-installing under an existing name upserts (overwrites) it and reloads any open session,',
+  'so the edit→reinstall authoring loop needs no /uninstall. Only a different package colliding',
+  'on the same local name is refused (use --as to keep both).',
 ].join('\n');
 
 // ─── /install ─────────────────────────────────────────────────────────────────
@@ -154,12 +158,33 @@ export async function cmdInstall(
     const installLine = result.linked
       ? `Linked ${result.type}:${result.name} (URL shortcut)`
       : `Installed ${result.type}:${result.name}`;
-    return ok(
+
+    // Reload any open session pointing at this app so a reinstall's new
+    // definition takes effect immediately. Without this, a live session keeps
+    // running the OLD compiled definition while /install reports success — the
+    // S3 "installed OK but old code runs" silent failure. We reuse the exact
+    // cleanup /uninstall performs (close the session; the next access re-reads
+    // the new definition from disk), and log which sessions reloaded so an
+    // agent whose app changed mid-run can see why.
+    const packagesDir = path.join(loader.home, 'packages', result.name);
+    const localPrefix = `file://${packagesDir}/`;
+    const localExact = `file://${packagesDir}`;
+    const reloaded = loader.sessionCleanup?.((uri) =>
+      uri === result.localUri ||
+      uri.startsWith(result.localUri + '#') ||
+      uri === localExact ||
+      uri.startsWith(localPrefix)
+    ) ?? [];
+
+    let summary =
       `${installLine}\n` +
       `  Source: ${source}\n` +
       `  Path: ${localPath}\n` +
-      useHint
-    );
+      useHint;
+    if (reloaded.length > 0) {
+      summary += `\n  Reloaded ${reloaded.length} active session${reloaded.length === 1 ? '' : 's'}: ${reloaded.join(', ')}`;
+    }
+    return ok(summary);
   } catch (e) {
     return err((e as Error).message, 'COMMAND_UNSUPPORTED');
   }
@@ -172,9 +197,14 @@ export async function cmdUninstall(
   _session: Session,
   loader: Loader,
 ): Promise<CommandResult> {
-  const name = args?.trim();
+  // Light parse: `--purge` anywhere is the destructive flag; the first
+  // non-flag token is the package name. (No interactive confirm — a prompt
+  // hangs in non-interactive runs; the flag is the honest opt-in.)
+  const tokens = (args ?? '').trim().split(/\s+/).filter(Boolean);
+  const purge = tokens.includes('--purge');
+  const name = tokens.find(t => !t.startsWith('-'));
   if (!name) {
-    return err('Usage: /uninstall <name>', 'COMMAND_UNSUPPORTED');
+    return err('Usage: /uninstall <name> [--purge]', 'COMMAND_UNSUPPORTED');
   }
 
   // Find in apps or tools
@@ -188,21 +218,22 @@ export async function cmdUninstall(
   const type = appUri ? 'apps' : 'tools';
   const typeLabel = appUri ? 'app' : 'tool';
   const registryUri = (appUri ?? toolUri)!;
-  loader.envStore.deletePackage(type as 'apps' | 'tools', name);
+  // Read provenance BEFORE deregistering (deletePackage clears the meta too).
+  const meta = loader.envStore.getPackageMeta(type as 'apps' | 'tools', name);
 
-  // Remove local package files
   const packagesDir = path.join(loader.home, 'packages', name);
   const localPrefix = `file://${packagesDir}/`;
   const localExact = `file://${packagesDir}`;
-  try {
-    await fsPromises.rm(packagesDir, { recursive: true });
-  } catch { /* directory may not exist */ }
 
-  // Close any session still pointing at the package we just removed —
-  // otherwise /refresh, /back, or any auto-default-action keeps re-reading
-  // a now-stale or missing path. Match both the registry URI (covers linked
-  // installs where files live at arbitrary HTTPS URLs) and the local
-  // packages dir prefix (covers any sub-doc the user nav'd into).
+  // Deregister first — /uninstall always removes the registry entry. Files are
+  // handled separately below so the DEFAULT is non-destructive (the S1 fix:
+  // /uninstall must never wipe the app source; only --purge deletes files).
+  loader.envStore.deletePackage(type as 'apps' | 'tools', name);
+
+  // Close any session still pointing at the package — otherwise /refresh,
+  // /back, or any auto-default-action keeps re-reading a now-stale or missing
+  // path. Matches the registry URI (covers linked installs at arbitrary HTTPS
+  // URLs) and the local packages dir prefix (covers any sub-doc nav'd into).
   const closed = loader.sessionCleanup?.((uri) =>
     uri === registryUri ||
     uri.startsWith(registryUri + '#') ||
@@ -210,7 +241,35 @@ export async function cmdUninstall(
     uri.startsWith(localPrefix)
   ) ?? [];
 
-  let summary = `Uninstalled ${typeLabel}:${name}`;
+  let dirExists = true;
+  try { await fsPromises.access(packagesDir); } catch { dirExists = false; }
+
+  let fileLine: string;
+  if (!purge) {
+    fileLine = dirExists
+      ? `  Files left in place at ${packagesDir}\n` +
+        `  (run /uninstall ${name} --purge to delete them)`
+      : `  No local files to remove.`;
+  } else if (meta?.inPlace) {
+    // The installed files ARE the author's source — deleting them is data loss,
+    // never what "uninstall" means, flag or not. Refuse and point them at it.
+    fileLine =
+      `  Refused to --purge: ${packagesDir} is this app's live in-place source.\n` +
+      `  You authored the app there; deleting it would destroy your source.\n` +
+      `  Left the files untouched. If you are certain, remove them yourself:\n` +
+      `    rm -rf ${packagesDir}`;
+  } else if (dirExists) {
+    try {
+      await fsPromises.rm(packagesDir, { recursive: true });
+      fileLine = `  Purged files at ${packagesDir}`;
+    } catch (e) {
+      fileLine = `  Failed to purge ${packagesDir}: ${(e as Error).message}`;
+    }
+  } else {
+    fileLine = `  No local files to remove.`;
+  }
+
+  let summary = `Uninstalled ${typeLabel}:${name}\n${fileLine}`;
   if (closed.length > 0) {
     summary += `\n  Closed ${closed.length} active session${closed.length === 1 ? '' : 's'}: ${closed.join(', ')}`;
   }

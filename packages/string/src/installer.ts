@@ -72,6 +72,20 @@ async function stripWriteBits(dir: string): Promise<void> {
   }
 }
 
+/**
+ * True when two paths resolve to the same real location. Used to detect an
+ * in-place install (the source dir IS the packages dir) so /uninstall --purge
+ * can refuse to delete the author's own source.
+ */
+async function realpathEquals(a: string, b: string): Promise<boolean> {
+  try {
+    const [ra, rb] = await Promise.all([fs.realpath(a), fs.realpath(b)]);
+    return ra === rb;
+  } catch {
+    return path.resolve(a) === path.resolve(b);
+  }
+}
+
 function isGithubInstallSource(source: string): boolean {
   if (parseGithubUrl(source)) return true;
   try {
@@ -217,43 +231,53 @@ export async function installPackage(
 
   const registryType = type === 'app' ? 'apps' : 'tools';
 
-  // Collision check: refuse to silently overwrite a different app installed
-  // under the same local name. This is common in marketplaces where multiple
-  // publishers ship apps with the same `name` field (cookbook/weather vs
-  // stringhub/weather both declare `name: weather`).
+  // Collision check. Re-installing under an existing local name is an UPSERT by
+  // default — that's the app authoring loop (edit → reinstall) and the common
+  // case. We REFUSE only when we can prove the incoming package is a *different*
+  // one colliding on the same local name, which is exactly two situations:
   //
-  // Re-install of the SAME app (matching identity) is allowed — that's how
-  // version upgrades work.
+  //   1. Different package kind: the name is already registered as a tool and
+  //      we're installing an app (or vice versa).
+  //   2. Provably different publisher: BOTH the installed and the incoming
+  //      string.md declare a (namespace, name) identity and they differ — the
+  //      marketplace case (cookbook/weather vs stringhub/weather).
   //
-  // Identity check, in order of reliability:
-  //   1. Local install: read installed string.md frontmatter → (namespace, name)
-  //   2. Link install: registry stores the source URL → string compare
-  //   3. Cross-mode or unparseable: treat as collision (force --as)
+  // If identity is indeterminate (most apps declare no `namespace:`), we cannot
+  // prove a different publisher, so we upsert rather than block the loop — this
+  // is the S3 fix: a no-namespace app could never be re-installed before.
   for (const t of ['apps', 'tools'] as const) {
     const existingUri = loader.envStore.getPackage(t, name);
     if (!existingUri) continue;
 
-    let isReinstall = false;
-    if (existingUri.startsWith('file://')) {
+    const sameKind = t === registryType;
+    let isUpsert: boolean;
+    if (!sameKind) {
+      isUpsert = false; // app-vs-tool name collision — a genuinely different thing
+    } else if (existingUri.startsWith('file://')) {
       const existingId = await readInstalledIdentity(existingUri);
       const newNs = typeof doc.frontmatter.namespace === 'string' ? doc.frontmatter.namespace : undefined;
       const newNm = typeof doc.frontmatter.name === 'string' ? doc.frontmatter.name : undefined;
-      if (existingId && newNs && newNm && existingId.namespace === newNs && existingId.name === newNm) {
-        isReinstall = true;
-      }
+      // Both sides declare identity → upsert iff it matches. Otherwise
+      // indeterminate → treat as an upsert of the same local slot.
+      isUpsert = (existingId && newNs && newNm)
+        ? existingId.namespace === newNs && existingId.name === newNm
+        : true;
     } else {
-      // existing entry is link-mode — compare source URLs directly
-      isReinstall = existingUri === source;
+      // Existing entry is link-mode: re-installing the same name updates that
+      // slot's target (same URL, or a new local/linked source) — an upsert.
+      isUpsert = true;
     }
 
-    if (!isReinstall) {
-      const altName = opts.as ? `${name}-2` : `${name}-2`;
+    if (!isUpsert) {
+      const reason = !sameKind
+        ? `${t === 'apps' ? 'An app' : 'A tool'} named "${name}" is already installed (a different package kind).`
+        : `A different ${t === 'apps' ? 'app' : 'tool'} named "${name}" is already installed (different namespace/name identity).`;
       throw new Error(
-        `An ${t === 'apps' ? 'app' : 'tool'} named "${name}" is already installed.\n` +
+        `${reason}\n` +
         `Refusing to overwrite a different package with the same local name.\n` +
         `\n` +
         `To install both side-by-side, choose a different local name with --as:\n` +
-        `  /install --as ${altName} ${source}\n` +
+        `  /install --as ${name}-2 ${source}\n` +
         `\n` +
         `Or remove the existing one first:\n` +
         `  /uninstall ${name}`
@@ -307,6 +331,9 @@ export async function installPackage(
     removeDuplicates(source);
     await fs.rm(path.join(loader.home, 'packages', name), { recursive: true, force: true });
     loader.envStore.setPackage(registryType as 'apps' | 'tools', name, source);
+    // Link installs never copy files into packages/{name}/, so there is no
+    // author source at risk — inPlace is always false.
+    loader.envStore.setPackageMeta(registryType as 'apps' | 'tools', name, { source, inPlace: false });
     return { name, type, localUri: source, linked: true };
   }
 
@@ -430,6 +457,16 @@ export async function installPackage(
   const localUri = `file://${destFile}`;
   removeDuplicates(localUri);
   loader.envStore.setPackage(registryType as 'apps' | 'tools', name, localUri);
+
+  // Record provenance so /uninstall --purge can refuse to delete the author's
+  // own source. inPlace is true when the source directory IS packages/{name}/
+  // (the app was authored in place, not copied in from elsewhere).
+  let inPlace = false;
+  if (loaded.uri.startsWith('file://')) {
+    const srcDir = path.dirname(new URL(loaded.uri).pathname);
+    inPlace = await realpathEquals(srcDir, packagesDir);
+  }
+  loader.envStore.setPackageMeta(registryType as 'apps' | 'tools', name, { source, inPlace });
 
   return { name, type, localUri };
 }

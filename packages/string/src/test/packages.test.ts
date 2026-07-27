@@ -379,7 +379,7 @@ await section('/install — type missing → error with hint', async () => {
   fs.rmSync(tmpDir, { recursive: true });
 });
 
-await section('/uninstall — removes package', async () => {
+await section('/uninstall — deregisters but LEAVES files by default (S1 data-loss fix)', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-uninstall-');
   const toolSource = path.join(tmpDir, 'bye.md');
   fs.writeFileSync(toolSource, [
@@ -393,24 +393,72 @@ await section('/uninstall — removes package', async () => {
   ].join('\n'));
 
   const b = new Browser({ home: tmpDir });
-  // Install first
+  // Install first (source is outside packages/ → copied in, not in-place)
   const r1 = await b.exec(`/install --tool ${toolSource}`);
   assert(r1.ok, 'install ok');
 
-  // Uninstall
+  // Plain uninstall: deregister only, files must survive.
   const r2 = await b.exec('/uninstall bye');
   assert(r2.ok, 'uninstall ok');
   assert(r2.content.includes('Uninstalled tool:bye'), 'uninstall output correct');
+  assert(r2.content.includes('Files left in place'), `default uninstall reports files kept: ${r2.content}`);
 
-  // Verify removed from registry
+  // Removed from registry...
   const config = JSON.parse(fs.readFileSync(path.join(tmpDir, 'config.json'), 'utf-8'));
   assert(config.tools?.bye === undefined, 'removed from registry');
-
-  // Verify files deleted
+  // ...but the files remain (the whole point of the S1 fix).
   const packagesDir = path.join(tmpDir, 'packages', 'bye');
-  assert(!fs.existsSync(packagesDir), 'package directory removed');
+  assert(fs.existsSync(packagesDir), 'package directory left in place on plain uninstall');
 
   fs.rmSync(tmpDir, { recursive: true });
+});
+
+await section('/uninstall --purge — deletes files of a copied install', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-uninstall-purge-');
+  const toolSource = path.join(tmpDir, 'bye.md');
+  fs.writeFileSync(toolSource, ['---', 'name: bye', 'type: tool', '---', '```act.bye', 'CLI echo bye', '```'].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  assert((await b.exec(`/install --tool ${toolSource}`)).ok, 'install ok');
+  const packagesDir = path.join(tmpDir, 'packages', 'bye');
+  assert(fs.existsSync(packagesDir), 'installed dir exists');
+
+  const r = await b.exec('/uninstall bye --purge');
+  assert(r.ok, 'purge uninstall ok');
+  assert(r.content.includes('Purged files'), `--purge reports deletion: ${r.content}`);
+  assert(!fs.existsSync(packagesDir), 'copied package dir removed by --purge');
+  // The original external source is untouched — --purge only deletes the copy.
+  assert(fs.existsSync(toolSource), 'external source untouched');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+await section('/uninstall --purge — REFUSES to delete an in-place app source (the agent-message case)', async () => {
+  const home = fs.mkdtempSync('/tmp/string-uninstall-inplace-');
+  // Author the app directly under {home}/packages/inplaceapp/ — source IS the
+  // install dir. A --purge here would destroy the author's own source.
+  const appDir = path.join(home, 'packages', 'inplaceapp');
+  fs.mkdirSync(appDir, { recursive: true });
+  fs.writeFileSync(path.join(appDir, 'string.md'),
+    ['---', 'name: inplaceapp', 'type: app', '---', '# In-place', '```act.hi', 'CLI echo hi', '```'].join('\n'));
+
+  const b = new Browser({ home });
+  assert((await b.exec(`/install ${path.join(appDir, 'string.md')}`)).ok, 'in-place install ok');
+
+  // provenance must record inPlace=true
+  const config = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf-8'));
+  assert(config.packageMeta?.apps?.inplaceapp?.inPlace === true, 'install recorded inPlace=true');
+
+  const r = await b.exec('/uninstall inplaceapp --purge');
+  assert(r.ok, 'uninstall still succeeds (deregisters)');
+  assert(r.content.includes('Refused to --purge'), `--purge refused on in-place source: ${r.content}`);
+  // Files MUST survive — this is the exact failure that wiped agent-message.
+  assert(fs.existsSync(path.join(appDir, 'string.md')), 'in-place source NOT deleted');
+  // But it is deregistered.
+  const cfg2 = JSON.parse(fs.readFileSync(path.join(home, 'config.json'), 'utf-8'));
+  assert(cfg2.apps?.inplaceapp === undefined, 'deregistered from config');
+
+  fs.rmSync(home, { recursive: true, force: true });
 });
 
 await section('/uninstall — closes zombie sessions (Round 2 #3a)', async () => {
@@ -714,6 +762,51 @@ await section('install collision — re-install of same (namespace,name) is allo
   fs.rmSync(tmpDir, { recursive: true });
 });
 
+await section('install upsert — re-install of a no-namespace app overwrites (S3 fix)', async () => {
+  // The exact case that forced /uninstall in the authoring loop: an app with no
+  // `namespace:` frontmatter could never be re-installed (collision check needed
+  // a matching namespace). It must now upsert.
+  const tmpDir = fs.mkdtempSync('/tmp/string-upsert-nons-');
+  const src = path.join(tmpDir, 'crew-ops.md');
+  const write = (v: string) => fs.writeFileSync(src,
+    ['---', 'name: crew-ops', 'type: app', '---', `# Crew ops ${v}`, '```act.hi', `CLI echo ${v}`, '```'].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  write('v1');
+  const r1 = await b.exec(`/install ${src}`);
+  assert(r1.ok, `first install ok: ${r1.content}`);
+
+  // Edit and re-install from the SAME source — must succeed, no /uninstall needed.
+  write('v2');
+  const r2 = await b.exec(`/install ${src}`);
+  assert(r2.ok, `re-install of no-namespace app upserts: ${r2.content}`);
+  const installed = fs.readFileSync(path.join(tmpDir, 'packages', 'crew-ops', 'string.md'), 'utf-8');
+  assert(installed.includes('Crew ops v2'), 'installed definition updated to v2');
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
+await section('install upsert — reinstall reloads an open session (S3 stale-def fix)', async () => {
+  const tmpDir = fs.mkdtempSync('/tmp/string-upsert-reload-');
+  const src = path.join(tmpDir, 'reloadapp.md');
+  const write = (v: string) => fs.writeFileSync(src,
+    ['---', 'name: reloadapp', 'type: app', '---', `# Reload ${v}`].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  write('v1');
+  assert((await b.exec(`/install ${src}`)).ok, 'install ok');
+  assert((await b.exec('/open app:reloadapp', 'main')).ok, 'open ok');
+  assert(b.session('main').currentUri?.includes('packages/reloadapp') ?? false, 'session points at app');
+
+  write('v2');
+  const r = await b.exec(`/install ${src}`, 'other');
+  assert(r.ok, 'reinstall ok');
+  assert(r.content.includes('Reloaded') && r.content.includes('main'),
+    `reinstall reports the reloaded session: ${r.content}`);
+
+  fs.rmSync(tmpDir, { recursive: true });
+});
+
 await section('install --as <name> — installs colliding apps side-by-side', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-collision-as-');
   const cookbookSrc = writeWeatherApp(tmpDir, 'cookbook');
@@ -975,9 +1068,9 @@ await section('Install makes app source read-only (write bits stripped, execute 
 
   assert((await b.exec('/act.go', 'app:rotest')).content.includes('ran'), 'executable helper still runs after read-only');
 
-  // uninstall + reinstall still work despite read-only files
-  await b.exec('/uninstall rotest');
-  assert(!fs.existsSync(pkg), 'uninstall removes read-only package');
+  // uninstall --purge + reinstall still work despite read-only files
+  await b.exec('/uninstall rotest --purge');
+  assert(!fs.existsSync(pkg), 'uninstall --purge removes read-only package');
   assert((await b.exec(`/install ${path.join(src, 'string.md')}`)).ok, 'reinstall over read-only works');
 
   fs.rmSync(home, { recursive: true, force: true });
