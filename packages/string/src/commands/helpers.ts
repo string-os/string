@@ -233,10 +233,27 @@ export function executeResponseTemplate(
   const body: unknown = actionResult.jsonBody !== null && actionResult.jsonBody !== undefined
     ? actionResult.jsonBody
     : actionResult.source;
+  // CLI actions expose stdout/stderr separately (undefined for HTTP). Surface
+  // them plus an `exit_code` alias for `status`, so authors reach for the names
+  // a shell command suggests ({Response.stdout}, {Response.exit_code}) instead
+  // of silently rendering blank when they guess wrong — the S4 fix.
+  const isCli = actionResult.stdout !== undefined || actionResult.stderr !== undefined;
   const responseObj: Record<string, unknown> = {
     status: actionResult.status,
     body,
+    ...(isCli
+      ? {
+          exit_code: actionResult.status,
+          stdout: actionResult.stdout ?? '',
+          stderr: actionResult.stderr ?? '',
+        }
+      : {}),
   };
+
+  // Unresolved {Response.*} references in OUTPUT text (not value-computing
+  // directives). Collected so a template that references a field that doesn't
+  // exist gets a loud warning instead of a silent blank.
+  const unresolvedRefs = new Set<string>();
 
   // The "current buffer" for save → decode → to pipelines. Starts as a
   // string (whatever JSON path resolved to, stringified). `decode: base64`
@@ -339,6 +356,15 @@ export function executeResponseTemplate(
     let out = substituteSlugRefs(line);
     out = out.replace(/\{Response\.([a-zA-Z_.[\]\d]+)\}/g, (_m: string, p: string): string => {
       const val = walkJsonPath(responseObj, p);
+      // Loud + consistent with unknown {var}/{field}, which already keep their
+      // literal visible: an unresolved reference stays as `{Response.x}` in the
+      // output (never a silent blank) and is recorded for the warning below.
+      // `undefined` = the path doesn't exist (typo, missing key); an explicit
+      // `null` is a real value and still renders "" via stringifyValue.
+      if (val === undefined) {
+        unresolvedRefs.add(`{Response.${p}}`);
+        return _m;
+      }
       return stringifyValue(val);
     });
     out = substituteVarsAndFields(out);
@@ -534,6 +560,20 @@ export function executeResponseTemplate(
   // gain phantom whitespace from template formatting.
   while (outputLines.length > 0 && outputLines[outputLines.length - 1].trim() === '') {
     outputLines.pop();
+  }
+
+  // Surface any unresolved output references (same inline-note convention as
+  // save:/decode:/to: problems above). The literals are already visible in the
+  // output; this names them and lists what the response actually exposes so a
+  // typo like {Response.stdout} vs {Response.body} is obvious, not silent.
+  if (unresolvedRefs.size > 0) {
+    const available = Object.keys(responseObj).join(', ');
+    outputLines.push(
+      '',
+      `> ⚠️ Unresolved template reference${unresolvedRefs.size === 1 ? '' : 's'}: ${[...unresolvedRefs].join(', ')}`,
+      `> This response exposes: ${available} (with nested JSON reachable under body). ` +
+        `Left visible above instead of rendering blank.`,
+    );
   }
 
   return outputLines.join('\n');
