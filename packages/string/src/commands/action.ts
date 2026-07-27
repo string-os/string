@@ -113,6 +113,7 @@ export async function executeAction(
     }
     const rawPath = parsed.flags[key];
     const filePath = path.isAbsolute(rawPath) ? rawPath : path.resolve(deriveCwd(session, loader), rawPath);
+    let contents: string;
     try {
       const stat = await fs.promises.stat(filePath);
       if (!stat.isFile()) {
@@ -124,10 +125,31 @@ export async function executeAction(
           'INVALID_PAYLOAD',
         );
       }
-      fileValues[base] = await fs.promises.readFile(filePath, 'utf-8');
+      contents = await fs.promises.readFile(filePath, 'utf-8');
     } catch (e) {
       return err(`--${key}: cannot read ${filePath}: ${(e as Error).message}`, 'INVALID_PAYLOAD');
     }
+    // SECURITY — command injection. A field value is interpolated into the
+    // action's command template; for CLI actions that means a `bash -c` string.
+    // File contents are the untrusted, unseen-by-a-human input D exists for, so
+    // a value carrying shell substitution would be executed. The direct-flag
+    // path rejects `$var`, but that guard matches only `$word` — NOT `$( )`,
+    // `${ }`, or backticks, all of which execute inside double quotes (verified
+    // against the reported repro). Refuse any `$` or backtick in a file value.
+    // STOPGAP: this also blocks legitimate `$`/backtick content; the complete
+    // fix (build argv + execFile, or quote on substitution) is a separate PR and
+    // closes the same residual on the direct-flag path too. It does NOT cover a
+    // `"`-breakout in an unusually-quoted template — that residual is identical
+    // on the direct path and is the step-2 fix's job, not a blocklist's.
+    if (/[$`]/.test(contents)) {
+      return err(
+        `--${key}: refusing ${filePath} — its contents contain a shell metacharacter ($ or backtick), ` +
+        `which would be interpreted when the value is placed in the action command (command-injection risk). ` +
+        `Remove it, or pass the value inline once shell-safe substitution lands.`,
+        'INVALID_PAYLOAD',
+      );
+    }
+    fileValues[base] = contents;
     delete parsed.flags[key];
   }
 

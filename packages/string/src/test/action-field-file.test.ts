@@ -11,6 +11,7 @@
  */
 import fs from 'fs';
 import path from 'path';
+import { parse } from '@string-os/core';
 import { Browser } from '../index.js';
 import { assert, section } from './runner.js';
 
@@ -28,13 +29,27 @@ function appDoc(fieldLine: string): string[] {
   ];
 }
 
+await section('D — invariant: SFMD field names reject hyphens (keeps the rule-1 guard unreachable)', () => {
+  // The rule-1 ambiguity guard ("both field X and a literal X-file declared →
+  // error") is unreachable ONLY because field names are \w+ (core/parser.ts),
+  // so a field named `X-file` cannot be declared. Pin that invariant: if the
+  // grammar ever gains hyphens this test fails and points straight at the guard
+  // that just became reachable. (Test the assumption, not the dead branch.)
+  const src = ['```act.t', 'CLI true', '  msg-file: string (required) "m"', '```'].join('\n');
+  const result = parse(src);
+  const declaredNames = (result.actions[0]?.fields ?? []).map(f => f.name);
+  assert(!declaredNames.includes('msg-file'),
+    `a hyphenated field name must not parse as a field; got ${JSON.stringify(declaredNames)}`);
+});
+
 await section('D — --<field>-file reads file contents as the field value (verbatim data)', async () => {
   const tmpDir = fs.mkdtempSync('/tmp/string-field-file-');
   fs.writeFileSync(path.join(tmpDir, 'app.md'), appDoc('  message: string (required) "the message"').join('\n'));
-  // Content that would break if it went through the arg layer: spaces, an
-  // apostrophe, a $VAR (rejected by the $var guard) and a {curly} (would be
-  // consumed by {var} substitution). All must pass through verbatim as data.
-  const brief = "Kit: research only, don't install. It is $URGENT and {important}.";
+  // A realistic brief: multiline, an apostrophe, double quotes, and a {curly}
+  // that would be eaten by {var} substitution on the arg path. All pass through
+  // verbatim as data. (Shell-substitution chars $ and backtick are refused — see
+  // the injection test below — so this safe brief contains none.)
+  const brief = 'Kit: research only, don\'t install.\nUse the "staging" DB. Keep {scope} tight.';
   const briefPath = path.join(tmpDir, 'brief.txt');
   fs.writeFileSync(briefPath, brief);
 
@@ -44,8 +59,46 @@ await section('D — --<field>-file reads file contents as the field value (verb
 
   assert(r.ok, `action ok: ${r.content}`);
   assert(r.content.includes('research only'), `file contents reached the field: ${r.content}`);
-  assert(r.content.includes('$URGENT'), `\$VAR-looking text passed verbatim (no guard rejection): ${r.content}`);
-  assert(r.content.includes('{important}'), `{curly} passed verbatim (not {var}-substituted): ${r.content}`);
+  assert(r.content.includes('"staging"'), `double quotes passed verbatim: ${r.content}`);
+  assert(r.content.includes('{scope}'), `{curly} passed verbatim (not {var}-substituted): ${r.content}`);
+
+  fs.rmSync(tmpDir, { recursive: true, force: true });
+});
+
+await section('D — SECURITY: file contents with shell substitution are REFUSED (command-injection fix)', async () => {
+  // Reported repro: a file value flowing into a CLI action's shell command
+  // executed $( ), backticks and $VAR. The direct-flag $var guard misses $( )
+  // and backticks, so file values are refused if they contain $ or backtick.
+  const tmpDir = fs.mkdtempSync('/tmp/string-field-file-inject-');
+  fs.writeFileSync(path.join(tmpDir, 'app.md'), [
+    '# Inject',
+    '',
+    '```act.run',
+    "CLI printf '%s' \"{payload}\"",
+    '  payload: string (required) "p"',
+    '```',
+  ].join('\n'));
+
+  const b = new Browser({ home: tmpDir });
+  await b.exec(`/open ${path.join(tmpDir, 'app.md')}`);
+
+  // The exact reported payload, plus each vector on its own.
+  const vectors = [
+    'BEGIN $(id -un) MID `hostname` END $HOME',
+    '$(id -un)',
+    '`hostname`',
+    '${HOME}',
+    'plain $HOME here',
+  ];
+  for (const v of vectors) {
+    const p = path.join(tmpDir, 'v.txt');
+    fs.writeFileSync(p, v);
+    const r = await b.exec(`/act.run --payload-file ${p}`);
+    assert(!r.ok, `injection payload refused: ${JSON.stringify(v)} → ${r.content}`);
+    assert(r.content.includes('shell metacharacter'), `refusal explains why: ${r.content}`);
+    // Must NOT have executed: no command output leaked into the result.
+    assert(!/uid=|ip-\d|\/home\/ubuntu/.test(r.content), `nothing executed: ${r.content}`);
+  }
 
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });

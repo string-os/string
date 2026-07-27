@@ -151,6 +151,24 @@ Constraints appear in parentheses, comma-separated:
   manifest: path (required) "Kubernetes manifest file"
 ```
 
+### Loading a field value from a file
+
+For a long or multi-line value, pass `--<field>-file <path>` instead of
+`--<field>`: the file's contents become that field's value. Handy for a brief
+you don't want to shell-quote; `--message-file <(some-command)` covers the pipe
+case via process substitution.
+
+- Only recognized when the action declares field `<field>`. An undeclared
+  `--x-file` is left as an ordinary flag.
+- Passing both `--<field>` and `--<field>-file` is an error, not a precedence
+  choice. So is an unreadable path or a file larger than 1 MiB.
+- The value is treated as literal data: `{curly}` and other text pass through
+  without `{var}` substitution.
+- **Security:** a file value that contains a shell metacharacter (`$` or a
+  backtick) is refused, because field values are interpolated into the action's
+  command and those characters would be executed. Keep such content out of the
+  file (a shell-safe substitution path that lifts this restriction is planned).
+
 ---
 
 ## Complete definition examples
