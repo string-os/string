@@ -6,6 +6,7 @@
  */
 import './navigation.test.js';
 import './actions.test.js';
+import './cli-response.test.js';
 import './topics-shell.test.js';
 import './editing.test.js';
 import './env-store.test.js';

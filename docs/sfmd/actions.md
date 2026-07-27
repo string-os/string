@@ -551,14 +551,28 @@ Response data is accessed using dot-and-bracket notation:
 | `{Response.body.nested.field}` | Nested field |
 | `{Response.body.items[0].name}` | Array index + field |
 | `{Response.body[0].display_name}` | Top-level array element |
-| `{Response.status}` | HTTP status code |
+| `{Response.status}` | HTTP status code (HTTP actions) or exit code (CLI actions) |
 | `{Response.body}` | Entire response body |
+| `{Response.stdout}` | CLI actions only: standard output |
+| `{Response.stderr}` | CLI actions only: standard error |
+| `{Response.exit_code}` | CLI actions only: process exit code (alias of `status`) |
+
+For CLI actions, `{Response.body}` is stdout+stderr interleaved (the same text
+you'd see in a terminal); `stdout` and `stderr` give the streams separately.
+The `stdout`/`stderr`/`exit_code` references exist only for CLI actions — using
+them on an HTTP action is an unresolved reference (see below).
 
 Array indices accept either `[N]` or bare-digit `.N` form, both
 zero-based: `body.items[0].name` and `body.items.0.name` are
 equivalent. A leading `$.` is allowed and ignored (JSONPath
-compatibility). Paths that resolve to `undefined` (missing key,
-out-of-range index) produce an empty string in output lines.
+compatibility).
+
+Unresolved references are loud, not silent. A reference whose path does not
+exist (a typo, a missing key, an out-of-range index) is left **visible** as its
+literal `{Response.…}` in the output and a warning lists what the response
+actually exposes — the same way an unknown `{var}`/`{field}` keeps its literal.
+An explicit `null` in the data is a real value and still renders as an empty
+string; only a genuinely missing path is treated as unresolved.
 
 ### Execution behavior
 

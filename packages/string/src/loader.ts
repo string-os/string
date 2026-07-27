@@ -44,10 +44,14 @@ interface ManifestFile {
 }
 
 export interface ActionResult extends LoadResult {
-  /** HTTP status code */
+  /** HTTP status code (HTTP actions) or process exit code (CLI actions) */
   status: number;
   /** Parsed JSON body (or null if not JSON) */
   jsonBody: unknown;
+  /** CLI actions only: stdout stream, trimmed (undefined for HTTP actions) */
+  stdout?: string;
+  /** CLI actions only: stderr stream, trimmed (undefined for HTTP actions) */
+  stderr?: string;
 }
 
 /** File access mode: 'full' allows any path, 'workspace' restricts to home. */
@@ -299,9 +303,16 @@ export class Loader {
         timeout: 120_000,
         stdio: ['ignore', 'pipe', 'pipe'],
       });
+      // Capture stdout and stderr both interleaved (into `output`, which stays
+      // the `source` = {Response.body} for back-compat) AND separately, so the
+      // response template can expose them as distinct {Response.stdout} /
+      // {Response.stderr} — an app otherwise can't tell an error stream from
+      // data.
       let output = '';
-      child.stdout.on('data', (d: Buffer) => { output += d; });
-      child.stderr.on('data', (d: Buffer) => { output += d; });
+      let stdout = '';
+      let stderr = '';
+      child.stdout.on('data', (d: Buffer) => { output += d; stdout += d; });
+      child.stderr.on('data', (d: Buffer) => { output += d; stderr += d; });
       child.on('close', (code) => {
         const trimmed = output.trimEnd();
         let jsonBody: unknown = null;
@@ -311,6 +322,8 @@ export class Loader {
           source: trimmed,
           status: code ?? 1,
           jsonBody,
+          stdout: stdout.trimEnd(),
+          stderr: stderr.trimEnd(),
         });
       });
       child.on('error', (e) => {
@@ -319,6 +332,8 @@ export class Loader {
           source: e.message,
           status: 1,
           jsonBody: null,
+          stdout: '',
+          stderr: e.message,
         });
       });
     });
