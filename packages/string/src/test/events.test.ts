@@ -182,6 +182,17 @@ function collectSSE(port: number, agentId: string, windowMs: number): Promise<Ar
   });
 }
 
+/** Poll GET /events/count until an agent's `unacked` hits `target` (async
+ *  predicate — `waitFor` only takes a sync one). Returns false on timeout. */
+async function waitForUnacked(port: number, agentId: string, target: number, timeoutMs: number): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    if ((await client.eventCount(port, agentId)).unacked === target) return true;
+    await wait(50);
+  }
+  return (await client.eventCount(port, agentId)).unacked === target;
+}
+
 function waitFor(predicate: () => boolean, timeoutMs = 5000): Promise<void> {
   const started = Date.now();
   return new Promise((resolve, reject) => {
@@ -460,6 +471,15 @@ await section('events — local webhook appends text to current agent inbox', as
     ).catch(e => {
       throw new Error(`${e.message}. stdout: ${channelOut} stderr: ${channelErr}`);
     });
+
+    // PR1: the `--mcp` consumer opts into autoAck and returns the notification
+    // promise, so a delivered event is acked once the channel hand-off resolves.
+    // The inbox must therefore DRAIN (unacked → 0) instead of staying pending
+    // forever — the unacked backlog is exactly what re-flooded the agent on every
+    // resume/compact. Without the autoAck opt-in this never reaches 0.
+    const drained = await waitForUnacked(env.port, 'hooked', 0, MCP_INIT_TIMEOUT_MS);
+    const finalUnacked = (await client.eventCount(env.port, 'hooked')).unacked;
+    assert(drained, `inbox drains via autoAck after channel hand-off (unacked=${finalUnacked}, want 0). stderr: ${channelErr}`);
   } finally {
     stopSpawned(channel);
     daemon.stop();
