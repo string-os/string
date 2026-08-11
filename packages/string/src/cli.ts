@@ -231,8 +231,15 @@ async function cmdMcp(agentId: string): Promise<void> {
     watcher = client.watchAgentEvents(
       port,
       agentId,
-      (event) => {
-        void server.server.notification({
+      // RETURN the channel-notification promise so auto-ack fires ONLY once the
+      // hand-off provably resolves. A failed notification rejects → the event
+      // stays unacked and is replayed on the next connect (at-least-once), never
+      // acked into invisibility. Without opting into autoAck the daemon never
+      // learns the event was consumed, so `delivered` never advances to `ack`
+      // and every session resume / compact re-drains the whole backlog (the
+      // replay flood). Fire-and-forget here was the bug.
+      (event) =>
+        server.server.notification({
           method: 'notifications/claude/channel',
           params: {
             content: event.text,
@@ -244,13 +251,13 @@ async function cmdMcp(agentId: string): Promise<void> {
               event: event.source,
             },
           },
-        } as any).catch(e => {
-          process.stderr.write(`string mcp: channel notification failed: ${String(e)}\n`);
-        });
-      },
+        } as any),
       (error) => {
-        process.stderr.write(`string mcp: event stream error: ${error.message}\n`);
+        // Covers stream, notification, and ack failures now that the callback
+        // and auto-ack both surface here.
+        process.stderr.write(`string mcp: event channel error: ${error.message}\n`);
       },
+      { autoAck: true },
     );
   };
   server.server.oninitialized = startWatcher;
