@@ -6,6 +6,7 @@ import fs from 'fs';
 import path from 'path';
 import { parse } from '@string-os/core';
 import { Browser } from '../index.js';
+import { STRING_VERSION } from '../version.js';
 import { assert, section } from './runner.js';
 
 await section('Reference definitions — parser', async () => {
@@ -218,6 +219,22 @@ await section('Warnings — body stays clean, surfaced via meta + /info', async 
   assert(info.content.includes('@missing.home'), '/info shows the warning');
 
   fs.rmSync(tmpDir, { recursive: true });
+});
+
+await section('/info surfaces the running runtime version (skew observability)', async () => {
+  // Every /info carries the actually-running build version so a merged-but-
+  // unreleased fix — or a stale npx cache resolving an old pin — is observable
+  // from inside a session instead of requiring an npx-cache dig.
+  const tmpDir = fs.mkdtempSync('/tmp/string-info-version-');
+  try {
+    const b = new Browser({ home: tmpDir });
+    const info = await b.exec('/info');
+    assert(info.ok, `/info ok: ${info.content}`);
+    assert(info.content.includes(`string:    v${STRING_VERSION}`),
+      `/info shows the running version (want "string:    v${STRING_VERSION}"): ${info.content}`);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 await section('Parser — shortcut definitions inside inline code are ignored', async () => {
