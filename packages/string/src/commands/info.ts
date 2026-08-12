@@ -9,6 +9,7 @@ import type { Session } from '../session.js';
 import type { CommandResult, TopicType } from '../types.js';
 import { parseTopic } from '../types.js';
 import { renderActions } from '../renderer.js';
+import { STRING_VERSION } from '../version.js';
 import {
   ok, err,
   resolveFilePath,
@@ -34,6 +35,14 @@ export function cmdInfo(args: string, session: Session, loader: Loader): Command
   const lines: string[] = [];
   const doc = session.currentDoc;
   const topic = parseTopic(session.name);
+
+  // Surface the RUNNING runtime version on every /info. STRING_VERSION is read
+  // from the live build's package.json, so this reflects what is actually
+  // executing — not the manifest a release pinned. It makes version skew
+  // observable from inside a session: a merged-but-unreleased fix, or a stale
+  // npx cache resolving an old pin, is otherwise invisible (you'd have to dig
+  // the npx cache). You cannot correct what you cannot observe.
+  lines.push(`string:    v${STRING_VERSION}`);
 
   if (!doc) {
     // app:NAME topic with no document loaded — report installation state
