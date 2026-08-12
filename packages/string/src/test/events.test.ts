@@ -357,6 +357,9 @@ await section('events — Browser commands list/read/ack', async () => {
     const list = await b.exec('/events');
     assert(list.ok, '/events ok');
     assert(list.content.includes(event.id), '/events lists event id');
+    // The list is newest-first; naming that in the header lets a naive reader
+    // know a retraction can sit above the instruction it cancels.
+    assert(list.content.includes('Order: newest-first'), '/events names its sort order');
 
     const read = await b.exec(`/events.read ${event.id}`);
     assert(read.ok, '/events.read ok');

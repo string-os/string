@@ -33,12 +33,21 @@ export async function renderEvents(loader: Loader, opts: { includeAck?: boolean 
     'Agent-local text events delivered by String webhooks and other local sources.',
     '',
     `## ${title} (${events.length})`,
-    '',
   ];
 
   if (events.length === 0) {
-    parts.push('  (no events)');
+    parts.push('', '  (no events)');
   } else {
+    // Naming the order matters: this list is newest-first, so reading it
+    // top-to-bottom applies a later message (e.g. a retraction) BEFORE the
+    // earlier one it refers to — the ordering hazard behind the replay
+    // incidents. A naive reader can't compensate for an order it can't see.
+    // (The event STREAM already replays oldest-first; this is the human list.)
+    parts.push(
+      '',
+      'Order: newest-first — a later message (e.g. a retraction) can sit above the earlier one it refers to. Apply oldest→newest, or drain via the event stream, which replays oldest-first.',
+      '',
+    );
     const width = Math.max(...events.map(e => e.id.length));
     for (const event of events) {
       const status = event.status === 'ack' ? 'ack' : 'pending';
