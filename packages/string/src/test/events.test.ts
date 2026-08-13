@@ -975,3 +975,50 @@ await section('events — a re-shown unacked event carries a REPLAY banner (mark
     fs.rmSync(env.root, { recursive: true, force: true });
   }
 });
+
+await section('events — sweep/clear cannot resurrect an event racing a mutation (delete race)', async () => {
+  // Deletion is the second in-process writer to the same files. In principle,
+  // without the per-event lock + re-check a sweep()/clear() rm can land inside a
+  // mutator's read→write gap, and the mutator then RECREATES the file — a purged
+  // event resurrected (delivered/non-acked), replaying on the next resume/compact.
+  // With deletes routed through withEventLock and the predicate re-checked under
+  // it, the final state is always cleanly gone.
+  //
+  // HONEST NOTE ON STRENGTH: this is an invariant/forward guard, not a
+  // reproduction. Measured on the un-fixed code, this exact race resurrects 0/100:
+  // sweep()'s readAll() (readdir + read every file) makes the delete slower than a
+  // single fast mutator, so markDelivered commits before the rm and there is no
+  // straddle. That timing is why the severity is genuinely low — but the fix makes
+  // check-and-act atomic regardless, so it holds if that assumption ever shifts
+  // (heavier load, a faster sweep, a slower mutator).
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'string-event-del-race-'));
+  try {
+    const store = new EventStore(home);
+    let resurrected = 0;
+    for (let i = 0; i < 25; i++) {
+      const e = await store.append('a', `stale ${i}`);
+      const base = Date.parse(e.receivedAt);
+      // Stale-cap sweep (age > maxAgeMs via injected now) racing a live-push mark.
+      await Promise.all([
+        store.sweep({ retentionMs: 999_999_999, maxAgeMs: 1, now: base + 10_000 }),
+        store.markDelivered(e.id),
+      ]);
+      if (await store.read(e.id) !== null) resurrected++;
+    }
+    assert(resurrected === 0, `sweep vs markDelivered: no resurrect across 25 races (survivors=${resurrected})`);
+
+    // clear({all}) deletes unconditionally; it must not resurrect either.
+    let clearResurrected = 0;
+    for (let i = 0; i < 25; i++) {
+      const e = await store.append('a', `clearme ${i}`);
+      await Promise.all([
+        store.clear({ all: true }),
+        store.markDelivered(e.id),
+      ]);
+      if (await store.read(e.id) !== null) clearResurrected++;
+    }
+    assert(clearResurrected === 0, `clear vs markDelivered: no resurrect across 25 races (survivors=${clearResurrected})`);
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});

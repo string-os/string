@@ -69,15 +69,13 @@ export function createWebhookToken(): string {
  *    inside its critical section — same-key re-entry would self-deadlock. (read()
  *    is deliberately outside the lock, so today's mutators are re-entry-free.)
  *
- *  - NOT covered — DELETION racing a mutation, in-process (unbuilt leg). `sweep()`
- *    (its stale-past-maxAge branch, which rm's NON-acked events) and `clear()`
- *    delete files OUTSIDE this lock. A delete landing inside a locked mutator's
- *    read→write gap lets the mutator RECREATE the file it just deleted —
- *    resurrecting a purged event as delivered/non-acked, which then replays on the
- *    next resume/compact. Low severity: the window is one locked mutator's
- *    read→write gap, and the sweep branch additionally requires age > maxAgeMs
- *    (documented as >> retentionMs). To close it, route those deletes through this
- *    same lock.
+ *  - COVERS: deletion vs mutation, in-process. `sweep()` and `clear()` take this
+ *    same lock per event and RE-READ + re-check the predicate INSIDE it before the
+ *    `rm`, so a delete cannot straddle a mutator's read→write (no resurrecting a
+ *    just-purged event) and cannot act on a stale readAll snapshot. Check-and-act
+ *    is atomic here, not merely serialized — the delete decision is made on the
+ *    same read that performs it. (They only rm; they call no other locked mutator,
+ *    so the re-entry rule above holds.)
  *
  *  - NOT covered — CROSS-PROCESS (unbuilt leg). A separate `string event ack` CLI
  *    process is not serialized by an in-process lock, and writes are in-place
@@ -260,12 +258,20 @@ export class EventStore {
   }
 
   async clear(opts: { all?: boolean } = {}): Promise<number> {
-    const events = await this.readAll();
+    const events = await this.readAll(); // candidate snapshot; the decision is re-made under the lock
     let count = 0;
     for (const event of events) {
-      if (!opts.all && event.status !== 'ack') continue;
-      await fs.rm(this.eventPath(event.id), { force: true });
-      count++;
+      // Take the per-event lock and RE-CHECK under it: a delete must not straddle a
+      // concurrent mutator's read→write (that resurrects the file), nor act on a
+      // stale snapshot (an event acked/mutated since readAll).
+      const removed = await withEventLock(this.eventPath(event.id), async () => {
+        const cur = await this.read(event.id);
+        if (!cur) return false; // already gone
+        if (!opts.all && cur.status !== 'ack') return false; // re-checked under the lock
+        await fs.rm(this.eventPath(cur.id), { force: true });
+        return true;
+      });
+      if (removed) count++;
     }
     return count;
   }
@@ -283,20 +289,32 @@ export class EventStore {
    */
   async sweep(opts: { retentionMs: number; maxAgeMs: number; now?: number }): Promise<{ purgedAcked: number; purgedStale: number }> {
     const now = opts.now ?? Date.now();
-    const events = await this.readAll();
+    const events = await this.readAll(); // candidate snapshot; the decision is re-made under the lock
     let purgedAcked = 0;
     let purgedStale = 0;
     for (const e of events) {
-      if (e.status === 'ack') {
-        const acked = Date.parse(e.ackedAt ?? e.receivedAt);
-        if (now - acked >= opts.retentionMs) {
-          await fs.rm(this.eventPath(e.id), { force: true });
-          purgedAcked++;
+      // Re-read and re-evaluate the predicate INSIDE the per-event lock so
+      // check-and-delete is atomic against markDelivered/ack/markEmitted. Without
+      // this the rm can straddle a mutator's read→write and resurrect the file, or
+      // purge an event whose status changed since readAll (e.g. one that just
+      // became `ack`, which then belongs to the retention branch, not the cap).
+      const purged = await withEventLock(this.eventPath(e.id), async () => {
+        const cur = await this.read(e.id);
+        if (!cur) return null; // already gone
+        if (cur.status === 'ack') {
+          const acked = Date.parse(cur.ackedAt ?? cur.receivedAt);
+          if (now - acked >= opts.retentionMs) {
+            await fs.rm(this.eventPath(cur.id), { force: true });
+            return 'acked' as const;
+          }
+        } else if (now - Date.parse(cur.receivedAt) >= opts.maxAgeMs) {
+          await fs.rm(this.eventPath(cur.id), { force: true });
+          return 'stale' as const;
         }
-      } else if (now - Date.parse(e.receivedAt) >= opts.maxAgeMs) {
-        await fs.rm(this.eventPath(e.id), { force: true });
-        purgedStale++;
-      }
+        return null;
+      });
+      if (purged === 'acked') purgedAcked++;
+      else if (purged === 'stale') purgedStale++;
     }
     return { purgedAcked, purgedStale };
   }
