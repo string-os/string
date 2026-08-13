@@ -984,13 +984,23 @@ await section('events — sweep/clear cannot resurrect an event racing a mutatio
   // With deletes routed through withEventLock and the predicate re-checked under
   // it, the final state is always cleanly gone.
   //
-  // HONEST NOTE ON STRENGTH: this is an invariant/forward guard, not a
-  // reproduction. Measured on the un-fixed code, this exact race resurrects 0/100:
-  // sweep()'s readAll() (readdir + read every file) makes the delete slower than a
-  // single fast mutator, so markDelivered commits before the rm and there is no
-  // straddle. That timing is why the severity is genuinely low — but the fix makes
-  // check-and-act atomic regardless, so it holds if that assumption ever shifts
-  // (heavier load, a faster sweep, a slower mutator).
+  // STRENGTH OF THIS GUARD — measured, so a future reader (e.g. one deleting the
+  // lock) isn't misled by a green test:
+  //   - Under NATURAL timing it does NOT fail without the lock: 0/100 unfixed.
+  //     sweep()'s readAll() (readdir + read every file) outpaces a single mutator,
+  //     so markDelivered commits before the rm and there is no straddle to exploit.
+  //     That is itself why the severity is low — and why this is a forward
+  //     INVARIANT guard, not a reproduction that fails without the fix.
+  //   - The resurrect IS real, demonstrated by widening the window: inject a 60ms
+  //     gap into markDelivered's read→write and it goes to 50/50 unfixed vs 0/50
+  //     fixed. We deliberately did NOT bake that delay in as a permanent test seam —
+  //     it would add complexity to the hottest mutator to defend a future
+  //     regression, not a present bug (and a no-seam symmetric-delay variant only
+  //     reached ~50%, i.e. could be false-safe, which is worse than honestly untested).
+  //   - Net: deleting the lock likely leaves this test GREEN, but the hazard above
+  //     is real, and the fix (re-read + re-check under the lock) makes check-and-act
+  //     atomic — holding if the timing assumption ever shifts (heavier load, a
+  //     faster sweep, a slower mutator).
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'string-event-del-race-'));
   try {
     const store = new EventStore(home);
