@@ -47,16 +47,34 @@ export function createWebhookToken(): string {
  * file path makes each mutator's read+write atomic against the others, so the
  * lifecycle only ever advances (pending → delivered → ack), never regresses.
  *
- * COVERAGE LIMIT (named on purpose): this lock is IN-PROCESS only. It fully
- * covers the hot path — live push and the HTTP `/events/{id}/ack` endpoint both
- * run inside the daemon process, which is where the race actually fires at speed.
- * It does NOT cover a separate `string event ack` CLI process racing the daemon:
- * the writes are plain in-place `fs.writeFile` (no temp+rename, no OS lock), so a
- * cross-process interleave can produce the SAME lost update — just far rarer,
- * because that path is human-paced, not an autoAck firing microseconds after a
- * live push. A cross-process guard (atomic write + CAS, or flock) is a separate,
- * unbuilt leg; a torn read from a mid-write is already fail-safe (`read()` returns
- * null on a JSON parse error rather than crashing).
+ * COVERAGE — what this lock does and does NOT serialize (named on purpose so the
+ * limit stays written down, not rediscovered in three months):
+ *
+ *  - COVERS: mutator-against-mutator, in-process. `markDelivered`, `ack`, and
+ *    (PR2) `markEmitted` racing each other on the same event file — the hot-path
+ *    collision (a live push's markDelivered vs the consumer's autoAck) this fix
+ *    exists for. Each mutator's read+write runs atomically w.r.t. the others, so
+ *    the lifecycle only advances (pending → delivered → ack), never regresses.
+ *    NOTE for PR2: a locked mutator must not call ANOTHER locked mutator from
+ *    inside its critical section — same-key re-entry would self-deadlock. (read()
+ *    is deliberately outside the lock, so today's mutators are re-entry-free.)
+ *
+ *  - NOT covered — DELETION racing a mutation, in-process (unbuilt leg). `sweep()`
+ *    (its stale-past-maxAge branch, which rm's NON-acked events) and `clear()`
+ *    delete files OUTSIDE this lock. A delete landing inside a locked mutator's
+ *    read→write gap lets the mutator RECREATE the file it just deleted —
+ *    resurrecting a purged event as delivered/non-acked, which then replays on the
+ *    next resume/compact. Low severity: the window is one locked mutator's
+ *    read→write gap, and the sweep branch additionally requires age > maxAgeMs
+ *    (documented as >> retentionMs). To close it, route those deletes through this
+ *    same lock.
+ *
+ *  - NOT covered — CROSS-PROCESS (unbuilt leg). A separate `string event ack` CLI
+ *    process is not serialized by an in-process lock, and writes are in-place
+ *    `fs.writeFile` (no temp+rename, no OS lock), so a cross-process interleave can
+ *    produce the SAME lost update — far rarer, because that path is human-paced.
+ *    Needs an atomic write + CAS, or flock. A torn read from a mid-write is already
+ *    fail-safe: `read()` returns null on a JSON parse error rather than crashing.
  */
 const eventMutationLocks = new Map<string, Promise<unknown>>();
 function withEventLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
