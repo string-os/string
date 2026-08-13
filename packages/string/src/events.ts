@@ -34,6 +34,41 @@ export function createWebhookToken(): string {
   return `wh_${randomBytes(24).toString('base64url')}`;
 }
 
+/**
+ * Serialize read-modify-write on a single event file WITHIN this process.
+ *
+ * Each mutator (`markDelivered`, `ack`, `markEmitted`) is read-decide-write over
+ * the same JSON file with no OS-level lock. Two of them running concurrently on
+ * one event lost-update each other: e.g. a live-push `markDelivered` reads
+ * `pending`, and before it writes, the consumer's auto-ack writes `ack` — then
+ * `markDelivered` writes back its stale `delivered`, ERASING the ack. The event
+ * is then stuck non-acked and gets replayed on the next resume/compact (the
+ * exact replay-flood this surface is meant to stop). Keying an async lock on the
+ * file path makes each mutator's read+write atomic against the others, so the
+ * lifecycle only ever advances (pending → delivered → ack), never regresses.
+ *
+ * COVERAGE LIMIT (named on purpose): this lock is IN-PROCESS only. It fully
+ * covers the hot path — live push and the HTTP `/events/{id}/ack` endpoint both
+ * run inside the daemon process, which is where the race actually fires at speed.
+ * It does NOT cover a separate `string event ack` CLI process racing the daemon:
+ * the writes are plain in-place `fs.writeFile` (no temp+rename, no OS lock), so a
+ * cross-process interleave can produce the SAME lost update — just far rarer,
+ * because that path is human-paced, not an autoAck firing microseconds after a
+ * live push. A cross-process guard (atomic write + CAS, or flock) is a separate,
+ * unbuilt leg; a torn read from a mid-write is already fail-safe (`read()` returns
+ * null on a JSON parse error rather than crashing).
+ */
+const eventMutationLocks = new Map<string, Promise<unknown>>();
+function withEventLock<T>(key: string, fn: () => Promise<T>): Promise<T> {
+  const prev = eventMutationLocks.get(key) ?? Promise.resolve();
+  const run = prev.then(fn, fn); // run fn after the predecessor settles, success or failure
+  const gate = run.then(() => undefined, () => undefined); // never let one failure poison the chain
+  eventMutationLocks.set(key, gate);
+  // Drop the entry once this is the tail, so the map doesn't grow per-event unbounded.
+  void gate.then(() => { if (eventMutationLocks.get(key) === gate) eventMutationLocks.delete(key); });
+  return run;
+}
+
 export class EventStore {
   private readonly dir: string;
 
@@ -133,14 +168,16 @@ export class EventStore {
    * reconnect churn.
    */
   async markDelivered(id: string): Promise<AgentEvent | null> {
-    const event = await this.read(id);
-    if (!event) return null;
-    if (event.status === 'pending') {
-      event.status = 'delivered';
-      event.deliveredAt = new Date().toISOString();
-      await fs.writeFile(this.eventPath(id), JSON.stringify(event, null, 2) + '\n', { mode: 0o600 });
-    }
-    return event;
+    return withEventLock(this.eventPath(id), async () => {
+      const event = await this.read(id);
+      if (!event) return null;
+      if (event.status === 'pending') {
+        event.status = 'delivered';
+        event.deliveredAt = new Date().toISOString();
+        await fs.writeFile(this.eventPath(id), JSON.stringify(event, null, 2) + '\n', { mode: 0o600 });
+      }
+      return event;
+    });
   }
 
   async read(id: string): Promise<AgentEvent | null> {
@@ -154,14 +191,16 @@ export class EventStore {
   }
 
   async ack(id: string): Promise<AgentEvent | null> {
-    const event = await this.read(id);
-    if (!event) return null;
-    if (event.status !== 'ack') {
-      event.status = 'ack';
-      event.ackedAt = new Date().toISOString();
-      await fs.writeFile(this.eventPath(id), JSON.stringify(event, null, 2) + '\n', { mode: 0o600 });
-    }
-    return event;
+    return withEventLock(this.eventPath(id), async () => {
+      const event = await this.read(id);
+      if (!event) return null;
+      if (event.status !== 'ack') {
+        event.status = 'ack';
+        event.ackedAt = new Date().toISOString();
+        await fs.writeFile(this.eventPath(id), JSON.stringify(event, null, 2) + '\n', { mode: 0o600 });
+      }
+      return event;
+    });
   }
 
   async clear(opts: { all?: boolean } = {}): Promise<number> {
