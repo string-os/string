@@ -36,6 +36,11 @@ export interface AgentEvent {
   status: 'pending' | 'delivered' | 'ack';
   deliveredAt?: string;
   ackedAt?: string;
+  /** Set once, on the first time this event was flushed to any stream. */
+  firstEmittedAt?: string;
+  /** Present and true only on a streamed copy that is a REPLAY (re-emitted,
+   *  unacked). The human-readable REPLAY banner is also prepended to `text`. */
+  replay?: boolean;
 }
 
 export interface EventWatcher {

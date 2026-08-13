@@ -855,8 +855,13 @@ await section('events — watchAgentEvents autoAck retires handled events; failu
     // Prove the unacked event is still redeliverable to a FRESH consumer (bypassing
     // the client's process-local dedup), while the acked one is gone for good.
     const fresh = await collectSSE(env.port, 'auto', 900);
-    assert(fresh.some(e => e.text === 'handler explodes'), 'unacked (failed) event is redelivered to a fresh consumer');
-    assert(!fresh.some(e => e.text === 'handled ok'), 'auto-acked event is not redelivered');
+    // The failed event was emitted once already (to the handler that threw), so on
+    // re-show it is correctly a REPLAY: its streamed text carries the banner around
+    // the original body (the persisted event itself is untouched).
+    const redelivered = fresh.find(e => (e.text ?? '').includes('handler explodes'));
+    assert(!!redelivered, 'unacked (failed) event is redelivered to a fresh consumer');
+    assert(redelivered!.text!.includes('REPLAY'), 're-shown unacked event carries the replay banner');
+    assert(!fresh.some(e => (e.text ?? '').includes('handled ok')), 'auto-acked event is not redelivered');
   } finally {
     watcher?.close();
     daemon.stop();
@@ -899,5 +904,74 @@ await section('events — concurrent markDelivered + ack never lost-updates the 
     assert((await store.read(late.id))?.status === 'ack', 'markDelivered never regresses an already-acked event');
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+await section('events — markEmitted stamps once and is ack-independent (replay discriminator)', async () => {
+  // The replay marker keys on firstEmittedAt, NOT on status/ack. This is the point
+  // Leo pressed: today's backlog is all `pending`, `delivered` is 0, nothing acks —
+  // a status-based discriminator would never fire. This proves the discriminator
+  // fires on a pending, never-acked event that is simply shown twice.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'string-event-emit-'));
+  try {
+    const store = new EventStore(home);
+    const e = await store.append('a', 'alarm: disk 92%');
+
+    const first = await store.markEmitted(e.id);
+    assert(first.wasEmittedBefore === false, 'first emission → not a replay');
+    assert(!!first.event?.firstEmittedAt, 'first emission stamps firstEmittedAt');
+    assert((await store.read(e.id))?.status === 'pending', 'markEmitted does not touch status (still pending)');
+
+    const firstAt = first.event!.firstEmittedAt;
+    const second = await store.markEmitted(e.id);
+    assert(second.wasEmittedBefore === true, 're-emit of an unacked pending event → replay');
+    assert(second.event?.firstEmittedAt === firstAt, 'firstEmittedAt is stamped once, never advances');
+    assert((await store.read(e.id))?.status === 'pending', 'discriminator never needed delivered/ack');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
+
+await section('events — a re-shown unacked event carries a REPLAY banner (marker fires end-to-end)', async () => {
+  // Leo's mandatory verification gate: prove the banner attaches when an unacked
+  // event is re-emitted to a fresh consumer — the exact incident shape (a resolved
+  // alarm / a retracted instruction re-arriving as if new after resume/compact).
+  const env = makeEnv();
+  const daemon = await startDaemon(env); // default grace → a delivered event stays redeliverable
+  const home = path.join(env.root, 'agent-home-replay');
+  try {
+    assert(await client.ping(env.port), 'daemon up for replay-banner test');
+    assert(runCli(env, ['agent', 'add', 'replayer', '--home', home]).code === 0, 'agent add ok');
+    assert(runCli(env, ['agent', 'use', 'replayer']).code === 0, 'agent use ok');
+    const show = runCli(env, ['event', 'webhook', 'show']);
+    const webhookUrl = show.stdout.split('\n').find(line => line.startsWith('http://127.0.0.1:'));
+    assert(!!webhookUrl, 'webhook URL printed');
+
+    const body = 'ALARM orin liveness: DOWN';
+    assert((await postText(webhookUrl!, body)).status === 202, 'webhook accepted while offline → pending');
+
+    // First fresh consumer: a FIRST emission → no banner.
+    const first = await collectSSE(env.port, 'replayer', 900);
+    const firstHit = first.find(e => (e.text ?? '').includes(body));
+    assert(!!firstHit, 'first fresh connect delivers the event');
+    assert(!firstHit!.text!.includes('REPLAY'), 'first emission carries NO replay banner');
+
+    // Second fresh consumer (models resume/compact — new process, empty client
+    // dedup). No ack happened in between. The re-shown event MUST be bannered.
+    const second = await collectSSE(env.port, 'replayer', 900);
+    const secondHit = second.find(e => (e.text ?? '').includes(body));
+    assert(!!secondHit, 'second fresh connect re-shows the still-unacked event');
+    assert(secondHit!.text!.includes('REPLAY'), 'the re-shown unacked event carries the REPLAY banner');
+    assert((secondHit as { replay?: boolean }).replay === true, 'streamed replay copy is flagged replay:true');
+    assert(secondHit!.text!.includes(body), 'original message text is preserved under the banner');
+
+    // The PERSISTED event is never mutated — the banner lives only on the stream.
+    const store = new EventStore(home);
+    const persisted = await store.read((await store.list({ includeAck: true }))[0].id);
+    assert(persisted!.text === body, 'persisted event text is unbannered (marker is stream-only)');
+    assert(persisted!.status !== 'ack', 'event stayed unacked throughout (discriminator is ack-independent)');
+  } finally {
+    daemon.stop();
+    fs.rmSync(env.root, { recursive: true, force: true });
   }
 });

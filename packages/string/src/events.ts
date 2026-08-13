@@ -17,6 +17,16 @@ export interface AgentEvent {
   status: AgentEventStatus;
   deliveredAt?: string;
   ackedAt?: string;
+  /**
+   * ISO timestamp of the FIRST time this event was flushed to any stream.
+   * Deliberately decoupled from the pending→delivered→ack status machine: it is
+   * stamped once and never depends on (or advances) status or ack. That makes it
+   * a reliable "has this event already been shown before" signal even in the
+   * regime where nothing acks and `delivered` never engages — which is exactly
+   * the data that caused the replay-flood incidents. Used to mark a re-emitted
+   * event as a replay (see markEmitted / the daemon backfill).
+   */
+  firstEmittedAt?: string;
 }
 
 export interface EventSummary {
@@ -195,6 +205,34 @@ export class EventStore {
         await fs.writeFile(this.eventPath(id), JSON.stringify(event, null, 2) + '\n', { mode: 0o600 });
       }
       return event;
+    });
+  }
+
+  /**
+   * Record that this event is being flushed to a stream, and report whether it
+   * had ALREADY been emitted before this call. Stamps `firstEmittedAt` exactly
+   * once (on the first emission) and is otherwise a read; it never touches
+   * `status`/`deliveredAt`/`ackedAt`, so "already emitted" is answerable even
+   * when nothing acks and the event is still `pending`.
+   *
+   * `wasEmittedBefore === true` ⇔ this is a re-emission (a replay): the daemon
+   * decorates such an event with a visible banner so a stale message can't read
+   * as new. Compute it ONCE per event (not per stream) so a brand-new event
+   * fanned out to several same-agent streams in one pass is not mislabeled a
+   * replay on the second stream — see the daemon's live-push path.
+   *
+   * Runs under the same per-file lock as markDelivered/ack (its stamp is a
+   * read-modify-write on the same file), and — per the lock's re-entry rule —
+   * does its own read+write and never calls another locked mutator.
+   */
+  async markEmitted(id: string): Promise<{ event: AgentEvent | null; wasEmittedBefore: boolean }> {
+    return withEventLock(this.eventPath(id), async () => {
+      const event = await this.read(id);
+      if (!event) return { event: null, wasEmittedBefore: false };
+      if (event.firstEmittedAt) return { event, wasEmittedBefore: true };
+      event.firstEmittedAt = new Date().toISOString();
+      await fs.writeFile(this.eventPath(id), JSON.stringify(event, null, 2) + '\n', { mode: 0o600 });
+      return { event, wasEmittedBefore: false };
     });
   }
 
