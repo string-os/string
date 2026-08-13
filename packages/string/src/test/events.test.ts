@@ -863,3 +863,41 @@ await section('events — watchAgentEvents autoAck retires handled events; failu
     fs.rmSync(env.root, { recursive: true, force: true });
   }
 });
+
+await section('events — concurrent markDelivered + ack never lost-updates the ack (write race)', async () => {
+  // Regression for the autoAck-drain flake. On the LIVE push path the daemon
+  // fires markDelivered(id) fire-and-forget while the consumer's autoAck POSTs
+  // /events/{id}/ack. Both are read-modify-write over the same event file; with
+  // no serialization markDelivered's stale pending→delivered write ERASES the
+  // ack, leaving the event stuck non-acked — which is exactly what gets replayed
+  // on the next resume/compact. Measured before the fix: this concurrent pair
+  // clobbers the ack ~197/200 of the time; the per-file mutation lock takes it to
+  // 0/200 by making each mutator's read+write atomic, so the lifecycle only ever
+  // advances (→ ack) and never regresses. Loop so a dropped lock can't hide
+  // behind scheduling luck.
+  const home = fs.mkdtempSync(path.join(os.tmpdir(), 'string-event-race-'));
+  try {
+    const store = new EventStore(home);
+    let regressions = 0;
+    let firstBad = '';
+    for (let i = 0; i < 25; i++) {
+      const e = await store.append('racer', `msg ${i}`);
+      await Promise.all([store.markDelivered(e.id), store.ack(e.id)]);
+      const after = await store.read(e.id);
+      if (after?.status !== 'ack' || !after?.ackedAt) {
+        regressions++;
+        if (!firstBad) firstBad = `iter ${i}: status=${after?.status}, ackedAt=${after?.ackedAt ?? 'none'}`;
+      }
+    }
+    assert(regressions === 0, `ack survives a concurrent markDelivered across 25 races (regressions=${regressions}; first: ${firstBad || 'none'})`);
+
+    // Sequential guard on the same invariant: a late markDelivered must never
+    // pull an already-acked event back to `delivered`.
+    const late = await store.append('racer', 'late-mark');
+    await store.ack(late.id);
+    await store.markDelivered(late.id);
+    assert((await store.read(late.id))?.status === 'ack', 'markDelivered never regresses an already-acked event');
+  } finally {
+    fs.rmSync(home, { recursive: true, force: true });
+  }
+});
