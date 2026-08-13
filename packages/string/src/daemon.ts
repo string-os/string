@@ -202,6 +202,26 @@ function notifyEventStreams(agentId: string, event: AgentEvent): boolean {
   return pushed;
 }
 
+/**
+ * A streamed copy of an event marked as a REPLAY: `replay: true` plus a visible
+ * banner prepended to the body, so a re-shown (stale) message cannot be read as
+ * new. The two incidents this addresses were both face-value reads — a resolved
+ * alarm re-arriving as current, and a retracted instruction re-arriving — so the
+ * marker lives in the text the agent reads, not only in metadata.
+ *
+ * The persisted event is never mutated; only the streamed copy carries the
+ * banner. Callers apply this ONLY when an event is being re-emitted (its
+ * firstEmittedAt was set by a prior emission).
+ */
+function asReplay(event: AgentEvent): AgentEvent & { replay: true } {
+  const firstAt = event.firstEmittedAt ?? event.deliveredAt ?? event.receivedAt;
+  const banner =
+    `> ⤺ REPLAY — you have already been sent this message (first delivered ${firstAt}; ` +
+    `originally received ${event.receivedAt}). It is shown again because it was not ` +
+    `acknowledged; do NOT act on it as new.`;
+  return { ...event, replay: true, text: `${banner}\n\n${event.text}` };
+}
+
 function buildMeta(browser: Browser, topic: string): SessionMeta | null {
   const sess = browser.session(topic);
   const doc = sess.currentDoc;
@@ -506,11 +526,18 @@ async function handleWebhook(token: string, req: http.IncomingMessage, res: http
   const store = new EventStore(agent.home);
   const event = await store.append(agent.id, text, 'local-webhook');
   if (notifyEventStreams(agent.id, event)) {
-    // Reached a live consumer → record delivery so the backfill won't re-flood it
-    // past the grace window. Best-effort: on failure the event stays pending and
-    // is simply replayed later (at-least-once), so we don't block the 202 on it.
+    // Reached a live consumer → (1) record delivery so the backfill won't re-flood
+    // it past the grace window, and (2) stamp this FIRST emission so a later
+    // reconnect that re-shows this same event can tell it's a replay. The raw
+    // (un-bannered) event was just pushed, which is correct for a first emission;
+    // markEmitted is called once here (not per stream), so a fan-out to several
+    // same-agent streams is not mislabeled a replay. Both are best-effort and
+    // serialize under the per-event lock; on failure the event stays pending/
+    // unmarked and is simply replayed later (at-least-once), so we don't block 202.
     void store.markDelivered(event.id).catch(err =>
       log.error('events.mark_delivered_failed', { agentId: agent.id, eventId: event.id, err: String(err) }));
+    void store.markEmitted(event.id).catch(err =>
+      log.error('events.mark_emitted_failed', { agentId: agent.id, eventId: event.id, err: String(err) }));
   }
   log.info('webhook.event', { agentId: agent.id, eventId: event.id, bytes: byteLength });
   sendJson(res, 202, {
@@ -571,7 +598,20 @@ function handleEventStream(req: http.IncomingMessage, res: http.ServerResponse):
     let replayed = 0;
     for (const ev of deliverable) {
       if (res.writableEnded || res.destroyed) break;
-      sseEvent(res, 'event', ev);
+      // Decide replay-vs-first BEFORE emitting: markEmitted stamps firstEmittedAt
+      // once and reports whether this event was already shown. A genuinely-missed
+      // pending event (never emitted) is a first delivery → no banner; a delivered
+      // event re-shown within grace, or a pending one re-backfilled on reconnect,
+      // was emitted before → banner, so a stale message can't read as new.
+      let out: AgentEvent = ev;
+      try {
+        const { event: emitted, wasEmittedBefore } = await store.markEmitted(ev.id);
+        if (wasEmittedBefore) out = asReplay(emitted ?? ev);
+        else if (emitted) out = emitted;
+      } catch (err) {
+        log.error('events.mark_emitted_failed', { agentId, eventId: ev.id, err: String(err) });
+      }
+      sseEvent(res, 'event', out);
       replayed++;
       await store.markDelivered(ev.id).catch(err =>
         log.error('events.mark_delivered_failed', { agentId, eventId: ev.id, err: String(err) }));
