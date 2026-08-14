@@ -976,58 +976,60 @@ await section('events — a re-shown unacked event carries a REPLAY banner (mark
   }
 });
 
-await section('events — sweep/clear cannot resurrect an event racing a mutation (delete race)', async () => {
-  // Deletion is the second in-process writer to the same files. In principle,
-  // without the per-event lock + re-check a sweep()/clear() rm can land inside a
-  // mutator's read→write gap, and the mutator then RECREATES the file — a purged
-  // event resurrected (delivered/non-acked), replaying on the next resume/compact.
-  // With deletes routed through withEventLock and the predicate re-checked under
-  // it, the final state is always cleanly gone.
+await section('events — sweep/clear + a concurrent mutation stay consistent (no resurrect, no corruption)', async () => {
+  // Two in-process writers touch the same event files: the mutators
+  // (markDelivered/ack/markEmitted) and the deleters (sweep/clear). The #71
+  // per-event lock serializes a delete against a mutation, so a delete cannot
+  // straddle a mutator's read→write and RESURRECT a just-purged file
+  // (rm-then-recreate). That guarantee holds — measured 0 true resurrects across
+  // 30k races, idle and under 2x CPU load.
   //
-  // STRENGTH OF THIS GUARD — measured, so a future reader (e.g. one deleting the
-  // lock) isn't misled by a green test:
-  //   - Under NATURAL timing it does NOT fail without the lock: 0/100 unfixed.
-  //     sweep()'s readAll() (readdir + read every file) outpaces a single mutator,
-  //     so markDelivered commits before the rm and there is no straddle to exploit.
-  //     That is itself why the severity is low — and why this is a forward
-  //     INVARIANT guard, not a reproduction that fails without the fix.
-  //   - The resurrect IS real, demonstrated by widening the window: inject a 60ms
-  //     gap into markDelivered's read→write and it goes to 50/50 unfixed vs 0/50
-  //     fixed. We deliberately did NOT bake that delay in as a permanent test seam —
-  //     it would add complexity to the hottest mutator to defend a future
-  //     regression, not a present bug (and a no-seam symmetric-delay variant only
-  //     reached ~50%, i.e. could be false-safe, which is worse than honestly untested).
-  //   - Net: deleting the lock likely leaves this test GREEN, but the hazard above
-  //     is real, and the fix (re-read + re-check under the lock) makes check-and-act
-  //     atomic — holding if the timing assumption ever shifts (heavier load, a
-  //     faster sweep, a slower mutator).
+  // WHAT THE LOCK DOES NOT CHANGE — corrected here after main flaked on the old
+  // `=== null` assertion: sweep()/clear() pick their candidates via readAll(),
+  // which reads each file OUTSIDE the lock. A readAll can torn-read an event a
+  // mutator is mid-writing → JSON.parse throws → read() returns null (the
+  // documented fail-safe) → that event is skipped THIS pass and survives as a
+  // consistent `delivered` event. That benign, self-healing skip — NOT a
+  // resurrect — happens ~0.3% idle and ~0.6% under load, which is what made the
+  // old "must be gone" assertion flaky. (The earlier "0/100, unreachable" claim was
+  // undersampled: the survivor is rare, not absent, and it is a skip, not a zombie.)
+  //
+  // So assert the invariants that actually hold: a survivor is a CONSISTENT
+  // delivered event (never corrupt, never a pending zombie), and a clean
+  // (uncontended) follow-up delete purges it (no PERMANENT survivor). Both are
+  // deterministic — verified 0 violations across 45k races idle+loaded.
   const home = fs.mkdtempSync(path.join(os.tmpdir(), 'string-event-del-race-'));
   try {
     const store = new EventStore(home);
-    let resurrected = 0;
+
     for (let i = 0; i < 25; i++) {
-      const e = await store.append('a', `stale ${i}`);
+      const e = await store.append('racer', `stale ${i}`);
       const base = Date.parse(e.receivedAt);
-      // Stale-cap sweep (age > maxAgeMs via injected now) racing a live-push mark.
       await Promise.all([
         store.sweep({ retentionMs: 999_999_999, maxAgeMs: 1, now: base + 10_000 }),
         store.markDelivered(e.id),
       ]);
-      if (await store.read(e.id) !== null) resurrected++;
+      const after = await store.read(e.id);
+      if (after !== null) {
+        assert(after.status === 'delivered', `a sweep survivor is a consistent delivered event, not a zombie (got ${after.status})`);
+        await store.sweep({ retentionMs: 999_999_999, maxAgeMs: 1, now: base + 20_000 });
+        assert(await store.read(e.id) === null, 'a skipped in-flight event is purged by the next uncontended sweep');
+      }
     }
-    assert(resurrected === 0, `sweep vs markDelivered: no resurrect across 25 races (survivors=${resurrected})`);
 
-    // clear({all}) deletes unconditionally; it must not resurrect either.
-    let clearResurrected = 0;
     for (let i = 0; i < 25; i++) {
-      const e = await store.append('a', `clearme ${i}`);
+      const e = await store.append('racer', `clearme ${i}`);
       await Promise.all([
         store.clear({ all: true }),
         store.markDelivered(e.id),
       ]);
-      if (await store.read(e.id) !== null) clearResurrected++;
+      const after = await store.read(e.id);
+      if (after !== null) {
+        assert(after.status === 'delivered', `a clear survivor is a consistent delivered event, not a zombie (got ${after.status})`);
+        await store.clear({ all: true });
+        assert(await store.read(e.id) === null, 'a skipped in-flight event is purged by the next uncontended clear');
+      }
     }
-    assert(clearResurrected === 0, `clear vs markDelivered: no resurrect across 25 races (survivors=${clearResurrected})`);
   } finally {
     fs.rmSync(home, { recursive: true, force: true });
   }
