@@ -661,6 +661,20 @@ function handleEventStream(req: http.IncomingMessage, res: http.ServerResponse):
  * that acks retires the event for the whole agent. `X-Consumer-Id` is parsed here as
  * a forward seam only (logged, no behavior yet); a future model-B per-consumer cursor
  * would scope the ack to that consumer without changing this signature.
+ *
+ * DEPENDENCY THIS MODEL CARRIES (name it, since other guarantees lean on it): model A
+ * treats ONE AGENT AS ONE LOGICAL RECEIVER — "delivered to the agent on some path"
+ * counts as "the agent received it", regardless of which session saw it. Several
+ * places rely on that. Notably the backfill's benign torn-read-skip: sweep/clear read
+ * candidates via readAll() OUTSIDE the per-event lock, so an event being written by a
+ * concurrent markDelivered/markEmitted/ack can be torn-read (read() → null, fail-safe)
+ * and omitted from ONE consumer's backfill; that is judged harmless ONLY because the
+ * concurrent writer was delivering/acking it on another path of the SAME agent. If we
+ * ever run overlapping sessions per agent routinely (we do briefly, around restarts/
+ * resumes), or move to model-B per-consumer cursors, "delivered elsewhere" stops
+ * meaning "received by this consumer", and that skip converts back into a real
+ * per-consumer delivery gap — with nothing in the code having changed. The argument is
+ * sound today; it depends on this assumption.
  */
 async function handleEventAck(req: http.IncomingMessage, res: http.ServerResponse, id: string): Promise<void> {
   req.resume(); // drain any body; ack carries no payload
