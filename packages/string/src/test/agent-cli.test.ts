@@ -22,6 +22,7 @@ import os from 'os';
 import { fileURLToPath } from 'url';
 import { spawn, spawnSync } from 'child_process';
 import * as client from '@string-os/client';
+import { STRING_VERSION } from '../version.js';
 import { assert, section } from './runner.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -383,6 +384,24 @@ await section('daemon — agent home changes apply without daemon restart', asyn
     assert(!newResult.content.includes('old-home-marker'), 'updated runtime no longer reads old home');
   } finally {
     daemon.stop();
+    fs.rmSync(path.dirname(env.dataDir), { recursive: true, force: true });
+  }
+});
+
+await section('CLI — --version names the running build (no daemon needed)', async () => {
+  // Every box reports the same version string while running a different build; the
+  // value of --version is that it names WHICH build (path + build time), so two
+  // boxes can be compared instead of argued about. Here we assert the stable
+  // contract: version line + a build: line, and -v as an alias. Exits before the
+  // daemon is touched.
+  const env = makeEnv();
+  try {
+    const r = runCli(env, ['--version']);
+    assert(r.code === 0, `--version exits 0 (stderr: ${r.stderr})`);
+    assert(r.stdout.startsWith(`string ${STRING_VERSION}`), `first line names the version: ${JSON.stringify(r.stdout.slice(0, 48))}`);
+    assert(r.stdout.includes('build:'), 'names the running build (path + build time)');
+    assert(runCli(env, ['-v']).stdout.startsWith(`string ${STRING_VERSION}`), '-v is an alias for --version');
+  } finally {
     fs.rmSync(path.dirname(env.dataDir), { recursive: true, force: true });
   }
 });
