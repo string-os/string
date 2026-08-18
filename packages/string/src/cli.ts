@@ -10,7 +10,9 @@
  */
 
 import readline from 'readline';
-import { spawn } from 'child_process';
+import { spawn, execFileSync } from 'child_process';
+import { statSync } from 'fs';
+import path from 'path';
 import { fileURLToPath } from 'url';
 import * as client from '@string-os/client';
 import { parseTopic, topicToString } from './types.js';
@@ -311,6 +313,47 @@ async function cmdDaemon(args: string[]): Promise<void> {
   }
 }
 
+// ─── Version ─────────────────────────────────────────────────────────────────
+
+/**
+ * `string --version` — NAME the running build, not just its version string.
+ *
+ * The whole point: every box reports the same `0.1.15`, yet they run different
+ * builds — the MCP path is a pinned `npx @string-os/string@X`, while the `string`
+ * CLI on each box is a hand-built local dist that drifts independently. A version
+ * number cannot tell those apart; the ENTRYPOINT PATH and BUILD TIME can. So we
+ * print where this build actually lives and when it was built, plus the source
+ * commit when the build sits inside a git clone — so two boxes that each say
+ * "0.1.15" can be compared instead of argued about.
+ */
+function printVersion(): void {
+  const out: string[] = [`string ${STRING_VERSION}`];
+  let entry: string | null = null;
+  try { entry = fileURLToPath(import.meta.url); } catch { entry = process.argv[1] ?? null; }
+  if (entry) {
+    let built = '';
+    try { built = `  (built ${statSync(entry).mtime.toISOString()})`; } catch { /* ignore */ }
+    out.push(`build:  ${entry}${built}`);
+    const commit = gitHeadNear(path.dirname(entry));
+    out.push(commit
+      ? `source: ${commit} — working-tree HEAD of the clone this build sits in (rebuild if the dist is older than HEAD)`
+      : `source: (published package — no source tree; pinned via npx/npm)`);
+  }
+  process.stdout.write(out.join('\n') + '\n');
+}
+
+/** Best-effort short commit of the git clone containing `dir` (null if none / no git). */
+function gitHeadNear(dir: string): string | null {
+  try {
+    const sha = execFileSync('git', ['-C', dir, 'rev-parse', '--short', 'HEAD'], {
+      encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000,
+    }).trim();
+    return sha || null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Usage ───────────────────────────────────────────────────────────────────
 
 function printUsage(): void {
@@ -327,6 +370,7 @@ Usage:
   string agent <cmd> [args]            Manage agents / current agent
   string event <cmd> [args]            Event inbox + local webhook
   string system <cmd>                  Daemon state
+  string --version                     Version + which build is running (path, build time, commit)
   string --help                        This help
 
 Agent management:
@@ -403,6 +447,7 @@ let json = false;
 let daemon = false;
 let mcp = false;
 let help = false;
+let version = false;
 let agentFlag: string | null = null;
 const positional: string[] = [];
 
@@ -421,6 +466,7 @@ for (let i = 0; i < argv.length; i++) {
   else if (arg === '--daemon') daemon = true;
   else if (arg === '--mcp') mcp = true;
   else if (arg === '--help' || arg === '-h') help = true;
+  else if (arg === '--version' || arg === '-v') version = true;
   else if (arg === '--agent') {
     const value = argv[++i];
     if (!value || value.startsWith('-')) {
@@ -439,6 +485,11 @@ for (let i = 0; i < argv.length; i++) {
 
 if (help) {
   printUsage();
+  process.exit(0);
+}
+
+if (version) {
+  printVersion();
   process.exit(0);
 }
 
