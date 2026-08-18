@@ -48,6 +48,19 @@ export function parsePosixFlags(
 
   for (let i = 0; i < args.length; i++) {
     const ch = args[i];
+    // A backslash OUTSIDE quotes escapes a following quote character into a literal
+    // quote, so a value can carry a `"` or `'` without toggling quote state:
+    // `\"dq\"` tokenizes to `"dq"` instead of the old `\dq\`. Deliberately narrow —
+    // it fires ONLY outside quotes and ONLY before a quote char, so a backslash
+    // before anything else (a Windows path `C:\x`, a regex `\d`) stays literal, and
+    // the encodeArgForReparse round-trip is untouched: its bare output never
+    // contains a quote, and its single/double-quoted content is handled by the
+    // branches below, not here.
+    if (!inQuote && ch === '\\' && (args[i + 1] === '"' || args[i + 1] === "'")) {
+      current += args[i + 1];
+      i++;
+      continue;
+    }
     if (inQuote) {
       if (ch === inQuote) {
         inQuote = null;
