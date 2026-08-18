@@ -83,3 +83,29 @@ await section('encodeBody — separate tokens still round-trip (command head bar
   const p = parsePosixFlags(body.slice('/act.send '.length));
   assert(p!.rest.length === 1 && p!.rest[0] === 'hi there', `multiword value intact: ${JSON.stringify(p!.rest)}`);
 });
+
+await section('parsePosixFlags — a backslash escapes a following quote outside quotes', () => {
+  // The fidelity bug: `\"dq\"` used to tokenize to `\dq\` (backslash kept, quotes
+  // toggled away). Now the backslash escapes the quote to a literal.
+  const dq = parsePosixFlags('send \\"dq\\"');            // send \"dq\"
+  assert(dq!.rest.length === 2 && dq!.rest[1] === '"dq"', `\\" -> literal ": ${JSON.stringify(dq!.rest)}`);
+  const sq = parsePosixFlags("send \\'sq\\'");            // send \'sq\'
+  assert(sq!.rest[1] === "'sq'", `\\' -> literal ': ${JSON.stringify(sq!.rest)}`);
+
+  // A backslash before a NON-quote stays literal — paths and regexes are untouched,
+  // so the encodeArgForReparse round-trip (which relies on that) is unaffected.
+  assert(parsePosixFlags('x a\\b')!.rest[1] === 'a\\b', 'backslash before a letter is literal');
+  assert(parsePosixFlags('x C:\\tmp\\d')!.rest[1] === 'C:\\tmp\\d', 'windows-ish path unchanged');
+
+  // Inside single quotes everything is literal (the escape fires only OUTSIDE
+  // quotes) — this is what keeps single-quoted values byte-exact.
+  assert(parsePosixFlags("x 'a\\\"b'")!.rest[1] === 'a\\"b', 'backslash literal inside single quotes');
+});
+
+await section('encodeArgForReparse — a value carrying literal backslash-quotes round-trips', () => {
+  // The escape must not disturb the existing round-trip: a value with a literal
+  // `\"` is wrapped in single quotes by encodeArgForReparse and comes back byte-exact.
+  const value = 'has \\"quotes\\" and a\\b';   // literal: has \"quotes\" and a\b
+  const p = parsePosixFlags(rejoin(['--message', value]));
+  assert(p!.flags.message === value, `backslash-quote value preserved: ${JSON.stringify(p!.flags.message)}`);
+});
