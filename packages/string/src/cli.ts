@@ -331,24 +331,35 @@ function printVersion(): void {
   let entry: string | null = null;
   try { entry = fileURLToPath(import.meta.url); } catch { entry = process.argv[1] ?? null; }
   if (entry) {
-    let built = '';
-    try { built = `  (built ${statSync(entry).mtime.toISOString()})`; } catch { /* ignore */ }
-    out.push(`build:  ${entry}${built}`);
-    const commit = gitHeadNear(path.dirname(entry));
-    out.push(commit
-      ? `source: ${commit} — working-tree HEAD of the clone this build sits in (rebuild if the dist is older than HEAD)`
-      : `source: (published package — no source tree; pinned via npx/npm)`);
+    let builtAt: Date | null = null;
+    try { builtAt = statSync(entry).mtime; } catch { /* ignore */ }
+    out.push(`build:  ${entry}${builtAt ? `  (built ${builtAt.toISOString()})` : ''}`);
+    const head = gitHeadNear(path.dirname(entry));
+    if (!head) {
+      out.push('source: (published package — no source tree; pinned via npx/npm)');
+    } else if (builtAt && head.committedAt.getTime() > builtAt.getTime()) {
+      // The machine has both numbers, so it does the comparison rather than
+      // handing the reader a "rebuild if older" instruction to evaluate.
+      out.push(`source: STALE — this build predates the source: HEAD ${head.sha} is from ${head.committedAt.toISOString()}, but the dist was built ${builtAt.toISOString()}. Rebuild.`);
+    } else {
+      out.push(`source: ${head.sha} — up to date with the working-tree HEAD`);
+    }
   }
   process.stdout.write(out.join('\n') + '\n');
 }
 
-/** Best-effort short commit of the git clone containing `dir` (null if none / no git). */
-function gitHeadNear(dir: string): string | null {
+/** Best-effort HEAD of the git clone containing `dir`: short sha + commit time
+ *  (so --version can say STALE outright). null if there's no git tree. */
+function gitHeadNear(dir: string): { sha: string; committedAt: Date } | null {
   try {
-    const sha = execFileSync('git', ['-C', dir, 'rev-parse', '--short', 'HEAD'], {
+    const out = execFileSync('git', ['-C', dir, 'show', '-s', '--format=%h %cI', 'HEAD'], {
       encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 2000,
     }).trim();
-    return sha || null;
+    const sp = out.indexOf(' ');
+    if (sp < 0) return null;
+    const sha = out.slice(0, sp);
+    const committedAt = new Date(out.slice(sp + 1).trim());
+    return sha && !isNaN(committedAt.getTime()) ? { sha, committedAt } : null;
   } catch {
     return null;
   }
