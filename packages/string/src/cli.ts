@@ -14,7 +14,7 @@ import { spawn } from 'child_process';
 import { fileURLToPath } from 'url';
 import * as client from '@string-os/client';
 import { parseTopic, topicToString } from './types.js';
-import { encodeArgForReparse } from './cli-args.js';
+import { encodeBody } from './cli-args.js';
 import { resolveAgentId } from './config.js';
 import { agentHelp, eventHelp, systemHelp } from './commands/management.js';
 import { STRING_VERSION } from './version.js';
@@ -488,7 +488,9 @@ if (mcp) {
   let topic: string;
   let body: string;
   if (positional[0].startsWith('/')) {
-    body = positional.map(encodeArgForReparse).join(' ');
+    // A single positional is already a complete command line (verbatim); separate
+    // tokens are re-encoded for the parsePosixFlags round-trip. See encodeBody.
+    body = encodeBody(positional);
     let derived = 'main';
     const openMatch = body.match(CANONICAL_OPEN_RE);
     if (openMatch) derived = openMatch[1];
@@ -501,7 +503,9 @@ if (mcp) {
       process.exit(1);
     }
     topic = topicToString(parsed);
-    body = positional.slice(1).map(encodeArgForReparse).join(' ');
+    // Same rule as the topic-less branch (see encodeBody): a single body token is a
+    // whole command line → verbatim; multiple tokens → re-encode for the round-trip.
+    body = encodeBody(positional.slice(1));
     if (!body && parsed.type === 'hub') {
       body = '/open';
     } else if (parsed.type === 'hub' && body === '--help') {

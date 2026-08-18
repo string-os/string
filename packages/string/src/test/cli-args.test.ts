@@ -5,7 +5,7 @@
  * multi-word value survives instead of being re-split into stray positionals
  * ("Too many positional arguments … got N").
  */
-import { encodeArgForReparse } from '../cli-args.js';
+import { encodeArgForReparse, encodeBody } from '../cli-args.js';
 import { parsePosixFlags } from '../commands/helpers.js';
 import { assert, section } from './runner.js';
 
@@ -61,4 +61,25 @@ await section('S2 — a realistic worker dispatch brief survives intact', () => 
   const p = parsePosixFlags(rejoin(argv));
   assert(p!.flags.message === brief, 'long natural-language brief preserved verbatim');
   assert(p!.rest.length === 1, 'no stray positionals from the brief');
+});
+
+await section('encodeBody — a single quoted body token is passed VERBATIM (leading / survives)', () => {
+  // Regression for the CLI COMMAND_UNSUPPORTED bug: `string <topic> '<whole /command
+  // with spaces>'` arrives as ONE positional. Re-encoding it wrapped the entire
+  // string — leading / included — in single quotes, so the daemon rejected it with
+  // "Commands must start with /". These are the tool's OWN --help examples.
+  for (const body of ['/install --app ./foo.md', '/open app:moltbook', '/act.send "hi there"', "/set $X = \"y\""]) {
+    assert(encodeBody([body]) === body, `single token verbatim: ${JSON.stringify(body)}`);
+    assert(encodeBody([body]).startsWith('/'), `leading / preserved so the command is detectable: ${JSON.stringify(body)}`);
+  }
+});
+
+await section('encodeBody — separate tokens still round-trip (command head bare, value intact)', () => {
+  // `string app:x /act.send "hi there"` — separate shell words. The /command head
+  // has no whitespace so it stays bare (body starts with /), and the multi-word
+  // value re-tokenizes back to ONE positional (the S2 contract, still honoured).
+  const body = encodeBody(['/act.send', 'hi there']);
+  assert(body.startsWith('/act.send '), `command head stays bare: ${JSON.stringify(body)}`);
+  const p = parsePosixFlags(body.slice('/act.send '.length));
+  assert(p!.rest.length === 1 && p!.rest[0] === 'hi there', `multiword value intact: ${JSON.stringify(p!.rest)}`);
 });

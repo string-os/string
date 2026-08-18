@@ -46,3 +46,25 @@ export function encodeArgForReparse(s: string): string {
   }
   return out;
 }
+
+/**
+ * Reassemble a command body from the positional tokens that follow the topic
+ * (or, in the topic-less form, the whole positional list starting with the
+ * `/command`).
+ *
+ * A SINGLE token is already a complete command line — the user quoted the whole
+ * body, e.g. `string app:x '/act.send "hi there"'` or `string '/install --app x'`.
+ * Return it VERBATIM; the daemon tokenizes it, exactly as the REPL and MCP paths
+ * do for the same string. Re-encoding a single token would wrap the entire string
+ * — leading `/` included — in single quotes (`'/act.send "hi there"'`), and the
+ * daemon's command layer would then reject it with "Commands must start with /"
+ * (COMMAND_UNSUPPORTED), because it sees a leading quote, not a slash.
+ *
+ * MULTIPLE tokens are separate shell words (`string app:x /act.send "hi there"`).
+ * Re-encode each so `parsePosixFlags` reassembles them into exactly the original
+ * argv — the multi-word-value round-trip this module exists for. The `/command`
+ * head has no whitespace/quotes, so it stays bare and the body still starts with `/`.
+ */
+export function encodeBody(tokens: string[]): string {
+  return tokens.length === 1 ? tokens[0] : tokens.map(encodeArgForReparse).join(' ');
+}
