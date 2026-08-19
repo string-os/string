@@ -186,6 +186,13 @@ await section('agent CLI — add/use/current + clobber fix (e2e)', async () => {
     const list = runCli(env, ['agent', 'list']);
     assert(/\*\s*leo/.test(list.stdout), 'list marks leo as current with *');
     assert(list.stdout.includes('default'), 'list includes default agent');
+    // ...and leads with the tool's OWN computed count, so a health check reads the
+    // number rather than counting rows. The count must equal the rows actually shown.
+    const countMatch = list.stdout.match(/## Agents \((\d+)\)/);
+    assert(countMatch !== null, `agent list shows a computed count heading: ${JSON.stringify(list.stdout)}`);
+    const rowCount = list.stdout.split('\n').filter(l => /^[* ] \S+\t/.test(l)).length;
+    assert(Number(countMatch![1]) === rowCount,
+      `heading count (${countMatch![1]}) equals rendered rows (${rowCount}) — number and rows cannot disagree`);
 
     // set-home updates the home (and preserves allowedPaths — clobber fix P1).
     const newHome = path.join(env.dataDir, 'leohome2');

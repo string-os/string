@@ -124,13 +124,18 @@ async function mintCapability(flags: Record<string, string>, loader: Loader): Pr
 async function listCapabilities(flags: Record<string, string>, loader: Loader): Promise<CommandResult> {
   const agentFilter = flags.agent || (flags.all === 'true' ? undefined : currentAgentId(loader));
   const records = await client.listCapabilities(port(), agentFilter);
-  if (records.length === 0) return ok(`No capabilities${agentFilter ? ` for agent '${agentFilter}'` : ''}.`);
+  // Computed count in the header (records.length = the rows shown, already scoped
+  // by agentFilter) — same fail-loud-not-quiet property as `agent list`. Carried
+  // on both branches so the count is always present, even at zero.
+  const scope = agentFilter ? ` for '${agentFilter}'` : '';
+  const header = `Capabilities${scope} (${records.length}):`;
+  if (records.length === 0) return ok(`${header}\n  (none)`);
   const now = Date.now();
   const lines = records.map(r => {
     const state = r.revoked_at ? 'revoked' : r.used_at ? 'used' : now > Date.parse(r.expires_at) ? 'expired' : 'live';
     return `  ${r.token_id}\t${r.agent_id}\t${r.path_prefix || '(workspace)'}\t[${r.verbs.join(',')}]\t${state}\texpires ${r.expires_at}`;
   });
-  return ok([`Capabilities${agentFilter ? ` for '${agentFilter}'` : ''}:`, ...lines].join('\n'));
+  return ok([header, ...lines].join('\n'));
 }
 
 async function revokeCapability(rest: string[]): Promise<CommandResult> {
@@ -186,12 +191,18 @@ async function currentAgent(loader: Loader, flags: Record<string, string>): Prom
 async function listAgents(): Promise<CommandResult> {
   const current = getCurrentAgent();
   const agents = await client.listAgents(port());
-  if (agents.length === 0) return ok('No agents registered.');
+  // Lead with the tool's OWN computed count so a health check reads the number
+  // instead of counting rows (`wc -l`). The count is agents.length — exactly the
+  // rows rendered below — so the header and the body can never disagree. Empty
+  // still carries `(0)`, so a checker can key on `Agents (N)` uniformly and treat
+  // a no-match as an ERROR rather than silently reading it as an empty registry.
+  const heading = `## Agents (${agents.length})`;
+  if (agents.length === 0) return ok(`${heading}\n\n  (no agents registered)`);
   const lines = agents.map(a => {
     const marker = a.id === current ? '* ' : '  ';
     return `${marker}${a.id}\t${a.home}`;
   });
-  return ok(lines.join('\n'));
+  return ok([heading, '', ...lines].join('\n'));
 }
 
 async function setAgentHome(rest: string[]): Promise<CommandResult> {
