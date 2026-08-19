@@ -207,6 +207,13 @@ await section('issuance — shell mint verb (CLI e2e): mint, use, list, revoke',
     const list = runCli(env, ['agent', 'capability', 'list']);
     assert(list.code === 0 && list.stdout.includes(tokenId!), 'capability list shows token id');
     assert(!list.stdout.includes(readSecret!), 'capability list never prints secrets');
+    // The header carries the tool's OWN computed count, and it must equal the rows
+    // shown (a checker reads the number instead of counting `cap_` lines).
+    const capCount = list.stdout.match(/Capabilities[^\n]*\((\d+)\):/);
+    assert(capCount !== null, `capability list header carries a count: ${JSON.stringify(list.stdout)}`);
+    const capRows = list.stdout.split('\n').filter(l => /\bcap_[A-Za-z0-9_-]+/.test(l)).length;
+    assert(Number(capCount![1]) === capRows,
+      `capability count (${capCount![1]}) equals rendered rows (${capRows})`);
 
     const putTokenId = put.stdout.match(/(cap_[A-Za-z0-9_-]+)/)?.[1];
     const revoke = runCli(env, ['agent', 'capability', 'revoke', putTokenId!]);
