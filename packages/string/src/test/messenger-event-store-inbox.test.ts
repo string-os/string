@@ -1,7 +1,8 @@
 /**
  * S7 — production cc-channel inbox (EventStoreInbox). Proofs:
  *  - PUSH goes through the daemon webhook (one POST) and creates exactly one event; delivered is
- *    NOT emitted on the 202 — only when the event reaches `status: 'ack'` (the read-ack);
+ *    NOT emitted on the 202 — only when the recipient READS the event, i.e. it reaches
+ *    `status: 'delivered'` (the daemon flushed it to a live CC session) OR `status: 'ack'`;
  *  - idempotent across a BRIDGE RESTART: a fresh inbox over the same persisted map re-attaches to
  *    the existing event on a repeat push — no second POST, no duplicate event;
  *  - a lost ack is recovered: a repeat push of an already-acked key re-asserts delivered (no POST);
@@ -80,6 +81,39 @@ await section('inbox: one POST, delivered only on the read-ack', async () => {
   await store.ack(open.id);
   assert(await waitFor(() => acks.length === 1), 'delivered fires on the read-ack');
   assert(acks[0] === 'm1', 'the ack is correlated to the message id');
+  inbox.close();
+});
+
+await section('inbox: delivered (not just ack) is a read for a CC agent — fires without an ack', async () => {
+  // A Claude Code session never acks: the daemon flushes the event to the live stream (→ `delivered`)
+  // and that injection IS the read. The inbox must fire delivered on `delivered`, so delivery never
+  // stalls waiting for an ack that will not come — which otherwise left the event un-reported and,
+  // after a stale sweep, re-POSTed as a duplicate (the bug this fixes). Driven through a REAL
+  // EventStore going pending → delivered.
+  const home = await tempHome();
+  const mapPath = path.join(home, 'map.json');
+  const { fetchImpl, state } = fakeDaemon(home, 'nova');
+  const acks: string[] = [];
+  const inbox = new EventStoreInbox({ agentId: 'nova', home, webhookUrl: 'http://d/webhook/tok', mapPath, pollIntervalMs: 10, fetchImpl });
+  inbox.onAck((k) => acks.push(k));
+
+  await inbox.push('m1', '[from leo] hi');
+  const ev = (await new EventStore(home).list())[0]!;
+  assert(ev.status === 'pending', 'event starts pending (the 202 is not a read)');
+
+  // The daemon flushes the event to the CC session stream: pending → delivered. No ack is ever sent.
+  await new EventStore(home).markDelivered(ev.id);
+  assert(await waitFor(() => acks.length === 1 && acks[0] === 'm1'), 'delivered fires on the pending→delivered read (no ack)');
+
+  // The read is recorded durably, so a later retention sweep (gone) re-asserts delivered instead of
+  // reading as a non-delivery and re-POSTing a duplicate — the exact duplicate path this closes.
+  const persisted = JSON.parse(await fs.readFile(mapPath, 'utf-8')) as Record<string, { acked?: boolean }>;
+  assert(persisted.m1?.acked === true, 'a delivered-observed read is persisted (so a gone re-asserts, not re-delivers)');
+
+  await fs.rm(path.join(home, 'events', `${ev.id}.json`), { force: true }); // retention sweep after the read
+  await inbox.push('m1', '[from leo] hi'); // hub redelivery
+  assert(state.posts === 1, 'a read-then-swept message is NOT re-POSTed as a duplicate');
+  assert(await waitFor(() => acks.length === 2), 'the gone-but-read event re-asserts delivered');
   inbox.close();
 });
 

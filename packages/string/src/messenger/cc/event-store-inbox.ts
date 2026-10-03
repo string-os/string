@@ -7,19 +7,24 @@ import type { AgentEventInbox } from './inbox.js';
  * The outcome of reading one event's status.
  *  - a concrete status (`pending`/`delivered`/`ack`) — the normal case;
  *  - `gone` — the event file is confirmed ABSENT (ENOENT). This alone does NOT mean delivered: the
- *    daemon's `sweep()` stale-purges events that were never acked (the `maxAge` cap) and `clear()`
- *    removes pending ones, so a `gone` is only treated as delivered when we have RECORDED an ack for
- *    it (see {@link MapEntry.acked}); otherwise it is a non-delivery and the hub must redeliver;
+ *    daemon's `sweep()` stale-purges events that were never read (the `maxAge` cap) and `clear()`
+ *    removes pending ones, so a `gone` is only treated as delivered when we have RECORDED a read
+ *    (delivered/ack) for it (see {@link MapEntry.acked}); otherwise it is a non-delivery and the hub
+ *    must redeliver;
  *  - `unreadable` — the file could not be parsed (a torn read mid-write, e.g. during the daemon's
  *    non-atomic in-place `ack()` rewrite). This is TRANSIENT: never treat it as gone — keep
  *    watching and re-read next tick. Conflating it with `gone` would falsely prune a live event.
  */
 type ReadResult = AgentEventStatus | 'gone' | 'unreadable';
 
-/** Durable per-message state: the event it maps to, and whether we have ever observed its read-ack. */
+/** Durable per-message state: the event it maps to, and whether we have ever observed its read. */
 interface MapEntry {
   eventId: string;
-  /** True once `status: 'ack'` has been observed. A later `gone` on an acked entry = delivered. */
+  /**
+   * True once a READ has been observed — the event reaching `status: 'delivered'` OR `'ack'`. (The
+   * JSON field is named `acked` for backward compatibility with maps written before `delivered`
+   * also counted; its meaning is "read-observed".) A later `gone` on such an entry = delivered.
+   */
   acked: boolean;
 }
 
@@ -31,18 +36,22 @@ interface MapEntry {
  *    the agent's event store (its per-file lock is in-process only, so a second writer would risk
  *    the lost-update the store warns about) and does the append + live-stream notify + first-emit
  *    stamp exactly as any other webhook event. The 202 carries the `event_id`.
- *  - The DELIVERED signal is the recipient CC session's READ-ACK — the event reaching
- *    `status: 'ack'` — observed by a read-only poll of that one event. A webhook 202 is
- *    transport-accepted, NOT received, so it is deliberately not treated as delivered; with no
- *    session attached the event stays `pending` and no `delivered` is ever emitted.
+ *  - The DELIVERED signal is the recipient session READING the event — it reaching `status:
+ *    'delivered'` (the daemon flushed it to the live session stream) OR `status: 'ack'` — observed
+ *    by a read-only poll of that one event. A Claude Code session is injected the event on the
+ *    `delivered` flush and never acks, so `delivered` IS the read for a CC agent; a consumer that
+ *    acks reaches `ack`. Either counts. A webhook 202 is transport-accepted, NOT received, so it is
+ *    deliberately not treated as delivered; with no session attached the event stays `pending` and
+ *    no `delivered` is ever emitted.
  *
  * IDEMPOTENT ON THE MESSAGE ID. `EventStore.append` mints a fresh event id per call, so to make a
  * repeat push (hub redelivery, or a bridge RESTART) re-attach instead of appending a duplicate, the
  * `messageId -> {eventId, acked}` mapping is persisted to a 0600 file outside any agent home. The
- * recorded `acked` flag is what makes a later disappearance unambiguous:
- *   - a `gone` event we had ALREADY acked = delivered-then-swept (normal retention): re-assert
- *     delivered so a missed ack recovers;
- *   - a `gone` event we had NOT acked = stale-purged / cleared BEFORE any session read it: NOT
+ * recorded read flag (the `acked` field — see {@link MapEntry}) is what makes a later disappearance
+ * unambiguous:
+ *   - a `gone` event we had ALREADY read (delivered/ack) = delivered-then-swept (normal retention):
+ *     re-assert delivered so a missed ack recovers;
+ *   - a `gone` event we had NOT read = stale-purged / cleared BEFORE any session read it: NOT
  *     delivered — drop the entry, log, emit no ack, and let the hub redeliver (a fresh push
  *     re-POSTs a new event). Firing delivered here would silently lose the message.
  *
@@ -149,36 +158,41 @@ export class EventStoreInbox implements AgentEventInbox {
 
   /**
    * Act on one observed status for a known key — shared by `push` (a redelivery) and `poll`.
-   *  - `ack`    → record the ack (durably) and emit delivered;
-   *  - `gone`   → delivered ONLY if we had recorded an ack; otherwise a non-delivery (drop + log, no
-   *               ack) so the hub redelivers;
-   *  - else     → still in flight (pending/delivered) or a transient torn read (`unreadable`): keep
-   *               watching and re-read. Never prune here.
+   *  - `delivered` or `ack` → a READ: record it (durably) and emit delivered. For a Claude Code
+   *               agent the daemon flushes the event to the live session stream (→ `delivered`) but
+   *               the session never acks, so `delivered` IS the read; a daemon consumer that acks
+   *               reaches `ack`. Either counts, so delivery no longer stalls on an ack that a CC
+   *               session will never send (which otherwise left the event un-reported and, after a
+   *               stale sweep, re-POSTed as a duplicate).
+   *  - `gone`   → delivered ONLY if we had recorded a read (delivered/ack); otherwise a non-delivery
+   *               (drop + log, no ack) so the hub redelivers;
+   *  - else     → still pending, or a transient torn read (`unreadable`): keep watching and re-read.
+   *               Never prune here.
    */
   private async reconcile(key: string, entry: MapEntry, status: ReadResult): Promise<void> {
-    if (status === 'ack') {
+    if (status === 'delivered' || status === 'ack') {
       this.watching.delete(key);
       if (!entry.acked) {
         entry.acked = true;
-        await this.persist(); // record the ack BEFORE firing, so a later `gone` is unambiguous
+        await this.persist(); // record the read BEFORE firing, so a later `gone` is unambiguous
       }
       this.fireAck(key);
     } else if (status === 'gone') {
       this.watching.delete(key);
       if (entry.acked) {
-        // Delivered earlier, then swept by retention — re-assert so a missed ack recovers.
+        // Read earlier (delivered/ack), then swept by retention — re-assert so a missed ack recovers.
         this.fireAck(key);
       } else {
-        // Vanished before any read-ack (stale cap / clear): NOT delivered. Drop it and stay silent;
+        // Vanished before any read (stale cap / clear): NOT delivered. Drop it and stay silent;
         // the hub still holds the message and will redeliver it as a fresh push.
         this.map.delete(key);
         await this.persist();
         this.onError(
-          `[inbox ${this.agentId}] event ${entry.eventId} for ${key} disappeared before a read-ack; treating as NOT delivered and awaiting hub redelivery`,
+          `[inbox ${this.agentId}] event ${entry.eventId} for ${key} disappeared before a read; treating as NOT delivered and awaiting hub redelivery`,
         );
       }
     } else {
-      // pending / delivered / unreadable → keep watching and re-read next tick (never prune here).
+      // pending / unreadable → keep watching and re-read next tick (never prune here).
       this.watch(key, entry.eventId);
     }
   }
