@@ -20,7 +20,22 @@ import { FakeHub, FakeInboundAdapter, stamped } from './fake-hub.js';
 const tick = (n = 5): Promise<void> => new Promise((r) => setTimeout(r, n));
 const DAY_MS = 24 * 60 * 60 * 1000;
 
-function setup(opts?: { baseBackoffMs?: number; now?: () => number }) {
+/**
+ * Poll `cond` until it holds or the timeout elapses, yielding the loop between checks so pending
+ * timers can fire. Used for the heartbeat proofs: a fixed sleep is flaky under a loaded event loop
+ * (setInterval ticks get starved), but a generous poll passes as soon as the beats land and only
+ * fails if they never do.
+ */
+async function waitUntil(cond: () => boolean, timeoutMs = 2000, stepMs = 5): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < timeoutMs) {
+    if (cond()) return true;
+    await tick(stepMs);
+  }
+  return cond();
+}
+
+function setup(opts?: { baseBackoffMs?: number; heartbeatIntervalMs?: number; now?: () => number }) {
   const hub = new FakeHub();
   const errors: string[] = [];
   const bridge = new Bridge({
@@ -30,6 +45,7 @@ function setup(opts?: { baseBackoffMs?: number; now?: () => number }) {
     connect: hub.connect,
     baseBackoffMs: opts?.baseBackoffMs ?? 2,
     maxBackoffMs: 8,
+    heartbeatIntervalMs: opts?.heartbeatIntervalMs ?? 0, // off by default in tests
     now: opts?.now,
     onError: (r) => errors.push(r),
   });
@@ -220,5 +236,36 @@ await section('bridge/review: buffered acks dedupe by id — not one per re-asse
   hub.resumeConnects();
   await tick(20); // reconnect + flush
   assert(hub.acks.filter((a) => a.messageId === 'm1').length === 1, 'exactly one ack flushed, deduped by id');
+  await bridge.close();
+});
+
+await section('bridge/S6: heartbeats are sent periodically once connected and stop on close', async () => {
+  const { hub, bridge } = setup({ heartbeatIntervalMs: 4 });
+  await bridge.start();
+  assert(await waitUntil(() => hub.heartbeats.length >= 3), 'several heartbeats sent while connected');
+  assert(hub.heartbeats.every((h) => h.machineId === 'agentbox'), 'heartbeats carry the machine id');
+  assert(hub.heartbeats.every((h) => typeof h.atMs === 'number'), 'heartbeats carry a timestamp');
+
+  await bridge.close();
+  const afterClose = hub.heartbeats.length;
+  await tick(40); // close() clears the timer synchronously, so no further beat can land
+  assert(hub.heartbeats.length === afterClose, 'heartbeats stop after close');
+});
+
+await section('bridge/S6: a dropped connection stops heartbeats, reconnect resumes them', async () => {
+  const { hub, bridge } = setup({ heartbeatIntervalMs: 4, baseBackoffMs: 2 });
+  await bridge.start();
+  assert(await waitUntil(() => hub.heartbeats.length >= 1), 'beating before the drop');
+  hub.drop();
+  const atDrop = hub.heartbeats.length;
+  assert(await waitUntil(() => hub.heartbeats.length > atDrop), 'heartbeats resume after the bridge reconnects');
+  await bridge.close();
+});
+
+await section('bridge/S6: heartbeatIntervalMs = 0 disables heartbeats', async () => {
+  const { hub, bridge } = setup({ heartbeatIntervalMs: 0 });
+  await bridge.start();
+  await tick(60); // a generous window; with the beat disabled none should ever land
+  assert(hub.heartbeats.length === 0, 'no heartbeats when disabled');
   await bridge.close();
 });
