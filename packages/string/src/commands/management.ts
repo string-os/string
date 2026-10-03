@@ -11,11 +11,12 @@ import {
   setCurrentAgentInFile,
   setCurrentAgent,
   stringRoot,
+  resolveDaemonPort,
 } from '../config.js';
 import { err, ok, parsePosixFlags } from './helpers.js';
 
 function port(): number {
-  return Number(process.env.STRING_PORT) || 3923;
+  return resolveDaemonPort();
 }
 
 function deriveHome(agentId: string): string {

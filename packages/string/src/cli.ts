@@ -17,7 +17,7 @@ import { fileURLToPath } from 'url';
 import * as client from '@string-os/client';
 import { parseTopic, topicToString } from './types.js';
 import { encodeBody } from './cli-args.js';
-import { resolveAgentId } from './config.js';
+import { resolveAgentId, resolveDaemonPort } from './config.js';
 import { agentHelp, eventHelp, systemHelp } from './commands/management.js';
 import { STRING_VERSION } from './version.js';
 
@@ -93,7 +93,7 @@ async function execOneShot(
   json: boolean,
   agentFlag: string | null,
 ): Promise<void> {
-  const port = Number(process.env.STRING_PORT) || 3923;
+  const port = resolveDaemonPort();
   const agentId = resolveAgentId(agentFlag);
 
   if (!await client.ping(port)) {
@@ -114,7 +114,7 @@ async function enterRepl(
   json: boolean,
   agentFlag: string | null,
 ): Promise<void> {
-  const port = Number(process.env.STRING_PORT) || 3923;
+  const port = resolveDaemonPort();
   const agentId = resolveAgentId(agentFlag);
 
   if (!await client.ping(port)) {
@@ -188,7 +188,7 @@ async function enterRepl(
 // don't bleed across clients.
 
 async function cmdMcp(agentId: string): Promise<void> {
-  const port = Number(process.env.STRING_PORT) || 3923;
+  const port = resolveDaemonPort();
 
   if (!await client.ping(port)) {
     await autoStartDaemon(port);
@@ -275,7 +275,7 @@ async function cmdMcp(agentId: string): Promise<void> {
 // ─── Daemon management ───────────────────────────────────────────────────────
 
 async function cmdDaemon(args: string[]): Promise<void> {
-  const port = Number(process.env.STRING_PORT) || 3923;
+  const port = resolveDaemonPort();
   const sub = args[0] || 'start';
 
   switch (sub) {

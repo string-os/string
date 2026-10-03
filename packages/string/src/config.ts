@@ -77,6 +77,43 @@ export function stringRoot(): string {
   return process.env.STRING_ROOT?.trim() || join(homedir(), '.string');
 }
 
+/** The daemon's default port when STRING_PORT is not set. */
+export const DEFAULT_DAEMON_PORT = 3923;
+
+/** Thrown when STRING_PORT is set to something that is not a valid port. */
+export class StringPortError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'StringPortError';
+  }
+}
+
+/**
+ * Resolve the daemon port from STRING_PORT. The single source of truth for every CLI entrypoint and
+ * command (previously `Number(process.env.STRING_PORT) || 3923`, duplicated).
+ *
+ *   - unset or empty  → the default 3923 (unchanged behaviour).
+ *   - a valid port    → that integer.
+ *   - set but invalid → a HARD error (never silently coerced).
+ *
+ * The old `Number(x) || 3923` quietly turned an invalid value — crucially "0", which `Number`
+ * parses to the falsy `0` — into the live default 3923, so a misconfigured child silently targeted
+ * the live daemon (the 2026-10-03 incident). Failing loud is the fix: a test or script with a bad
+ * STRING_PORT now stops with a clear message instead of writing to the live daemon.
+ */
+export function resolveDaemonPort(env: NodeJS.ProcessEnv = process.env): number {
+  const raw = env.STRING_PORT;
+  if (raw === undefined || raw.trim() === '') return DEFAULT_DAEMON_PORT;
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1 || n > 65535) {
+    throw new StringPortError(
+      `STRING_PORT is set to ${JSON.stringify(raw)}, which is not a valid port ` +
+        `(expected an integer 1-65535). Unset it to use the default ${DEFAULT_DAEMON_PORT}.`,
+    );
+  }
+  return n;
+}
+
 /** Global client config path. */
 export function globalConfigPath(): string {
   return join(stringRoot(), 'config.json');
