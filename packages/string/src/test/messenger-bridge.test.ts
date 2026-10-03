@@ -12,6 +12,12 @@
  *  - an in-flight delivery is NOT re-dispatched when the hub reconnects (dispatching is kept);
  *  - send() rejects instead of hanging when the link is down for good;
  *  - the delivered-dedup map expires after the TTL and buffered acks dedupe by id.
+ * S6c — two-way liveness (the bridge side):
+ *  - checkHubLiveness drops the link once the hub is silent past hubSilenceLimitMs, and reconnects;
+ *  - any frame heard from the hub resets the silence clock;
+ *  - a half-open socket (fake hub stops echoing without closing) is caught by the heartbeat timer,
+ *    which drops + reconnects, and recovers when the hub answers again;
+ *  - hubSilenceLimitMs = 0 disables the check.
  */
 import { assert, section } from './runner.js';
 import { Bridge } from '../messenger/hub/bridge.js';
@@ -35,7 +41,7 @@ async function waitUntil(cond: () => boolean, timeoutMs = 2000, stepMs = 5): Pro
   return cond();
 }
 
-function setup(opts?: { baseBackoffMs?: number; heartbeatIntervalMs?: number; now?: () => number }) {
+function setup(opts?: { baseBackoffMs?: number; heartbeatIntervalMs?: number; hubSilenceLimitMs?: number; now?: () => number }) {
   const hub = new FakeHub();
   const errors: string[] = [];
   const bridge = new Bridge({
@@ -43,6 +49,7 @@ function setup(opts?: { baseBackoffMs?: number; heartbeatIntervalMs?: number; no
     machineId: 'agentbox',
     token: 'tok-fake-nova-0000', // obviously-fake fixture
     connect: hub.connect,
+    hubSilenceLimitMs: opts?.hubSilenceLimitMs,
     baseBackoffMs: opts?.baseBackoffMs ?? 2,
     maxBackoffMs: 8,
     heartbeatIntervalMs: opts?.heartbeatIntervalMs ?? 0, // off by default in tests
@@ -240,7 +247,7 @@ await section('bridge/review: buffered acks dedupe by id — not one per re-asse
 });
 
 await section('bridge/S6: heartbeats are sent periodically once connected and stop on close', async () => {
-  const { hub, bridge } = setup({ heartbeatIntervalMs: 4 });
+  const { hub, bridge } = setup({ heartbeatIntervalMs: 4, hubSilenceLimitMs: 0 }); // emission only; silence off
   await bridge.start();
   assert(await waitUntil(() => hub.heartbeats.length >= 3), 'several heartbeats sent while connected');
   assert(hub.heartbeats.every((h) => h.machineId === 'agentbox'), 'heartbeats carry the machine id');
@@ -253,7 +260,7 @@ await section('bridge/S6: heartbeats are sent periodically once connected and st
 });
 
 await section('bridge/S6: a dropped connection stops heartbeats, reconnect resumes them', async () => {
-  const { hub, bridge } = setup({ heartbeatIntervalMs: 4, baseBackoffMs: 2 });
+  const { hub, bridge } = setup({ heartbeatIntervalMs: 4, baseBackoffMs: 2, hubSilenceLimitMs: 0 }); // emission only
   await bridge.start();
   assert(await waitUntil(() => hub.heartbeats.length >= 1), 'beating before the drop');
   hub.drop();
@@ -267,5 +274,109 @@ await section('bridge/S6: heartbeatIntervalMs = 0 disables heartbeats', async ()
   await bridge.start();
   await tick(60); // a generous window; with the beat disabled none should ever land
   assert(hub.heartbeats.length === 0, 'no heartbeats when disabled');
+  await bridge.close();
+});
+
+await section('bridge/S6c: checkHubLiveness drops a hub-silent link past the limit, then reconnects', async () => {
+  // Deterministic: inject the clock and drive the check by hand (heartbeat timer off, so nothing
+  // echoes to reset the silence clock behind our back). lastHeardMs is baselined at connect.
+  let nowMs = 1_000_000;
+  const { hub, bridge, errors } = setup({ hubSilenceLimitMs: 100, now: () => nowMs });
+  await bridge.start();
+  assert(hub.connected, 'connected after hello');
+
+  nowMs += 99; // just under the limit since the hello was heard
+  assert(bridge.checkHubLiveness() === false, 'under the limit: no drop');
+  assert(hub.connected, 'still connected under the limit');
+
+  hub.pauseConnects(); // hold the reconnect so we can observe the link actually down
+  const hellosBefore = hub.hellos.length;
+  nowMs += 2; // 101ms of silence ≥ the 100ms limit
+  assert(bridge.checkHubLiveness() === true, 'past the limit: the silent link is dropped');
+  await tick(); // detachAndReconnect runs; reconnectLoop is held at the gated connect
+  assert(!hub.connected, 'link is down (reconnect is gated)');
+  assert(errors.some((e) => /hub silent/.test(e)), 'surfaced the silence via onError');
+
+  hub.resumeConnects();
+  assert(await waitUntil(() => hub.hellos.length > hellosBefore), 'reconnected with a fresh hello');
+  await bridge.close();
+});
+
+await section('bridge/S6c: a frame heard within the window resets the silence clock', async () => {
+  let nowMs = 500_000;
+  const { hub, bridge } = setup({ hubSilenceLimitMs: 100, now: () => nowMs });
+  await bridge.start();
+
+  nowMs += 90; // nearly silent...
+  hub.deliver(stamped('m1', 'leo', 'nova', 'still here')); // ...then a frame arrives
+  await tick(); // the deliver is processed → lastHeardMs reset to now
+  nowMs += 90; // 90ms since that frame, < 100
+  assert(bridge.checkHubLiveness() === false, 'a frame heard within the window keeps the link alive');
+
+  nowMs += 100; // now 190ms since the last frame, ≥ the limit
+  assert(bridge.checkHubLiveness() === true, 'genuine silence after the last frame still trips the drop');
+  await bridge.close();
+});
+
+await section('bridge/S6c: a half-open socket (hub stops echoing, no close) is dropped + reconnected', async () => {
+  // End-to-end through the real heartbeat timer: prove a fake hub that goes silent WITHOUT closing
+  // is detected and recovered from. The limit is widened well past 3× the interval so a loaded event
+  // loop cannot false-trip while the hub is still answering (the exact 3× default is pinned by the
+  // injected-clock section above).
+  const { hub, bridge } = setup({ heartbeatIntervalMs: 15, hubSilenceLimitMs: 200, baseBackoffMs: 2 });
+  await bridge.start();
+  assert(await waitUntil(() => hub.heartbeats.length >= 2), 'beating with a responsive (echoing) hub');
+
+  const hellosBefore = hub.hellos.length;
+  hub.goSilent(); // half-open: stop answering heartbeats, keep the socket open
+  assert(await waitUntil(() => hub.hellos.length > hellosBefore, 3000), 'silence detected → link dropped and re-helloed');
+
+  hub.goLoud(); // the hub answers again
+  const beatsAtRecovery = hub.heartbeats.length;
+  assert(await waitUntil(() => hub.heartbeats.length > beatsAtRecovery, 3000), 'heartbeats resume once the hub answers again');
+  await bridge.close();
+});
+
+await section('bridge/S6c: a half-open socket whose close() never fires onClose still reconnects', async () => {
+  // The real hazard: on a half-open socket close() may not fire onClose until a TCP timeout. The
+  // silence path must detach LOCALLY (not wait on the close handshake), so reconnect proceeds even
+  // though the dead link's onClose never arrives.
+  let nowMs = 2_000_000;
+  const { hub, bridge } = setup({ hubSilenceLimitMs: 100, now: () => nowMs });
+  hub.swallowClientClose = true; // client links mark closed but never invoke onClose
+  await bridge.start();
+  const hellosBefore = hub.hellos.length;
+
+  nowMs += 101; // silent past the limit
+  assert(bridge.checkHubLiveness() === true, 'silence tripped the drop');
+  assert(await waitUntil(() => hub.hellos.length > hellosBefore), 'reconnected without waiting on the (never-firing) close handshake');
+  await bridge.close();
+});
+
+await section('bridge/S6c: a stale link closing late does not tear down the reconnected link', async () => {
+  // After a local detach + reconnect, the OLD link's onClose can still fire. The bridge guards each
+  // link's onClose by identity, so that late callback is a no-op and the fresh link survives.
+  let nowMs = 3_000_000;
+  const { hub, bridge, adapter } = setup({ hubSilenceLimitMs: 100, now: () => nowMs });
+  await bridge.start();
+  const hellosBefore = hub.hellos.length;
+
+  nowMs += 101;
+  assert(bridge.checkHubLiveness() === true, 'silence tripped the drop');
+  assert(await waitUntil(() => hub.hellos.length > hellosBefore), 'reconnected on a fresh link');
+  // The dead link's onClose fired (best-effort close above); the fresh link must still deliver.
+  await tick();
+  hub.deliver(stamped('mx', 'leo', 'nova', 'after a late stale close'));
+  assert(await waitUntil(() => adapter.delivered.some((m) => m.id === 'mx')), 'fresh link still delivers (stale onClose ignored)');
+  await bridge.close();
+});
+
+await section('bridge/S6c: hubSilenceLimitMs = 0 disables the silence check', async () => {
+  let nowMs = 0;
+  const { hub, bridge } = setup({ hubSilenceLimitMs: 0, now: () => nowMs });
+  await bridge.start();
+  nowMs += 10_000_000; // an eternity of silence
+  assert(bridge.checkHubLiveness() === false, 'never trips when disabled');
+  assert(hub.connected, 'link left untouched');
   await bridge.close();
 });

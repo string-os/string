@@ -33,6 +33,12 @@ export interface BridgeOptions {
   maxBackoffMs?: number;
   /** How often to send a heartbeat once connected. Default 15s; 0 disables (S6 liveness). */
   heartbeatIntervalMs?: number;
+  /**
+   * How long the hub may stay silent (no frame of any kind — not even a heartbeat echo) before the
+   * bridge treats the link as half-open, drops it, and reconnects. Default 3×heartbeatIntervalMs; 0
+   * disables. Detection rides the heartbeat timer, so it needs heartbeatIntervalMs > 0 (S6c).
+   */
+  hubSilenceLimitMs?: number;
   /** Injectable clock (ms); defaults to Date.now. Stamps heartbeats and expires the dedup map. */
   now?: () => number;
   onError?: (reason: string) => void;
@@ -46,7 +52,8 @@ const DELIVERED_TTL_MS = 24 * 60 * 60 * 1000;
  * DIALS OUT to the hub (no inbound ports). It performs the versioned hello handshake, routes each
  * `deliver` to the right local InboundAdapter by recipient, relays the adapter's delivered/answered
  * acks back to the hub, and carries outbound `send` with sendResult correlation. A dropped
- * connection reconnects with capped backoff and re-hellos (heartbeat/liveness is S6).
+ * connection reconnects with capped backoff and re-hellos. For liveness it heartbeats once connected
+ * and drops+reconnects when the hub falls silent past hubSilenceLimitMs (a half-open socket).
  *
  * Delivery is deduped by message id: the hub redelivers on reconnect, so the same `deliver` can
  * arrive more than once — the bridge never dispatches an in-flight message twice and re-asserts
@@ -63,9 +70,12 @@ export class Bridge {
   private readonly baseBackoffMs: number;
   private readonly maxBackoffMs: number;
   private readonly heartbeatIntervalMs: number;
+  private readonly hubSilenceLimitMs: number;
   private readonly now: () => number;
   private readonly onError?: (reason: string) => void;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
+  /** The ms of the last frame heard from the hub (any frame = a sign of life). 0 until connected. */
+  private lastHeardMs = 0;
 
   private link: HubLink | null = null;
   private helloOk = false;
@@ -101,6 +111,7 @@ export class Bridge {
     this.baseBackoffMs = opts.baseBackoffMs ?? 500;
     this.maxBackoffMs = opts.maxBackoffMs ?? 30_000;
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 15_000;
+    this.hubSilenceLimitMs = opts.hubSilenceLimitMs ?? 3 * this.heartbeatIntervalMs;
     this.now = opts.now ?? Date.now;
     this.onError = opts.onError;
   }
@@ -120,7 +131,10 @@ export class Bridge {
     this.link = link;
     this.helloOk = false;
     link.onFrame((f) => this.handleFrame(f));
-    link.onClose(() => this.handleClose());
+    // Guard by identity: a superseded link can fire onClose late (on a real half-open socket the
+    // close handshake may not resolve for a long time), and by then we may already be on a fresh
+    // link — that stale callback must not tear the new one down.
+    link.onClose(() => this.onLinkClose(link));
     await new Promise<void>((resolve, reject) => {
       this.helloSettlers = { resolve, reject };
       this.rawSend({
@@ -133,6 +147,8 @@ export class Bridge {
     });
     // helloOk received: flush any acks produced while we were disconnected, then start the
     // heartbeat so the hub can tell this bridge is alive (silence must look like silence, not calm).
+    // Baseline the silence clock at connect so a stale lastHeardMs from a prior link can't trip it.
+    this.lastHeardMs = this.now();
     this.flushPendingAcks();
     this.startHeartbeat();
   }
@@ -142,9 +158,33 @@ export class Bridge {
     if (this.heartbeatIntervalMs <= 0) return;
     this.heartbeatTimer = setInterval(() => {
       if (this.link && this.helloOk) this.rawSend({ t: 'heartbeat', machineId: this.machineId, atMs: this.now() });
+      // Two-way liveness: a half-open socket leaves us "connected" while every send stalls. If the
+      // hub has not made a sound within the limit, detach the link so we reconnect (see below).
+      this.checkHubLiveness();
     }, this.heartbeatIntervalMs);
     // Don't keep the process alive just for heartbeats.
     this.heartbeatTimer.unref?.();
+  }
+
+  /**
+   * Drop-and-reconnect when the hub has gone silent past the limit — a half-open socket where our
+   * heartbeats go unanswered. Public and side-effecting so a test can drive it with an injected
+   * clock (symmetric with the hub's checkLiveness). Returns true when it tripped. A no-op unless
+   * connected and configured (hubSilenceLimitMs > 0).
+   */
+  checkHubLiveness(): boolean {
+    if (this.hubSilenceLimitMs <= 0) return false;
+    if (!this.link || !this.helloOk) return false;
+    const silentForMs = this.now() - this.lastHeardMs;
+    if (silentForMs < this.hubSilenceLimitMs) return false;
+    this.onError?.(`hub silent for ${silentForMs}ms (limit ${this.hubSilenceLimitMs}ms) — dropping to reconnect`);
+    // A half-open socket is exactly the case where close() may NOT fire onClose for a long time
+    // (the close handshake hangs). So detach LOCALLY and reconnect now, then close the dead socket
+    // best-effort for cleanup — its onClose, whenever it fires, is ignored by the identity guard.
+    const dead = this.link;
+    this.detachAndReconnect();
+    try { dead.close(); } catch { /* best-effort */ }
+    return true;
   }
 
   private stopHeartbeat(): void {
@@ -154,7 +194,19 @@ export class Bridge {
     }
   }
 
-  private handleClose(): void {
+  /** A link reported it closed. Act only if it is still the current link (ignore stale callbacks). */
+  private onLinkClose(link: HubLink): void {
+    if (link !== this.link) return;
+    this.detachAndReconnect();
+  }
+
+  /**
+   * Drop the current link locally and start reconnecting. Does NOT wait for any close handshake —
+   * the caller detaches first and closes the old socket best-effort, so a half-open socket (whose
+   * onClose may never fire) cannot wedge the reconnect. Idempotent: a second call while already
+   * reconnecting is a no-op.
+   */
+  private detachAndReconnect(): void {
     this.link = null;
     this.helloOk = false;
     this.stopHeartbeat();
@@ -218,7 +270,7 @@ export class Bridge {
     return new Promise<SendOutcome>((resolve, reject) => {
       // `ready` resolving does not guarantee the link is still up — it may have dropped in the
       // microtask gap since. Check before registering so send() rejects instead of hanging forever
-      // (a drop AFTER we register is caught by handleClose, which rejects every pending send).
+      // (a drop AFTER we register is caught by detachAndReconnect, which rejects every pending send).
       if (!this.link || !this.helloOk) {
         reject(new Error('hub connection not ready (dropped before send)'));
         return;
@@ -259,6 +311,9 @@ export class Bridge {
   }
 
   private handleFrame(frame: Frame): void {
+    // Any frame from the hub — deliver, ack, sendResult, a heartbeat echo — is a sign of life and
+    // resets the silence clock. Silence (no frame at all) is what must alarm, not quiet traffic.
+    this.lastHeardMs = this.now();
     if (isFrame(frame, 'helloOk')) {
       const check = checkProtocolVersion(frame.protocolVersion);
       if (!check.ok) {
@@ -305,7 +360,8 @@ export class Bridge {
       }
       return;
     }
-    // heartbeat and anything else: ignored here (liveness is S6).
+    // A heartbeat echo (or any other frame) needs no branch: it already reset the silence clock at
+    // the top of handleFrame, which is the whole point — the hub answering keeps this link alive.
   }
 
   private handleDeliver(msg: StampedMessage): void {

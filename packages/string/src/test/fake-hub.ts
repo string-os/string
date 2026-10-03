@@ -19,6 +19,9 @@ class MemoryLink implements HubLink {
   private closeCb: (() => void) | null = null;
   peer!: MemoryLink;
   closed = false;
+  /** When false, close() marks the link closed but never invokes onClose — a half-open socket
+   *  whose close handshake hangs, so the owner must detach locally rather than wait on onClose. */
+  fireCloseCb = true;
 
   send(frame: Frame): void {
     if (this.closed) return;
@@ -36,11 +39,11 @@ class MemoryLink implements HubLink {
   close(): void {
     if (this.closed) return;
     this.closed = true;
-    queueMicrotask(() => this.closeCb?.());
+    if (this.fireCloseCb) queueMicrotask(() => this.closeCb?.());
     const peer = this.peer;
     if (!peer.closed) {
       peer.closed = true;
-      queueMicrotask(() => peer.closeCb?.());
+      if (peer.fireCloseCb) queueMicrotask(() => peer.closeCb?.());
     }
   }
 }
@@ -64,6 +67,10 @@ export class FakeHub {
   /** The version the hub advertises in helloOk (override to force a mismatch). */
   advertisedVersion = PROTOCOL_VERSION;
   hubId = 'hub-test';
+  /** When true the hub stops answering heartbeats — a half-open socket (link stays OPEN). */
+  private silent = false;
+  /** When true, each client link's close() will NOT fire onClose (the close handshake hangs). */
+  swallowClientClose = false;
   private link: HubLink | null = null;
   private msgCounter = 0;
   private connectGate: Promise<void> | null = null;
@@ -72,6 +79,7 @@ export class FakeHub {
   connect = async (): Promise<HubLink> => {
     if (this.connectGate) await this.connectGate; // held offline until resumeConnects()
     const { client, server } = createLinkPair();
+    if (this.swallowClientClose) (client as MemoryLink).fireCloseCb = false;
     this.attach(server);
     return client;
   };
@@ -80,7 +88,11 @@ export class FakeHub {
     this.link = l;
     l.onFrame((f) => this.onFrame(f));
     l.onClose(() => {
-      this.link = null;
+      // Only clear if this is still the current link. When the BRIDGE initiates the close (S6c
+      // silence drop), it detaches + reconnects and attaches the next link before this old
+      // link's onClose microtask runs — without this guard that stale callback would null the
+      // freshly-attached link, and the reconnect's helloOk would never be sent.
+      if (this.link === l) this.link = null;
     });
   }
 
@@ -110,6 +122,9 @@ export class FakeHub {
     }
     if (isFrame(f, 'heartbeat')) {
       this.heartbeats.push({ machineId: f.machineId, atMs: f.atMs });
+      // Two-way liveness: a healthy hub echoes. When silent, we drop the echo WITHOUT closing —
+      // the link stays up but the bridge hears nothing, the half-open case S6c must detect.
+      if (!this.silent) this.send({ t: 'heartbeat', machineId: this.hubId, atMs: f.atMs });
       return;
     }
   }
@@ -120,6 +135,14 @@ export class FakeHub {
   }
   drop(): void {
     this.link?.close();
+  }
+  /** Go quiet without closing: stop answering heartbeats (models a half-open socket). */
+  goSilent(): void {
+    this.silent = true;
+  }
+  /** Resume answering heartbeats. */
+  goLoud(): void {
+    this.silent = false;
   }
   /** Hold every subsequent connect() open (keeps a reconnecting bridge offline) until resumed. */
   pauseConnects(): void {
