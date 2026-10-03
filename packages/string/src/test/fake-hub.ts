@@ -65,11 +65,14 @@ export class FakeHub {
   hubId = 'hub-test';
   private link: HubLink | null = null;
   private msgCounter = 0;
+  private connectGate: Promise<void> | null = null;
+  private releaseGate: (() => void) | null = null;
 
-  connect = (): Promise<HubLink> => {
+  connect = async (): Promise<HubLink> => {
+    if (this.connectGate) await this.connectGate; // held offline until resumeConnects()
     const { client, server } = createLinkPair();
     this.attach(server);
-    return Promise.resolve(client);
+    return client;
   };
 
   private attach(l: HubLink): void {
@@ -112,6 +115,15 @@ export class FakeHub {
   }
   drop(): void {
     this.link?.close();
+  }
+  /** Hold every subsequent connect() open (keeps a reconnecting bridge offline) until resumed. */
+  pauseConnects(): void {
+    if (!this.connectGate) this.connectGate = new Promise<void>((r) => (this.releaseGate = r));
+  }
+  resumeConnects(): void {
+    this.releaseGate?.();
+    this.connectGate = null;
+    this.releaseGate = null;
   }
   get connected(): boolean {
     return this.link !== null;

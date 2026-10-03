@@ -31,8 +31,13 @@ export interface BridgeOptions {
   protocolVersion?: string;
   baseBackoffMs?: number;
   maxBackoffMs?: number;
+  /** Injectable clock (ms); defaults to Date.now. Used to expire the delivered-dedup map. */
+  now?: () => number;
   onError?: (reason: string) => void;
 }
+
+/** How long a delivered message id is remembered for redelivery dedup before it is forgotten. */
+const DELIVERED_TTL_MS = 24 * 60 * 60 * 1000;
 
 /**
  * The agent-box side of the cross-machine messenger: one persistent client WebSocket the bridge
@@ -55,6 +60,7 @@ export class Bridge {
   private readonly protocolVersion: string;
   private readonly baseBackoffMs: number;
   private readonly maxBackoffMs: number;
+  private readonly now: () => number;
   private readonly onError?: (reason: string) => void;
 
   private link: HubLink | null = null;
@@ -68,12 +74,17 @@ export class Bridge {
 
   private refCounter = 0;
   private readonly pendingSends = new Map<string, { resolve: (o: SendOutcome) => void; reject: (e: Error) => void }>();
-  /** Messages confirmed delivered (so a redelivered `deliver` re-asserts the ack, not re-dispatches). */
-  private readonly delivered = new Set<string>();
+  /**
+   * Messages confirmed delivered -> the ms they were confirmed, so a redelivered `deliver`
+   * re-asserts the ack instead of re-dispatching. Entries older than DELIVERED_TTL_MS are
+   * forgotten so this never grows without bound (a redelivery that old is not realistic).
+   */
+  private readonly delivered = new Map<string, number>();
   /** Messages currently out at an adapter (so a duplicate `deliver` is not dispatched twice). */
   private readonly dispatching = new Set<string>();
-  /** Acks produced while disconnected, flushed on reconnect. */
-  private pendingAcks: Frame[] = [];
+  /** Acks produced while disconnected, flushed on reconnect; keyed by message id so a re-asserted
+   * ack collapses onto one entry (bounded by distinct messages, not by redelivery count). */
+  private pendingAcks = new Map<string, Frame>();
   private readonly backoffWaiters = new Set<() => void>();
 
   constructor(opts: BridgeOptions) {
@@ -85,6 +96,7 @@ export class Bridge {
     this.protocolVersion = opts.protocolVersion ?? PROTOCOL_VERSION;
     this.baseBackoffMs = opts.baseBackoffMs ?? 500;
     this.maxBackoffMs = opts.maxBackoffMs ?? 30_000;
+    this.now = opts.now ?? Date.now;
     this.onError = opts.onError;
   }
 
@@ -127,8 +139,11 @@ export class Bridge {
     }
     for (const { reject } of this.pendingSends.values()) reject(new Error('hub connection closed'));
     this.pendingSends.clear();
-    // In-flight dispatches will be redelivered by the hub; let them re-dispatch on reconnect.
-    this.dispatching.clear();
+    // KEEP `dispatching` across the reconnect: the adapter delivery is local and outlives the hub
+    // link, so a message still being handled is NOT finished. If we cleared it and the hub
+    // redelivered on reconnect, handleDeliver would dispatch it a second time (e.g. the codex
+    // adapter would fire a second turn/start). The in-flight deliver() resolves to an ack or
+    // rejects (hung → its catch clears dispatching), and only then does redelivery re-dispatch.
     if (this.closing || this.fatal || this.reconnecting) return;
     this.reconnecting = true;
     this.ready = this.reconnectLoop();
@@ -176,6 +191,13 @@ export class Bridge {
     await this.ready;
     const clientRef = `cr_${++this.refCounter}`;
     return new Promise<SendOutcome>((resolve, reject) => {
+      // `ready` resolving does not guarantee the link is still up — it may have dropped in the
+      // microtask gap since. Check before registering so send() rejects instead of hanging forever
+      // (a drop AFTER we register is caught by handleClose, which rejects every pending send).
+      if (!this.link || !this.helloOk) {
+        reject(new Error('hub connection not ready (dropped before send)'));
+        return;
+      }
       this.pendingSends.set(clientRef, { resolve, reject });
       this.rawSend({ t: 'send', clientRef, from, msg });
     });
@@ -184,22 +206,31 @@ export class Bridge {
   /** An adapter observed delivered/answered for a message; relay it to the hub (buffer if offline). */
   reportAck(ack: DeliveryAck): void {
     if (ack.state === 'delivered') {
-      this.delivered.add(ack.messageId);
+      this.delivered.set(ack.messageId, this.now());
       this.dispatching.delete(ack.messageId);
     }
+    this.pruneDelivered();
     this.sendAck(ack.messageId, ack.state);
+  }
+
+  /** Forget delivered ids older than the TTL so the dedup map cannot grow without bound. */
+  private pruneDelivered(): void {
+    const cutoff = this.now() - DELIVERED_TTL_MS;
+    for (const [id, at] of this.delivered) {
+      if (at < cutoff) this.delivered.delete(id);
+    }
   }
 
   private sendAck(messageId: string, state: BridgeAckState): void {
     const frame: Frame = { t: 'ack', messageId, state };
     if (this.link && this.helloOk) this.rawSend(frame);
-    else this.pendingAcks.push(frame);
+    else this.pendingAcks.set(messageId, frame); // keyed by id: a re-assert overwrites, not appends
   }
 
   private flushPendingAcks(): void {
     const acks = this.pendingAcks;
-    this.pendingAcks = [];
-    for (const f of acks) this.rawSend(f);
+    this.pendingAcks = new Map();
+    for (const f of acks.values()) this.rawSend(f);
   }
 
   private handleFrame(frame: Frame): void {
@@ -253,6 +284,7 @@ export class Bridge {
   }
 
   private handleDeliver(msg: StampedMessage): void {
+    this.pruneDelivered();
     if (this.delivered.has(msg.id)) {
       // Already delivered; the hub redelivered because it missed our ack. Re-assert it.
       this.sendAck(msg.id, 'delivered');

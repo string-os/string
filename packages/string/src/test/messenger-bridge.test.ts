@@ -8,14 +8,19 @@
  *  - outbound send correlates its sendResult;
  *  - a dropped connection reconnects + re-hellos and keeps delivering;
  *  - acks produced while disconnected are flushed on reconnect.
+ * Review fixes (Leo, blocking):
+ *  - an in-flight delivery is NOT re-dispatched when the hub reconnects (dispatching is kept);
+ *  - send() rejects instead of hanging when the link is down for good;
+ *  - the delivered-dedup map expires after the TTL and buffered acks dedupe by id.
  */
 import { assert, section } from './runner.js';
 import { Bridge } from '../messenger/hub/bridge.js';
 import { FakeHub, FakeInboundAdapter, stamped } from './fake-hub.js';
 
 const tick = (n = 5): Promise<void> => new Promise((r) => setTimeout(r, n));
+const DAY_MS = 24 * 60 * 60 * 1000;
 
-function setup(opts?: { baseBackoffMs?: number }) {
+function setup(opts?: { baseBackoffMs?: number; now?: () => number }) {
   const hub = new FakeHub();
   const errors: string[] = [];
   const bridge = new Bridge({
@@ -25,6 +30,7 @@ function setup(opts?: { baseBackoffMs?: number }) {
     connect: hub.connect,
     baseBackoffMs: opts?.baseBackoffMs ?? 2,
     maxBackoffMs: 8,
+    now: opts?.now,
     onError: (r) => errors.push(r),
   });
   const adapter = new FakeInboundAdapter((a) => bridge.reportAck(a));
@@ -139,5 +145,80 @@ await section('bridge: acks produced while disconnected are flushed on reconnect
   adapter.ack('m1'); // the read-ack lands while the bridge is reconnecting → buffered
   await tick(20); // reconnect + flush
   assert(hub.acks.some((a) => a.messageId === 'm1' && a.state === 'delivered'), 'buffered ack flushed after reconnect');
+  await bridge.close();
+});
+
+await section('bridge/review: an in-flight delivery is not re-dispatched when the hub reconnects', async () => {
+  const { hub, bridge, adapter } = setup();
+  adapter.autoDeliver = false; // the adapter is still handling the turn when the link drops
+  await bridge.start();
+  hub.deliver(stamped('m1', 'leo', 'nova', 'long turn'));
+  await tick();
+  assert(adapter.delivered.length === 1, 'dispatched once');
+
+  hub.drop(); // link dies mid-delivery
+  await tick(20); // reconnect + re-hello
+  hub.deliver(stamped('m1', 'leo', 'nova', 'long turn')); // hub redelivers the still-unacked message
+  await tick();
+  assert(adapter.delivered.length === 1, 'NOT dispatched again — dispatching kept across the reconnect');
+
+  adapter.ack('m1'); // the original handling finally completes
+  await tick();
+  assert(adapter.delivered.length === 1, 'still a single dispatch after the ack lands');
+  assert(hub.acks.filter((a) => a.messageId === 'm1').length === 1, 'acked exactly once');
+  await bridge.close();
+});
+
+await section('bridge/review: send() rejects instead of hanging when the link is down for good', async () => {
+  const { hub, bridge } = setup();
+  await bridge.start();
+  hub.rejectHello = 'revoked'; // the reconnect will be refused → fatal, link stays down
+  hub.drop();
+  await tick(20); // reconnect attempt → helloReject → fatal, no link
+  let threw = false;
+  try {
+    await bridge.send('nova', { to: 'leo', body: 'into the void' });
+  } catch {
+    threw = true;
+  }
+  assert(threw, 'send rejected rather than hanging on a dead link');
+  await bridge.close();
+});
+
+await section('bridge/review: the delivered-dedup map forgets ids after the TTL', async () => {
+  let nowMs = 1_000_000;
+  const { hub, bridge, adapter } = setup({ now: () => nowMs });
+  await bridge.start();
+  hub.deliver(stamped('m1', 'leo', 'nova', 'first'));
+  await tick();
+  assert(adapter.delivered.length === 1, 'dispatched once');
+
+  hub.deliver(stamped('m1', 'leo', 'nova', 'first')); // redelivery within the TTL
+  await tick();
+  assert(adapter.delivered.length === 1, 'within TTL: re-asserted, not re-dispatched');
+
+  nowMs += DAY_MS + 1; // a day and a tick later the id is forgotten
+  hub.deliver(stamped('m1', 'leo', 'nova', 'first, a day later'));
+  await tick();
+  assert(adapter.delivered.length === 2, 'past TTL: treated as new (map pruned, so no unbounded growth)');
+  await bridge.close();
+});
+
+await section('bridge/review: buffered acks dedupe by id — not one per re-assert', async () => {
+  const { hub, bridge, adapter } = setup();
+  adapter.autoDeliver = false;
+  await bridge.start();
+  hub.deliver(stamped('m1', 'leo', 'nova', 'handle me'));
+  await tick();
+
+  hub.pauseConnects(); // keep the bridge offline across the ack burst (reconnect is otherwise immediate)
+  hub.drop();
+  await tick(); // bridge observes the drop and is now held offline reconnecting
+  adapter.ack('m1');
+  adapter.ack('m1');
+  adapter.ack('m1'); // three read-acks buffered while reconnecting
+  hub.resumeConnects();
+  await tick(20); // reconnect + flush
+  assert(hub.acks.filter((a) => a.messageId === 'm1').length === 1, 'exactly one ack flushed, deduped by id');
   await bridge.close();
 });
