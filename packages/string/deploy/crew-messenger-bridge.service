@@ -1,0 +1,38 @@
+[Unit]
+# Agent-box String bridge for the cross-machine messenger. A USER unit (systemctl --user): it
+# runs as the agent-box user, dials OUT to the hub, and needs no root and no inbound port.
+Description=crew-messenger agent-box String bridge
+Documentation=https://github.com/string-os/string
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# The String repo checkout on this box. The bin is run with the repo toolchain (tsx), exactly as
+# the daemon is; point this at your checkout and make sure deps are installed (pnpm install).
+WorkingDirectory=__REPO__/packages/string
+
+# Config + the capability token path live outside the repo. See deploy/bridge.env.example.
+# The token itself is a 0600 FILE referenced by CREW_BRIDGE_TOKEN_FILE — never inlined here.
+EnvironmentFile=%h/.config/crew-messenger/bridge.env
+
+ExecStart=/usr/bin/node --import tsx src/messenger/hub/bridge-bin.ts
+
+Restart=on-failure
+RestartSec=2
+TimeoutStopSec=10
+
+# Modest hardening available to a user unit. The bridge needs: outbound to the hub (wss) and to
+# the LOCAL daemon (127.0.0.1), plus write access to its own state dir (the dedup maps).
+NoNewPrivileges=yes
+ProtectSystem=strict
+# Writable: the dedup-map state dir (CREW_BRIDGE_STATE_DIR) and the config dir the env file lives in.
+ReadWritePaths=%h/.local/state/crew-messenger-bridge
+PrivateTmp=yes
+LockPersonality=yes
+RestrictRealtime=yes
+UMask=0077
+
+[Install]
+WantedBy=default.target
