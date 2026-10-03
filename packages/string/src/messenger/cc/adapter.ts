@@ -2,7 +2,7 @@ import type { AgentEventInbox } from './inbox.js';
 import type { DeliverableMessage, DeliveryAck, DeliveryMode, InboundAdapter } from '../types.js';
 
 export interface CcAdapterOptions {
-  /** The recipient agent's event inbox (push + read-ack). */
+  /** The recipient agent's event inbox (idempotent push + read-ack, both keyed by message id). */
   inbox: AgentEventInbox;
   /** Out-of-band delivery acks. cc-channel only ever emits `delivered` (on the read-ack). */
   onAck: (ack: DeliveryAck) => void;
@@ -10,10 +10,14 @@ export interface CcAdapterOptions {
 
 /**
  * Delivers messages into one Claude Code agent through its String event inbox. A message becomes
- * a local-webhook event; `delivered` is acked when the attached CC session READ-ACKS that event
- * (the robust signal — not the composer pixels, not the webhook 202). With no session attached
- * the event stays `pending` in the inbox and no `delivered` is emitted, so the hub keeps the
- * message `dispatched` (queued) rather than falsely delivered.
+ * a local-webhook event keyed by its message id; `delivered` is acked when the attached CC
+ * session READ-ACKS that event (the robust signal — not the composer pixels, not the webhook
+ * 202). With no session attached the event stays `pending` in the inbox and no `delivered` is
+ * emitted, so the hub keeps the message `dispatched` (queued) rather than falsely delivered.
+ *
+ * Delivery is idempotent on the message id: the hub redelivers on reconnect and a bridge can
+ * restart, so `deliver` may be called more than once for the same message — the inbox push does
+ * not duplicate the event, and the agent sees it exactly once.
  *
  * Unlike the codex adapter there is no steer/interrupt protocol here — every message is an inbox
  * event the session picks up in order — so `mode` is accepted for interface parity and ignored.
@@ -21,15 +25,8 @@ export interface CcAdapterOptions {
 export class CcChannelAdapter implements InboundAdapter {
   private readonly inbox: AgentEventInbox;
   private readonly onAck: (ack: DeliveryAck) => void;
-  /** eventId -> our messageId, awaiting the recipient session's read-ack (the delivered signal). */
-  private readonly awaitingAck = new Map<string, string>();
-  /**
-   * Event ids whose read-ack arrived before `deliver` recorded the correlation. A fast local
-   * inbox can report the ack before `push()`'s promise continuation runs; the matching deliver
-   * drains this. `onAck` is edge-triggered (at-most-once per event), so entries that never match
-   * a deliver are only pathological duplicate/unknown ids and stay bounded.
-   */
-  private readonly earlyAcks = new Set<string>();
+  /** Message ids awaiting the recipient session's read-ack (the delivered signal). */
+  private readonly awaiting = new Set<string>();
   private closed = false;
 
   constructor(opts: CcAdapterOptions) {
@@ -38,20 +35,20 @@ export class CcChannelAdapter implements InboundAdapter {
   }
 
   async start(): Promise<void> {
-    this.inbox.onAck((eventId) => this.handleAck(eventId));
+    this.inbox.onAck((key) => this.handleAck(key));
   }
 
   async deliver(msg: DeliverableMessage, _opts?: { mode?: DeliveryMode }): Promise<void> {
     if (this.closed) throw new Error('cc-channel adapter is closed');
-    const eventId = await this.inbox.push(this.render(msg));
-    // Resolving push means the event is stored (accepted), NOT received. We hold the correlation
-    // until the session read-acks that event id, which is when we emit `delivered` — unless the
-    // ack already raced ahead of this point.
-    if (this.earlyAcks.delete(eventId)) {
-      this.onAck({ messageId: msg.id, state: 'delivered' });
-      return;
+    // Register BEFORE pushing and key on the message id, so a read-ack can never beat the record
+    // (no buffering of foreign acks), and a redelivery re-attaches instead of duplicating.
+    this.awaiting.add(msg.id);
+    try {
+      await this.inbox.push(msg.id, this.render(msg));
+    } catch (err) {
+      this.awaiting.delete(msg.id);
+      throw err;
     }
-    this.awaitingAck.set(eventId, msg.id);
   }
 
   /** The text the recipient CC session sees: sender attribution then the body verbatim. */
@@ -59,22 +56,17 @@ export class CcChannelAdapter implements InboundAdapter {
     return `[from ${msg.from}] ${msg.body}`;
   }
 
-  private handleAck(eventId: string): void {
+  private handleAck(key: string): void {
     if (this.closed) return;
-    const messageId = this.awaitingAck.get(eventId);
-    if (messageId) {
-      this.awaitingAck.delete(eventId);
-      this.onAck({ messageId, state: 'delivered' });
-      return;
-    }
-    // The ack beat the deliver that will record this event id; the matching deliver drains it.
-    this.earlyAcks.add(eventId);
+    // Only messages we are awaiting matter; an ack for anything else (unrelated inbox traffic, or
+    // a message already acked) is dropped, never buffered — so nothing grows unbounded.
+    if (!this.awaiting.delete(key)) return;
+    this.onAck({ messageId: key, state: 'delivered' });
   }
 
   async close(): Promise<void> {
     this.closed = true;
-    this.awaitingAck.clear();
-    this.earlyAcks.clear();
+    this.awaiting.clear();
     this.inbox.close();
   }
 }
