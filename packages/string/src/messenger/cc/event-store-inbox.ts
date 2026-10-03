@@ -6,12 +6,22 @@ import type { AgentEventInbox } from './inbox.js';
 /**
  * The outcome of reading one event's status.
  *  - a concrete status (`pending`/`delivered`/`ack`) — the normal case;
- *  - `gone` — the event file is confirmed ABSENT (ENOENT): it was swept, so treat it as handled;
+ *  - `gone` — the event file is confirmed ABSENT (ENOENT). This alone does NOT mean delivered: the
+ *    daemon's `sweep()` stale-purges events that were never acked (the `maxAge` cap) and `clear()`
+ *    removes pending ones, so a `gone` is only treated as delivered when we have RECORDED an ack for
+ *    it (see {@link MapEntry.acked}); otherwise it is a non-delivery and the hub must redeliver;
  *  - `unreadable` — the file could not be parsed (a torn read mid-write, e.g. during the daemon's
  *    non-atomic in-place `ack()` rewrite). This is TRANSIENT: never treat it as gone — keep
  *    watching and re-read next tick. Conflating it with `gone` would falsely prune a live event.
  */
 type ReadResult = AgentEventStatus | 'gone' | 'unreadable';
+
+/** Durable per-message state: the event it maps to, and whether we have ever observed its read-ack. */
+interface MapEntry {
+  eventId: string;
+  /** True once `status: 'ack'` has been observed. A later `gone` on an acked entry = delivered. */
+  acked: boolean;
+}
 
 /**
  * The production {@link AgentEventInbox}: it delivers a messenger message into a Claude Code agent
@@ -27,10 +37,21 @@ type ReadResult = AgentEventStatus | 'gone' | 'unreadable';
  *    session attached the event stays `pending` and no `delivered` is ever emitted.
  *
  * IDEMPOTENT ON THE MESSAGE ID. `EventStore.append` mints a fresh event id per call, so to make a
- * repeat push (hub redelivery, or a bridge RESTART) re-attach instead of appending a duplicate,
- * the `messageId -> eventId` mapping is persisted to a 0600 file outside any agent home. On a
- * repeat push of a known key: if that event is already acked the delivered fact is re-asserted
- * (recovering a lost ack); if it is still open it is simply re-watched; neither re-POSTs.
+ * repeat push (hub redelivery, or a bridge RESTART) re-attach instead of appending a duplicate, the
+ * `messageId -> {eventId, acked}` mapping is persisted to a 0600 file outside any agent home. The
+ * recorded `acked` flag is what makes a later disappearance unambiguous:
+ *   - a `gone` event we had ALREADY acked = delivered-then-swept (normal retention): re-assert
+ *     delivered so a missed ack recovers;
+ *   - a `gone` event we had NOT acked = stale-purged / cleared BEFORE any session read it: NOT
+ *     delivered — drop the entry, log, emit no ack, and let the hub redeliver (a fresh push
+ *     re-POSTs a new event). Firing delivered here would silently lose the message.
+ *
+ * KNOWN DUPLICATE WINDOW: the daemon assigns the event id, so the map entry can only be persisted
+ * AFTER the 202. If the bridge crashes between the daemon's append and that persist, a restart has
+ * no record of the message; the hub redelivers it and we POST a second event. The recipient then
+ * sees the message twice. This is the single non-idempotent window and is accepted as rare (it
+ * needs a crash in that millisecond gap); closing it would require the daemon to accept a
+ * caller-supplied idempotency key on the webhook, which is out of scope for this change.
  */
 export interface EventStoreInboxOptions {
   /** The recipient agent id (for the webhook target + diagnostics). */
@@ -40,8 +61,9 @@ export interface EventStoreInboxOptions {
   /** This agent's daemon webhook endpoint, e.g. `http://127.0.0.1:3923/webhook/<token>`. */
   webhookUrl: string;
   /**
-   * Persistent `messageId -> eventId` map file (0600, bridge-owned, OUTSIDE any agent home). A
-   * bridge restart reloads it so a redelivered push re-attaches rather than duplicating the event.
+   * Persistent `messageId -> {eventId, acked}` map file (0600, bridge-owned, OUTSIDE any agent
+   * home). A bridge restart reloads it so a redelivered push re-attaches rather than duplicating
+   * the event, and so a recorded ack survives the restart.
    */
   mapPath: string;
   /** How often an awaited event is polled for its read-ack. Default 1000ms; must be > 0. */
@@ -67,8 +89,8 @@ export class EventStoreInbox implements AgentEventInbox {
   private readonly readStatus: (eventId: string) => Promise<ReadResult>;
   private readonly onError: (msg: string) => void;
 
-  /** Durable `messageId -> eventId` (loaded from {@link mapPath}); the dedup/re-attach key. */
-  private readonly map = new Map<string, string>();
+  /** Durable `messageId -> {eventId, acked}` (loaded from {@link mapPath}); the dedup/re-attach key. */
+  private readonly map = new Map<string, MapEntry>();
   /** Keys whose event we are still polling for its read-ack: `messageId -> eventId`. */
   private readonly watching = new Map<string, string>();
   private ackCb: ((key: string) => void) | null = null;
@@ -96,29 +118,14 @@ export class EventStoreInbox implements AgentEventInbox {
     const known = this.map.get(key);
     if (known) {
       // Already pushed (this process or a prior one) — never re-POST. Re-attach to the fact.
-      const status = await this.readStatus(known);
-      if (status === 'ack') {
-        // The hub only redelivers when it missed our ack; re-assert delivered so it recovers.
-        this.watching.delete(key);
-        this.fireAck(key);
-      } else if (status === 'gone') {
-        // The event file is confirmed absent — swept after an ack+retention (the realistic case).
-        // Treat as handled: re-assert the delivered fact + prune the stale map entry.
-        this.watching.delete(key);
-        this.map.delete(key);
-        await this.persist();
-        this.fireAck(key);
-      } else {
-        // Still pending/delivered, or a transient `unreadable` (torn read) — keep watching. We must
-        // NOT prune on `unreadable`: the event is alive, just mid-write; the poll re-reads it.
-        this.watch(key, known);
-      }
+      const status = await this.readStatus(known.eventId);
+      await this.reconcile(key, known, status);
       return;
     }
 
     // New key: push through the daemon's existing webhook path (it is the sole writer).
     const eventId = await this.postWebhook(body);
-    this.map.set(key, eventId);
+    this.map.set(key, { eventId, acked: false });
     await this.persist();
     this.watch(key, eventId);
   }
@@ -139,6 +146,42 @@ export class EventStoreInbox implements AgentEventInbox {
   }
 
   // ── internals ──────────────────────────────────────────────────────────────
+
+  /**
+   * Act on one observed status for a known key — shared by `push` (a redelivery) and `poll`.
+   *  - `ack`    → record the ack (durably) and emit delivered;
+   *  - `gone`   → delivered ONLY if we had recorded an ack; otherwise a non-delivery (drop + log, no
+   *               ack) so the hub redelivers;
+   *  - else     → still in flight (pending/delivered) or a transient torn read (`unreadable`): keep
+   *               watching and re-read. Never prune here.
+   */
+  private async reconcile(key: string, entry: MapEntry, status: ReadResult): Promise<void> {
+    if (status === 'ack') {
+      this.watching.delete(key);
+      if (!entry.acked) {
+        entry.acked = true;
+        await this.persist(); // record the ack BEFORE firing, so a later `gone` is unambiguous
+      }
+      this.fireAck(key);
+    } else if (status === 'gone') {
+      this.watching.delete(key);
+      if (entry.acked) {
+        // Delivered earlier, then swept by retention — re-assert so a missed ack recovers.
+        this.fireAck(key);
+      } else {
+        // Vanished before any read-ack (stale cap / clear): NOT delivered. Drop it and stay silent;
+        // the hub still holds the message and will redeliver it as a fresh push.
+        this.map.delete(key);
+        await this.persist();
+        this.onError(
+          `[inbox ${this.agentId}] event ${entry.eventId} for ${key} disappeared before a read-ack; treating as NOT delivered and awaiting hub redelivery`,
+        );
+      }
+    } else {
+      // pending / delivered / unreadable → keep watching and re-read next tick (never prune here).
+      this.watch(key, entry.eventId);
+    }
+  }
 
   private async postWebhook(body: string): Promise<string> {
     let res: Response;
@@ -188,6 +231,11 @@ export class EventStoreInbox implements AgentEventInbox {
     try {
       // Snapshot so mutation during the await doesn't disturb iteration.
       for (const [key, eventId] of [...this.watching]) {
+        const entry = this.map.get(key);
+        if (!entry) {
+          this.watching.delete(key);
+          continue;
+        }
         let status: ReadResult;
         try {
           status = await this.readStatus(eventId);
@@ -195,17 +243,7 @@ export class EventStoreInbox implements AgentEventInbox {
           this.onError(`[inbox ${this.agentId}] read-ack poll failed for ${eventId}: ${(err as Error).message}`);
           continue;
         }
-        if (status === 'ack') {
-          this.watching.delete(key);
-          this.fireAck(key);
-        } else if (status === 'gone') {
-          // Confirmed absent (swept) — assume handled; stop watching and prune the stale map entry.
-          this.watching.delete(key);
-          this.map.delete(key);
-          void this.persist();
-          this.fireAck(key);
-        }
-        // pending / delivered / unreadable → keep watching and re-read next tick (never prune here).
+        await this.reconcile(key, entry, status);
       }
     } finally {
       this.polling = false;
@@ -222,9 +260,11 @@ export class EventStoreInbox implements AgentEventInbox {
       this.loaded = (async () => {
         try {
           const raw = await fs.readFile(this.mapPath, 'utf-8');
-          const obj = JSON.parse(raw) as Record<string, string>;
+          const obj = JSON.parse(raw) as Record<string, { eventId?: unknown; acked?: unknown }>;
           for (const [k, v] of Object.entries(obj)) {
-            if (typeof v === 'string') this.map.set(k, v);
+            if (v && typeof v.eventId === 'string') {
+              this.map.set(k, { eventId: v.eventId, acked: v.acked === true });
+            }
           }
         } catch {
           // No map yet (first run) or unreadable — start empty; it is rebuilt by subsequent pushes.
@@ -236,7 +276,7 @@ export class EventStoreInbox implements AgentEventInbox {
 
   /** Atomically persist the map (temp + rename) so a crash never leaves a half-written file. */
   private async persist(): Promise<void> {
-    const obj: Record<string, string> = {};
+    const obj: Record<string, MapEntry> = {};
     for (const [k, v] of this.map) obj[k] = v;
     const tmp = `${this.mapPath}.tmp`;
     try {
@@ -255,7 +295,7 @@ export class EventStoreInbox implements AgentEventInbox {
  * Read one event's status directly from the agent's event store, distinguishing a confirmed-absent
  * file from a torn one. The daemon's `ack()` rewrites the event file in place (no temp+rename), so
  * a concurrent read can catch a partial/empty file — that is `unreadable` (retry), NOT `gone`. Only
- * `ENOENT` means the event was actually removed (swept).
+ * `ENOENT` means the event was actually removed (swept or cleared).
  */
 async function readEventStatus(home: string, eventId: string): Promise<ReadResult> {
   const file = path.join(home, 'events', `${eventId}.json`);

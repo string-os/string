@@ -25,8 +25,20 @@ The bin is `src/messenger/hub/bridge-bin.ts`. It reads the token from the 0600 f
 ## Start — gated
 
 **Do not start the bridge until Leo confirms the hub is up and this PR is merged.** The first live
-step is **one agent (nova)** — `CREW_BRIDGE_AGENTS=nova` — before the other eleven. Starting it
-writes real events into those agents' live String inboxes, so it is an explicit, supervised step.
+step is **one agent (nova)** — `CREW_BRIDGE_AGENTS=nova` — before widening to the rest of the
+authorized Claude Code roster (`ada aria keel leo nova scout suri vega vera`). Starting it writes
+real events into those agents' live String inboxes, so it is an explicit, supervised step.
+
+**Claude Code agents only.** The Codex (node) sessions `atlas`, `milo`, `pike` never read-ack
+String events, so delivery to them would never confirm and their mail would queue forever. They are
+not in the hub roster and the bin refuses to start if any is listed in `CREW_BRIDGE_AGENTS`
+(override `CREW_BRIDGE_DENY_AGENTS` only if that roster changes).
+
+**One non-idempotent window.** The daemon assigns the event id, so the dedup entry is persisted only
+after the webhook 202. A bridge crash in the gap between the daemon's append and that persist loses
+the record; on restart the hub redelivers and a second event is POSTed, so the recipient sees the
+message twice. This is rare (a crash in that millisecond) and accepted; closing it needs a
+caller-supplied idempotency key on the webhook, out of scope here.
 
 When cleared: `systemctl --user start crew-messenger-bridge`, watch
 `journalctl --user -u crew-messenger-bridge -f`, confirm the hello + heartbeat, then send one

@@ -4,12 +4,14 @@
  *    agentbox, loopback daemon on STRING_PORT, the agreed token-file + state-dir paths);
  *  - every value is env-overridable; the agents list tolerates spaces/empties; STRING_DAEMON_URL
  *    wins over STRING_PORT; machineId falls back to bridgeId;
- *  - the launcher refuses to start with no agents (before any network/daemon contact).
+ *  - the launcher refuses to start with no agents (before any network/daemon contact);
+ *  - the launcher refuses to serve a Codex agent (they never read-ack), by default roster and when
+ *    the deny-list is overridden — also before any IO.
  */
 import path from 'path';
 import os from 'os';
 import { assert, section } from './runner.js';
-import { resolveBridgeConfig, startAgentboxBridge } from '../messenger/hub/bridge-bin.js';
+import { DEFAULT_CODEX_AGENTS, resolveBridgeConfig, startAgentboxBridge } from '../messenger/hub/bridge-bin.js';
 
 await section('bridge-bin: production defaults', async () => {
   const c = resolveBridgeConfig({});
@@ -64,4 +66,25 @@ await section('bridge-bin: refuses to start with no agents (before any IO)', asy
     threw = /serves no agents/.test((err as Error).message);
   }
   assert(threw, 'an empty agents list is a hard refusal, not a silent no-op');
+});
+
+await section('bridge-bin: default deny-list is the known Codex roster', async () => {
+  const c = resolveBridgeConfig({ CREW_BRIDGE_AGENTS: 'nova' });
+  assert(JSON.stringify(c.denyAgents) === JSON.stringify(DEFAULT_CODEX_AGENTS), 'deny-list defaults to the Codex roster');
+  const custom = resolveBridgeConfig({ CREW_BRIDGE_DENY_AGENTS: 'foo , bar ,' });
+  assert(JSON.stringify(custom.denyAgents) === JSON.stringify(['foo', 'bar']), 'deny-list is overridable and trimmed');
+});
+
+await section('bridge-bin: refuses to serve a Codex agent (before any IO)', async () => {
+  const neverFetch = (async () => {
+    throw new Error('fetch must not be called when a denied agent is listed');
+  }) as unknown as typeof fetch;
+  let threw = false;
+  try {
+    // milo is a Codex session on the default deny roster.
+    await startAgentboxBridge(resolveBridgeConfig({ CREW_BRIDGE_AGENTS: 'nova,milo' }), neverFetch);
+  } catch (err) {
+    threw = /Codex agent/.test((err as Error).message) && /milo/.test((err as Error).message);
+  }
+  assert(threw, 'a Codex agent in the serve list is a hard refusal naming the offender');
 });

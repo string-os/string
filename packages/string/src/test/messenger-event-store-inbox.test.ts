@@ -5,7 +5,9 @@
  *  - idempotent across a BRIDGE RESTART: a fresh inbox over the same persisted map re-attaches to
  *    the existing event on a repeat push — no second POST, no duplicate event;
  *  - a lost ack is recovered: a repeat push of an already-acked key re-asserts delivered (no POST);
- *  - a swept event (status gone) is treated as handled — the stale map entry is pruned;
+ *  - `gone` is disambiguated by the recorded ack: a stale-purged / never-acked event is NOT
+ *    delivered (dropped, logged, left for the hub to redeliver), while a gone-but-acked event
+ *    re-asserts delivered — so a swept pending message is never silently lost;
  *  - a failed webhook push throws (so the hub keeps the message queued) and records nothing;
  *  - close() stops the poller and rejects further pushes.
  *
@@ -128,23 +130,66 @@ await section('inbox: a lost ack is recovered — repeat push of an acked key re
   inbox.close();
 });
 
-await section('inbox: a swept (gone) event is treated as handled and the map entry is pruned', async () => {
+await section('inbox: a stale-purged (gone, never acked) event is NOT delivered — hub redelivers', async () => {
+  // The daemon's sweep() removes a NON-acked event once it passes the maxAge cap. That is a message
+  // no session ever read — firing delivered on it would silently lose it. The inbox must instead
+  // drop the entry, emit no ack, and let the next push (hub redelivery) re-POST a fresh event.
   const home = await tempHome();
   const mapPath = path.join(home, 'map.json');
-  const { fetchImpl } = fakeDaemon(home, 'nova');
+  const d1 = fakeDaemon(home, 'nova');
+  const acks: string[] = [];
+  const logs: string[] = [];
+  const inbox = new EventStoreInbox({
+    agentId: 'nova',
+    home,
+    webhookUrl: 'http://d/webhook/tok',
+    mapPath,
+    pollIntervalMs: 10,
+    fetchImpl: d1.fetchImpl,
+    onError: (m) => logs.push(m),
+  });
+  inbox.onAck((k) => acks.push(k));
+
+  await inbox.push('m1', '[from leo] hi');
+  // Real stale purge: the event is still pending (never acked), so the maxAge cap removes it.
+  const swept = await new EventStore(home).sweep({ retentionMs: 60_000, maxAgeMs: 0 });
+  assert(swept.purgedStale === 1 && swept.purgedAcked === 0, 'the pending event is stale-purged, not retention-purged');
+
+  await inbox.push('m1', '[from leo] hi'); // hub redelivery sees the event gone
+  await sleep(40);
+  assert(acks.length === 0, 'a never-acked gone event does NOT fire delivered');
+  assert(logs.some((l) => l.includes('NOT delivered')), 'the non-delivery is logged');
+  const persisted = JSON.parse(await fs.readFile(mapPath, 'utf-8')) as Record<string, unknown>;
+  assert(!('m1' in persisted), 'the undelivered entry is dropped so a fresh push can re-POST');
+
+  // The hub keeps redelivering; the next push is treated as new and re-POSTs a fresh event.
+  await inbox.push('m1', '[from leo] hi');
+  assert(d1.state.posts === 2, 'redelivery after a stale purge re-POSTs (the message is not lost)');
+  inbox.close();
+});
+
+await section('inbox: a gone event that WAS acked re-asserts delivered (retention sweep after read)', async () => {
+  // The realistic sweep: the session read-acked, then retention removed the event. We recorded the
+  // ack, so a later disappearance is delivered-then-swept — re-assert it (recovering a missed ack).
+  const home = await tempHome();
+  const mapPath = path.join(home, 'map.json');
+  const { fetchImpl, state } = fakeDaemon(home, 'nova');
   const acks: string[] = [];
   const inbox = new EventStoreInbox({ agentId: 'nova', home, webhookUrl: 'http://d/webhook/tok', mapPath, pollIntervalMs: 10, fetchImpl });
   inbox.onAck((k) => acks.push(k));
 
   await inbox.push('m1', '[from leo] hi');
   const ev = (await new EventStore(home).list())[0]!;
-  // The daemon's retention sweep removed the event after it was handled.
-  await fs.rm(path.join(home, 'events', `${ev.id}.json`), { force: true });
+  await new EventStore(home).ack(ev.id);
+  assert(await waitFor(() => acks.length === 1), 'delivered on the first read-ack');
 
-  await inbox.push('m1', '[from leo] hi'); // hub redelivery after the sweep
-  assert(await waitFor(() => acks.length >= 1), 'a gone event re-asserts delivered (assumed handled)');
-  const persisted = JSON.parse(await fs.readFile(mapPath, 'utf-8')) as Record<string, string>;
-  assert(!('m1' in persisted), 'the stale map entry is pruned');
+  // Retention removed the acked event; the hub (having missed our ack) redelivers it.
+  await fs.rm(path.join(home, 'events', `${ev.id}.json`), { force: true });
+  await inbox.push('m1', '[from leo] hi');
+  assert(state.posts === 1, 'no re-POST for a message we already delivered');
+  assert(await waitFor(() => acks.length === 2), 'a gone-but-acked event re-asserts delivered');
+  const persisted = JSON.parse(await fs.readFile(mapPath, 'utf-8')) as Record<string, { acked?: boolean }>;
+  assert(persisted.m1?.acked === true, 'the recorded ack persists so the delivered fact survives');
   inbox.close();
 });
 

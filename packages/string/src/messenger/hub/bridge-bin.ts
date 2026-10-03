@@ -25,10 +25,21 @@ export interface BridgeBinConfig {
   daemonBaseUrl: string;
   /** The agents this bridge serves — exactly the names the hub token authorizes. */
   agents: string[];
+  /**
+   * Agents this bridge must REFUSE to serve: Codex (node) sessions never read-ack String events,
+   * so the cc-channel inbox would never see a delivered and every message to them would queue
+   * forever. The daemon's agent registry exposes no runtime `kind`, so this can't be detected from
+   * the live state — it is a configured stop-list (default: the known Codex roster), and a start
+   * that lists any of them fails loudly rather than silently black-holing their mail.
+   */
+  denyAgents: string[];
   /** Directory for the per-agent dedup maps (0700, bridge-owned, outside any agent home). */
   stateDir: string;
   heartbeatIntervalMs: number;
 }
+
+/** Known Codex (node) sessions — they do not read-ack String events, so the cc bridge can't serve them. */
+export const DEFAULT_CODEX_AGENTS = ['atlas', 'milo', 'pike'];
 
 /** Resolve config from the environment with the production defaults. Pure (no IO) and testable. */
 export function resolveBridgeConfig(env: NodeJS.ProcessEnv = process.env): BridgeBinConfig {
@@ -43,6 +54,10 @@ export function resolveBridgeConfig(env: NodeJS.ProcessEnv = process.env): Bridg
       path.join(os.homedir(), '.config', 'crew-messenger', 'agentbox.token'),
     daemonBaseUrl: env.STRING_DAEMON_URL?.trim() || `http://127.0.0.1:${stringPort}`,
     agents: (env.CREW_BRIDGE_AGENTS ?? '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    denyAgents: (env.CREW_BRIDGE_DENY_AGENTS ?? DEFAULT_CODEX_AGENTS.join(','))
       .split(',')
       .map((s) => s.trim())
       .filter(Boolean),
@@ -109,6 +124,14 @@ export async function startAgentboxBridge(
 ): Promise<Bridge> {
   if (cfg.agents.length === 0) {
     throw new Error('CREW_BRIDGE_AGENTS is empty; refusing to start a bridge that serves no agents');
+  }
+  const denied = cfg.agents.filter((id) => cfg.denyAgents.includes(id));
+  if (denied.length) {
+    throw new Error(
+      `refusing to serve Codex agent(s) over the cc-channel bridge: ${denied.join(', ')} — ` +
+        'they do not read-ack String events, so their mail would queue forever. ' +
+        'Remove them from CREW_BRIDGE_AGENTS (or override CREW_BRIDGE_DENY_AGENTS if the roster changed).',
+    );
   }
   const token = await readToken(cfg.tokenFile);
   const homes = await resolveHomes(cfg.daemonBaseUrl, cfg.agents, fetchImpl);
