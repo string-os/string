@@ -58,6 +58,7 @@ export class FakeHub {
   readonly sends: Array<{ clientRef: string; from: string; to: string; body: string }> = [];
   readonly acks: Array<{ messageId: string; state: BridgeAckState }> = [];
   readonly errors: Array<{ reason: string; ref?: string }> = [];
+  readonly heartbeats: Array<{ machineId: string; atMs: number }> = [];
   /** Set a reason to refuse the hello handshake. */
   rejectHello: string | null = null;
   /** The version the hub advertises in helloOk (override to force a mismatch). */
@@ -105,6 +106,10 @@ export class FakeHub {
     }
     if (isFrame(f, 'error')) {
       this.errors.push({ reason: f.reason, ref: f.ref });
+      return;
+    }
+    if (isFrame(f, 'heartbeat')) {
+      this.heartbeats.push({ machineId: f.machineId, atMs: f.atMs });
       return;
     }
   }

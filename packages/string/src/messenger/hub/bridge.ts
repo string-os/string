@@ -31,7 +31,9 @@ export interface BridgeOptions {
   protocolVersion?: string;
   baseBackoffMs?: number;
   maxBackoffMs?: number;
-  /** Injectable clock (ms); defaults to Date.now. Used to expire the delivered-dedup map. */
+  /** How often to send a heartbeat once connected. Default 15s; 0 disables (S6 liveness). */
+  heartbeatIntervalMs?: number;
+  /** Injectable clock (ms); defaults to Date.now. Stamps heartbeats and expires the dedup map. */
   now?: () => number;
   onError?: (reason: string) => void;
 }
@@ -60,8 +62,10 @@ export class Bridge {
   private readonly protocolVersion: string;
   private readonly baseBackoffMs: number;
   private readonly maxBackoffMs: number;
+  private readonly heartbeatIntervalMs: number;
   private readonly now: () => number;
   private readonly onError?: (reason: string) => void;
+  private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
 
   private link: HubLink | null = null;
   private helloOk = false;
@@ -96,6 +100,7 @@ export class Bridge {
     this.protocolVersion = opts.protocolVersion ?? PROTOCOL_VERSION;
     this.baseBackoffMs = opts.baseBackoffMs ?? 500;
     this.maxBackoffMs = opts.maxBackoffMs ?? 30_000;
+    this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 15_000;
     this.now = opts.now ?? Date.now;
     this.onError = opts.onError;
   }
@@ -126,13 +131,33 @@ export class Bridge {
         token: this.token,
       });
     });
-    // helloOk received: flush any acks produced while we were disconnected.
+    // helloOk received: flush any acks produced while we were disconnected, then start the
+    // heartbeat so the hub can tell this bridge is alive (silence must look like silence, not calm).
     this.flushPendingAcks();
+    this.startHeartbeat();
+  }
+
+  private startHeartbeat(): void {
+    this.stopHeartbeat();
+    if (this.heartbeatIntervalMs <= 0) return;
+    this.heartbeatTimer = setInterval(() => {
+      if (this.link && this.helloOk) this.rawSend({ t: 'heartbeat', machineId: this.machineId, atMs: this.now() });
+    }, this.heartbeatIntervalMs);
+    // Don't keep the process alive just for heartbeats.
+    this.heartbeatTimer.unref?.();
+  }
+
+  private stopHeartbeat(): void {
+    if (this.heartbeatTimer) {
+      clearInterval(this.heartbeatTimer);
+      this.heartbeatTimer = null;
+    }
   }
 
   private handleClose(): void {
     this.link = null;
     this.helloOk = false;
+    this.stopHeartbeat();
     if (this.helloSettlers) {
       this.helloSettlers.reject(new Error('hub connection closed during handshake'));
       this.helloSettlers = null;
@@ -319,6 +344,7 @@ export class Bridge {
 
   async close(): Promise<void> {
     this.closing = true;
+    this.stopHeartbeat();
     for (const cancel of this.backoffWaiters) cancel();
     this.backoffWaiters.clear();
     for (const { reject } of this.pendingSends.values()) reject(new Error('bridge closing'));
