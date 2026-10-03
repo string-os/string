@@ -8,6 +8,7 @@ import { Browser } from '../index.js';
 import { EventStore } from '../events.js';
 import * as client from '@string-os/client';
 import { assert, section } from './runner.js';
+import { startDaemon, assertIsolatedEnv, HARNESS_PLACEHOLDER_PORT } from './daemon-harness.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(__dirname, '../cli.ts');
@@ -33,7 +34,8 @@ function makeEnv(): Env {
   // Placeholder only — startDaemon() allocates and installs a real OS-assigned free port (every
   // makeEnv() here is immediately followed by startDaemon(), and nothing contacts a daemon before
   // it). A fixed/random port in a shared range is exactly the #91 collision this avoids.
-  const port = 0;
+  // Never 0: an invalid STRING_PORT resolves to the live default 3923.
+  const port = HARNESS_PLACEHOLDER_PORT;
   // Hermetic env: the host session may export STRING_* vars (e.g. a String
   // plugin sets STRING_AGENT_ID), which would redirect CLI agent resolution
   // away from the agents these tests create. Strip them all, then set ours.
@@ -56,59 +58,14 @@ function runCli(
   args: string[],
   extraEnv: NodeJS.ProcessEnv = {},
 ): { code: number; stdout: string; stderr: string } {
+  const childEnv = { ...env.base, ...extraEnv };
+  assertIsolatedEnv(childEnv); // never let a CLI child resolve the live daemon / real ~/.string
   const r = spawnSync('npx', ['tsx', CLI, ...args], {
-    env: { ...env.base, ...extraEnv },
+    env: childEnv,
     encoding: 'utf-8',
     timeout: 30_000,
   });
   return { code: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
-}
-
-/** An OS-assigned free TCP port: the kernel confirms it is unbound, so it cannot be a squatter's. */
-async function freePort(): Promise<number> {
-  return new Promise((resolve, reject) => {
-    const srv = http.createServer();
-    srv.once('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const addr = srv.address();
-      const port = typeof addr === 'object' && addr ? addr.port : 0;
-      srv.close(() => (port ? resolve(port) : reject(new Error('could not resolve a free port'))));
-    });
-  });
-}
-
-async function startDaemon(env: Env, extraEnv: NodeJS.ProcessEnv = {}): Promise<{ stop: () => void }> {
-  // #91 root cause: a random port in a range shared by several test files birthday-collides with
-  // another section's daemon — or with one leaked by a failed teardown — and this helper would then
-  // ping-SUCCEED against that FOREIGN daemon (wrong data dir / wrong agents), so asserts like
-  // "webhook resolves target agent" trip intermittently. Fix: bind the daemon to an OS-assigned
-  // free port (one the kernel just confirmed is unbound, so never a squatter's), watch the child
-  // for an early exit (a lost bind race → EADDRINUSE), and retry on a fresh port. A ping can now
-  // only succeed against OUR daemon. Sections run sequentially and the probe→bind window is tiny,
-  // so a residual collision is vanishingly rare and self-heals through the retry.
-  for (let attempt = 0; attempt < 5; attempt++) {
-    const port = await freePort();
-    env.port = port;
-    env.base.STRING_PORT = String(port);
-    const child = spawn('npx', ['tsx', CLI, '--daemon', 'foreground', String(port)], {
-      env: { ...env.base, ...extraEnv },
-      detached: true,
-      stdio: 'ignore',
-    });
-    let exited = false;
-    child.once('exit', () => { exited = true; });
-    child.unref();
-    const stop = (): void => { try { process.kill(-child.pid!); } catch { /* already gone */ } };
-    let up = false;
-    for (let i = 0; i < 100; i++) {
-      if (exited) break; // bind race or crash — abandon this port and retry on a fresh one
-      if (await client.ping(port)) { up = true; break; }
-      await new Promise(r => setTimeout(r, 100));
-    }
-    if (up) return { stop };
-    stop(); // tear down the failed attempt before retrying so it can't leak and squat the port
-  }
-  throw new Error('daemon did not come up after 5 attempts on fresh free ports');
 }
 
 function stopSpawned(child: ReturnType<typeof spawn> | null): void {
@@ -518,6 +475,7 @@ await section('events — local webhook appends text to current agent inbox', as
     watcher.close();
     assert(watched?.agentId === 'hooked', 'SDK watcher receives agent event');
 
+    assertIsolatedEnv(env.base); // the --mcp child is a CLI child too: never the live daemon
     channel = spawn('npx', ['tsx', CLI, '--mcp', '--agent', 'hooked'], {
       env: env.base,
       detached: true,

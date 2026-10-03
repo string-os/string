@@ -16,6 +16,7 @@ import './cli-args.test.js';
 import './references.test.js';
 import './client.test.js';
 import './agent-config.test.js';
+import './port-resolver.test.js';
 import './agent-cli.test.js';
 import './agents-provisioning.test.js';
 import './capability.test.js';

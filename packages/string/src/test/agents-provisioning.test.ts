@@ -11,13 +11,9 @@ import fs from 'fs';
 import http from 'http';
 import os from 'os';
 import path from 'path';
-import { fileURLToPath } from 'url';
-import { spawn } from 'child_process';
 import * as client from '@string-os/client';
 import { assert, section } from './runner.js';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const CLI = path.resolve(__dirname, '../cli.ts');
+import { startDaemon, HARNESS_PLACEHOLDER_PORT } from './daemon-harness.js';
 const HOUR = 60 * 60 * 1000;
 
 interface Env {
@@ -28,7 +24,7 @@ interface Env {
 
 function makeEnv(): Env {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'string-provision-'));
-  const port = 23000 + Math.floor(Math.random() * 9000);
+  const port = HARNESS_PLACEHOLDER_PORT; // overwritten by startDaemon() with a verified free port (see #91); never 0 (would resolve to live 3923)
   const inherited: NodeJS.ProcessEnv = { ...process.env };
   for (const key of Object.keys(inherited)) {
     if (key.startsWith('STRING_')) delete inherited[key];
@@ -43,22 +39,6 @@ function makeEnv(): Env {
     STRING_NO_AGENT_RECOVERY: '1',
   };
   return { root, port, base };
-}
-
-async function startDaemon(env: Env): Promise<{ stop: () => void }> {
-  const child = spawn('npx', ['tsx', CLI, '--daemon', 'foreground', String(env.port)], {
-    env: env.base,
-    detached: true,
-    stdio: 'ignore',
-  });
-  child.unref();
-  for (let i = 0; i < 100; i++) {
-    if (await client.ping(env.port)) break;
-    await new Promise(r => setTimeout(r, 100));
-  }
-  return {
-    stop: () => { try { process.kill(-child.pid!); } catch { /* already gone */ } },
-  };
 }
 
 function postText(port: number, urlPath: string, text: string): Promise<{ status: number; body: string }> {

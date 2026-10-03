@@ -9,9 +9,10 @@ import http from 'http';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { spawn, spawnSync } from 'child_process';
+import { spawnSync } from 'child_process';
 import * as client from '@string-os/client';
 import { assert, section } from './runner.js';
+import { startDaemon, assertIsolatedEnv, HARNESS_PLACEHOLDER_PORT } from './daemon-harness.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CLI = path.resolve(__dirname, '../cli.ts');
@@ -25,7 +26,7 @@ interface Env {
 
 function makeEnv(): Env {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'string-capissue-'));
-  const port = 23000 + Math.floor(Math.random() * 9000);
+  const port = HARNESS_PLACEHOLDER_PORT; // overwritten by startDaemon() with a verified free port (see #91); never 0 (would resolve to live 3923)
   const inherited: NodeJS.ProcessEnv = { ...process.env };
   for (const key of Object.keys(inherited)) {
     if (key.startsWith('STRING_')) delete inherited[key];
@@ -43,28 +44,13 @@ function makeEnv(): Env {
 }
 
 function runCli(env: Env, args: string[]): { code: number; stdout: string; stderr: string } {
+  assertIsolatedEnv(env.base); // never let a CLI child resolve the live daemon / real ~/.string
   const r = spawnSync('npx', ['tsx', CLI, ...args], {
     env: env.base,
     encoding: 'utf-8',
     timeout: 30_000,
   });
   return { code: r.status ?? -1, stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
-}
-
-async function startDaemon(env: Env): Promise<{ stop: () => void }> {
-  const child = spawn('npx', ['tsx', CLI, '--daemon', 'foreground', String(env.port)], {
-    env: env.base,
-    detached: true,
-    stdio: 'ignore',
-  });
-  child.unref();
-  for (let i = 0; i < 100; i++) {
-    if (await client.ping(env.port)) break;
-    await new Promise(r => setTimeout(r, 100));
-  }
-  return {
-    stop: () => { try { process.kill(-child.pid!); } catch { /* already gone */ } },
-  };
 }
 
 function rawGet(port: number, urlPath: string): Promise<{ status: number; body: Buffer }> {
