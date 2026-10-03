@@ -57,6 +57,8 @@ export function createMemoryTransportPair(): { client: AppServerTransport; serve
 export class FakeCodexAppServer {
   readonly receivedMethods: string[] = [];
   readonly turnStarts: TurnStartParams[] = [];
+  /** When true, turn/start is recorded but never answered — simulates a hung app-server. */
+  silentTurnStart = false;
   private transport: AppServerTransport | null = null;
   private turnCounter = 0;
   private itemCounter = 0;
@@ -98,6 +100,7 @@ export class FakeCodexAppServer {
       case METHODS.turnStart: {
         const p = f.params as TurnStartParams;
         this.turnStarts.push(p);
+        if (this.silentTurnStart) return; // hung server: accept nothing back
         const started = this.activeTurnId === null;
         if (started) this.activeTurnId = `turn-${++this.turnCounter}`;
         const turnId = this.activeTurnId as string;

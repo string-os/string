@@ -105,3 +105,93 @@ await section('codex adapter: INTERRUPT reserved for human identities (founder/c
   assert(agent.acks.some((a) => a.messageId === 'm2'), 'non-human message delivered via steer');
   await agent.adapter.close();
 });
+
+await section('codex adapter: a dropped connection retries with capped backoff until it recovers', async () => {
+  const fake = new FakeCodexAppServer(THREAD);
+  const acks: DeliveryAck[] = [];
+  let connectCalls = 0;
+  const adapter = new CodexAppserverAdapter({
+    threadId: THREAD,
+    // start() is call #1 (ok); the first two RECONNECT attempts are refused (app-server still
+    // restarting), the next succeeds — proving one failure does not kill the adapter.
+    connect: () => {
+      connectCalls += 1;
+      if (connectCalls === 2 || connectCalls === 3) return Promise.reject(new Error('app-server down'));
+      return fake.connect();
+    },
+    onAck: (a) => acks.push(a),
+    baseBackoffMs: 2,
+    maxBackoffMs: 8,
+  });
+  await adapter.start();
+  await adapter.deliver({ id: 'm1', from: 'leo', to: 'nova', body: 'before drop' });
+  await tick();
+
+  fake.dropConnection();
+  await tick(); // let handleClose install the reconnect loop
+
+  // deliver() awaits readiness, so this resolves only after the backoff retries reconnect.
+  await adapter.deliver({ id: 'm2', from: 'leo', to: 'nova', body: 'after recovery' });
+  await tick();
+
+  assert(connectCalls >= 4, 'retried past the two refusals (start + 3 reconnect attempts)');
+  assert(acks.some((a) => a.messageId === 'm2' && a.state === 'delivered'), 'delivered after recovery');
+  assert(fake.receivedMethods.filter((m) => m === 'thread/resume').length >= 2, 'resumed again after recovery');
+  await adapter.close();
+});
+
+await section('codex adapter: a hung app-server times out deliver() and is treated as a drop', async () => {
+  const fake = new FakeCodexAppServer(THREAD);
+  const acks: DeliveryAck[] = [];
+  const adapter = new CodexAppserverAdapter({
+    threadId: THREAD,
+    connect: fake.connect,
+    onAck: (a) => acks.push(a),
+    requestTimeoutMs: 20,
+    baseBackoffMs: 2,
+    maxBackoffMs: 8,
+  });
+  await adapter.start();
+  fake.silentTurnStart = true; // next turn/start never gets a response
+
+  let threw = false;
+  try {
+    await adapter.deliver({ id: 'm1', from: 'leo', to: 'nova', body: 'into the void' });
+  } catch (e) {
+    threw = true;
+    assert(/timed out/.test((e as Error).message), 'deliver() rejected with a timeout, not a hang');
+  }
+  assert(threw, 'deliver() surfaced a failure the hub can act on');
+
+  // The timeout closed the hung socket; recover and prove the pending-delivery was cleaned
+  // (no late delivered ack for the timed-out message).
+  fake.silentTurnStart = false;
+  await tick(10); // allow the reconnect loop to re-resume
+  await adapter.deliver({ id: 'm2', from: 'leo', to: 'nova', body: 'after recovery' });
+  await tick();
+  assert(!acks.some((a) => a.messageId === 'm1'), 'timed-out message never acked delivered (entry cleaned)');
+  assert(acks.some((a) => a.messageId === 'm2' && a.state === 'delivered'), 'recovered and delivered m2');
+  await adapter.close();
+});
+
+await section('codex adapter: reports the effective mode when interrupt degrades to steer', async () => {
+  const changes: Array<{ messageId: string; requested: DeliveryMode; effective: DeliveryMode }> = [];
+  const fake = new FakeCodexAppServer(THREAD);
+  const adapter = new CodexAppserverAdapter({
+    threadId: THREAD,
+    connect: fake.connect,
+    onAck: () => {},
+    isHuman: (f) => f === 'founder',
+    onModeChange: (i) => changes.push(i),
+  });
+  await adapter.start();
+  // No active turn yet → even a founder interrupt degrades to steer and is reported.
+  await adapter.deliver({ id: 'm1', from: 'founder', to: 'nova', body: 'stop' }, { mode: 'interrupt' });
+  await tick();
+  assert(changes.length === 1, 'one mode-change reported');
+  assert(
+    changes[0]?.messageId === 'm1' && changes[0]?.requested === 'interrupt' && changes[0]?.effective === 'steer',
+    'founder interrupt with no active turn degraded to steer and was reported',
+  );
+  await adapter.close();
+});
