@@ -182,6 +182,67 @@ function collectSSE(port: number, agentId: string, windowMs: number): Promise<Ar
   });
 }
 
+/**
+ * Collect SSE 'event' frames until `done(events)` holds, then resolve immediately — or at
+ * `timeoutMs` as a failure ceiling. Unlike collectSSE's fixed window, a positive backfill
+ * assertion waits on the EVENT, not the clock: it returns the instant the event arrives, so a
+ * slow-under-load backfill lengthens the wait instead of failing it (the fixed-window race, #85).
+ */
+function collectSSEUntil(
+  port: number,
+  agentId: string,
+  done: (events: Array<{ text?: string }>) => boolean,
+  timeoutMs = 5000,
+): Promise<Array<{ text?: string }>> {
+  return new Promise(resolve => {
+    const events: Array<{ text?: string }> = [];
+    let settled = false;
+    let req: http.ClientRequest;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      req.destroy();
+      resolve(events);
+    };
+    const timer = setTimeout(finish, timeoutMs);
+    req = http.request(
+      { hostname: '127.0.0.1', port, path: '/events/stream', method: 'GET', headers: { 'X-Agent-Id': agentId }, agent: false },
+      res => {
+        let buf = '';
+        res.setEncoding('utf-8');
+        res.on('data', chunk => {
+          buf += chunk;
+          let idx: number;
+          while ((idx = buf.indexOf('\n\n')) !== -1) {
+            const frame = buf.slice(0, idx);
+            buf = buf.slice(idx + 2);
+            const lines = frame.split('\n');
+            const isEvent = lines.some(l => l.startsWith('event: ') && l.slice(7).trim() === 'event');
+            const dataLine = lines.find(l => l.startsWith('data: '));
+            if (isEvent && dataLine) {
+              try { events.push(JSON.parse(dataLine.slice(6))); } catch { /* ignore */ }
+            }
+          }
+          if (done(events)) finish();
+        });
+      },
+    );
+    req.on('error', () => { /* destroyed on finish */ });
+    req.end();
+  });
+}
+
+/** Poll GET /events/count until an agent's `delivered` hits `target`. Returns false on timeout. */
+async function waitForDelivered(port: number, agentId: string, target: number, timeoutMs: number): Promise<boolean> {
+  const started = Date.now();
+  while (Date.now() - started <= timeoutMs) {
+    if ((await client.eventCount(port, agentId)).delivered === target) return true;
+    await wait(50);
+  }
+  return (await client.eventCount(port, agentId)).delivered === target;
+}
+
 /** Poll GET /events/count until an agent's `unacked` hits `target` (async
  *  predicate — `waitFor` only takes a sync one). Returns false on timeout. */
 async function waitForUnacked(port: number, agentId: string, target: number, timeoutMs: number): Promise<boolean> {
@@ -549,13 +610,19 @@ await section('events — a fresh consumer past grace is not re-flooded (server-
     assert((await postText(webhookUrl!, 'cron tick during downtime')).status === 202, 'webhook accepted');
 
     // First fresh consumer connects: the pending event is backfilled once, then
-    // marked delivered server-side.
-    const first = await collectSSE(env.port, 'grace', 900);
+    // marked delivered server-side. Wait on the event's ARRIVAL, not a fixed window (#85).
+    const first = await collectSSEUntil(env.port, 'grace', evs => evs.some(e => e.text === 'cron tick during downtime'));
     assert(first.some(e => e.text === 'cron tick during downtime'), 'first fresh connect backfills the pending event');
 
+    // Gate the negative on a deterministic fact: the server has marked the event delivered.
+    // This removes the cascade where a slow first backfill left the event pending and the
+    // second consumer then (correctly) received it.
+    assert(await waitForDelivered(env.port, 'grace', 1, 5000), 'event is marked delivered server-side after the first connect');
+
     // Second fresh consumer (a different process — no shared cache). grace=0 means
-    // the now-delivered event is past-grace → it must NOT be replayed.
-    const second = await collectSSE(env.port, 'grace', 900);
+    // the now-delivered event is past-grace → it must NOT be replayed. A short settle
+    // window is a legitimate absence check here, not a race (the delivered gate above is met).
+    const second = await collectSSE(env.port, 'grace', 700);
     assert(second.length === 0, 'second fresh connect is NOT re-flooded (delivered + past grace)');
   } finally {
     daemon.stop();
