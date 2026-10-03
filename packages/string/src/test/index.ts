@@ -29,5 +29,7 @@ import './misc.test.js';
 import './messenger-codex.test.js';
 import './messenger-cc.test.js';
 import './messenger-bridge.test.js';
+import './messenger-event-store-inbox.test.js';
+import './messenger-bridge-bin.test.js';
 import { printSummary } from './runner.js';
 printSummary();
