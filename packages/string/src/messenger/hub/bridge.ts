@@ -131,7 +131,10 @@ export class Bridge {
     this.link = link;
     this.helloOk = false;
     link.onFrame((f) => this.handleFrame(f));
-    link.onClose(() => this.handleClose());
+    // Guard by identity: a superseded link can fire onClose late (on a real half-open socket the
+    // close handshake may not resolve for a long time), and by then we may already be on a fresh
+    // link — that stale callback must not tear the new one down.
+    link.onClose(() => this.onLinkClose(link));
     await new Promise<void>((resolve, reject) => {
       this.helloSettlers = { resolve, reject };
       this.rawSend({
@@ -156,7 +159,7 @@ export class Bridge {
     this.heartbeatTimer = setInterval(() => {
       if (this.link && this.helloOk) this.rawSend({ t: 'heartbeat', machineId: this.machineId, atMs: this.now() });
       // Two-way liveness: a half-open socket leaves us "connected" while every send stalls. If the
-      // hub has not made a sound within the limit, drop the link so handleClose reconnects us.
+      // hub has not made a sound within the limit, detach the link so we reconnect (see below).
       this.checkHubLiveness();
     }, this.heartbeatIntervalMs);
     // Don't keep the process alive just for heartbeats.
@@ -175,7 +178,12 @@ export class Bridge {
     const silentForMs = this.now() - this.lastHeardMs;
     if (silentForMs < this.hubSilenceLimitMs) return false;
     this.onError?.(`hub silent for ${silentForMs}ms (limit ${this.hubSilenceLimitMs}ms) — dropping to reconnect`);
-    this.link.close(); // → handleClose → reconnectLoop (re-hello on a fresh link)
+    // A half-open socket is exactly the case where close() may NOT fire onClose for a long time
+    // (the close handshake hangs). So detach LOCALLY and reconnect now, then close the dead socket
+    // best-effort for cleanup — its onClose, whenever it fires, is ignored by the identity guard.
+    const dead = this.link;
+    this.detachAndReconnect();
+    try { dead.close(); } catch { /* best-effort */ }
     return true;
   }
 
@@ -186,7 +194,19 @@ export class Bridge {
     }
   }
 
-  private handleClose(): void {
+  /** A link reported it closed. Act only if it is still the current link (ignore stale callbacks). */
+  private onLinkClose(link: HubLink): void {
+    if (link !== this.link) return;
+    this.detachAndReconnect();
+  }
+
+  /**
+   * Drop the current link locally and start reconnecting. Does NOT wait for any close handshake —
+   * the caller detaches first and closes the old socket best-effort, so a half-open socket (whose
+   * onClose may never fire) cannot wedge the reconnect. Idempotent: a second call while already
+   * reconnecting is a no-op.
+   */
+  private detachAndReconnect(): void {
     this.link = null;
     this.helloOk = false;
     this.stopHeartbeat();
@@ -250,7 +270,7 @@ export class Bridge {
     return new Promise<SendOutcome>((resolve, reject) => {
       // `ready` resolving does not guarantee the link is still up — it may have dropped in the
       // microtask gap since. Check before registering so send() rejects instead of hanging forever
-      // (a drop AFTER we register is caught by handleClose, which rejects every pending send).
+      // (a drop AFTER we register is caught by detachAndReconnect, which rejects every pending send).
       if (!this.link || !this.helloOk) {
         reject(new Error('hub connection not ready (dropped before send)'));
         return;

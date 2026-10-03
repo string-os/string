@@ -293,7 +293,7 @@ await section('bridge/S6c: checkHubLiveness drops a hub-silent link past the lim
   const hellosBefore = hub.hellos.length;
   nowMs += 2; // 101ms of silence ≥ the 100ms limit
   assert(bridge.checkHubLiveness() === true, 'past the limit: the silent link is dropped');
-  await tick(); // handleClose runs; reconnectLoop is held at the gated connect
+  await tick(); // detachAndReconnect runs; reconnectLoop is held at the gated connect
   assert(!hub.connected, 'link is down (reconnect is gated)');
   assert(errors.some((e) => /hub silent/.test(e)), 'surfaced the silence via onError');
 
@@ -334,6 +334,40 @@ await section('bridge/S6c: a half-open socket (hub stops echoing, no close) is d
   hub.goLoud(); // the hub answers again
   const beatsAtRecovery = hub.heartbeats.length;
   assert(await waitUntil(() => hub.heartbeats.length > beatsAtRecovery, 3000), 'heartbeats resume once the hub answers again');
+  await bridge.close();
+});
+
+await section('bridge/S6c: a half-open socket whose close() never fires onClose still reconnects', async () => {
+  // The real hazard: on a half-open socket close() may not fire onClose until a TCP timeout. The
+  // silence path must detach LOCALLY (not wait on the close handshake), so reconnect proceeds even
+  // though the dead link's onClose never arrives.
+  let nowMs = 2_000_000;
+  const { hub, bridge } = setup({ hubSilenceLimitMs: 100, now: () => nowMs });
+  hub.swallowClientClose = true; // client links mark closed but never invoke onClose
+  await bridge.start();
+  const hellosBefore = hub.hellos.length;
+
+  nowMs += 101; // silent past the limit
+  assert(bridge.checkHubLiveness() === true, 'silence tripped the drop');
+  assert(await waitUntil(() => hub.hellos.length > hellosBefore), 'reconnected without waiting on the (never-firing) close handshake');
+  await bridge.close();
+});
+
+await section('bridge/S6c: a stale link closing late does not tear down the reconnected link', async () => {
+  // After a local detach + reconnect, the OLD link's onClose can still fire. The bridge guards each
+  // link's onClose by identity, so that late callback is a no-op and the fresh link survives.
+  let nowMs = 3_000_000;
+  const { hub, bridge, adapter } = setup({ hubSilenceLimitMs: 100, now: () => nowMs });
+  await bridge.start();
+  const hellosBefore = hub.hellos.length;
+
+  nowMs += 101;
+  assert(bridge.checkHubLiveness() === true, 'silence tripped the drop');
+  assert(await waitUntil(() => hub.hellos.length > hellosBefore), 'reconnected on a fresh link');
+  // The dead link's onClose fired (best-effort close above); the fresh link must still deliver.
+  await tick();
+  hub.deliver(stamped('mx', 'leo', 'nova', 'after a late stale close'));
+  assert(await waitUntil(() => adapter.delivered.some((m) => m.id === 'mx')), 'fresh link still delivers (stale onClose ignored)');
   await bridge.close();
 });
 
