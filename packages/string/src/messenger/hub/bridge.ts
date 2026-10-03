@@ -42,6 +42,17 @@ export interface BridgeOptions {
   /** Injectable clock (ms); defaults to Date.now. Stamps heartbeats and expires the dedup map. */
   now?: () => number;
   onError?: (reason: string) => void;
+  /**
+   * Fired after each successful hello — the first connect and every reconnect (`reconnect: true`).
+   * For journal/observability only; it must never throw into the link (a throw is swallowed).
+   */
+  onConnect?: (info: { reconnect: boolean }) => void;
+  /**
+   * Fired when the current link drops and we will reconnect, with a short reason. For
+   * journal/observability only; never throws into the link. The half-open silence drop is reported
+   * via {@link onError} instead (it carries the measured silence), so this fires for a link close.
+   */
+  onDrop?: (reason: string) => void;
 }
 
 /** How long a delivered message id is remembered for redelivery dedup before it is forgotten. */
@@ -73,6 +84,10 @@ export class Bridge {
   private readonly hubSilenceLimitMs: number;
   private readonly now: () => number;
   private readonly onError?: (reason: string) => void;
+  private readonly onConnect?: (info: { reconnect: boolean }) => void;
+  private readonly onDrop?: (reason: string) => void;
+  /** True once the first hello has succeeded, so onConnect can distinguish a reconnect. */
+  private hasConnected = false;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   /** The ms of the last frame heard from the hub (any frame = a sign of life). 0 until connected. */
   private lastHeardMs = 0;
@@ -114,6 +129,8 @@ export class Bridge {
     this.hubSilenceLimitMs = opts.hubSilenceLimitMs ?? 3 * this.heartbeatIntervalMs;
     this.now = opts.now ?? Date.now;
     this.onError = opts.onError;
+    this.onConnect = opts.onConnect;
+    this.onDrop = opts.onDrop;
   }
 
   /** Register (or replace) the adapter serving a recipient agent. */
@@ -151,6 +168,13 @@ export class Bridge {
     this.lastHeardMs = this.now();
     this.flushPendingAcks();
     this.startHeartbeat();
+    const reconnect = this.hasConnected;
+    this.hasConnected = true;
+    try {
+      this.onConnect?.({ reconnect });
+    } catch {
+      /* observability callback must never break the link */
+    }
   }
 
   private startHeartbeat(): void {
@@ -197,6 +221,16 @@ export class Bridge {
   /** A link reported it closed. Act only if it is still the current link (ignore stale callbacks). */
   private onLinkClose(link: HubLink): void {
     if (link !== this.link) return;
+    // A real drop of the live link (clean FIN from the hub, or a network close). The half-open
+    // silence path detaches locally first (this.link is already cleared when its best-effort
+    // close() later fires onClose), so it never reaches here — that drop is reported via onError.
+    if (!this.closing && !this.fatal) {
+      try {
+        this.onDrop?.('hub closed the link');
+      } catch {
+        /* observability callback must never break the reconnect */
+      }
+    }
     this.detachAndReconnect();
   }
 

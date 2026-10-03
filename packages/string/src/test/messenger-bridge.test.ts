@@ -44,6 +44,8 @@ async function waitUntil(cond: () => boolean, timeoutMs = 2000, stepMs = 5): Pro
 function setup(opts?: { baseBackoffMs?: number; heartbeatIntervalMs?: number; hubSilenceLimitMs?: number; now?: () => number }) {
   const hub = new FakeHub();
   const errors: string[] = [];
+  const connects: Array<{ reconnect: boolean }> = [];
+  const drops: string[] = [];
   const bridge = new Bridge({
     bridgeId: 'bridge-agentbox',
     machineId: 'agentbox',
@@ -55,10 +57,12 @@ function setup(opts?: { baseBackoffMs?: number; heartbeatIntervalMs?: number; hu
     heartbeatIntervalMs: opts?.heartbeatIntervalMs ?? 0, // off by default in tests
     now: opts?.now,
     onError: (r) => errors.push(r),
+    onConnect: (info) => connects.push(info),
+    onDrop: (r) => drops.push(r),
   });
   const adapter = new FakeInboundAdapter((a) => bridge.reportAck(a));
   bridge.register('nova', adapter);
-  return { hub, bridge, adapter, errors };
+  return { hub, bridge, adapter, errors, connects, drops };
 }
 
 await section('bridge: versioned hello handshake resolves start', async () => {
@@ -135,6 +139,39 @@ await section('bridge: a dropped connection reconnects, re-hellos, and keeps del
   await tick();
   assert(hub.hellos.length >= 2, 're-hello after reconnect');
   assert(adapter.delivered.some((m) => m.id === 'm1'), 'delivered after reconnect');
+  await bridge.close();
+});
+
+await section('bridge: onConnect/onDrop report the link history — first connect, then drop + reconnect', async () => {
+  const { hub, bridge, connects, drops } = setup();
+  await bridge.start();
+  assert(connects.length === 1 && connects[0]?.reconnect === false, 'first connect fires onConnect with reconnect=false');
+  assert(drops.length === 0, 'no drop reported on a clean start');
+
+  hub.drop();
+  assert(await waitUntil(() => drops.length === 1), 'a link close fires onDrop with a reason');
+  assert(/closed the link/.test(drops[0] ?? ''), 'the drop reason names the link close');
+  assert(await waitUntil(() => connects.length === 2), 'the reconnect fires onConnect again');
+  assert(connects[1]?.reconnect === true, 'the second connect is flagged reconnect=true');
+  await bridge.close();
+});
+
+await section('bridge: a half-open silence drop is reported via onError, not a spurious onDrop', async () => {
+  // The silence path detaches locally and closes the dead socket best-effort; its late onClose must
+  // not fire a second (spurious) onDrop. The drop is surfaced through onError (it carries the
+  // measured silence), and the subsequent recovery still fires onConnect(reconnect=true).
+  let clock = 1_000_000;
+  const { hub, bridge, errors, connects, drops } = setup({
+    heartbeatIntervalMs: 10,
+    hubSilenceLimitMs: 100,
+    now: () => clock,
+  });
+  await bridge.start();
+  assert(connects.length === 1, 'connected once');
+  clock += 1000; // jump past the silence limit; the heartbeat timer trips checkHubLiveness
+  assert(await waitUntil(() => errors.some((e) => /hub silent/.test(e))), 'silence surfaced via onError');
+  assert(await waitUntil(() => connects.length === 2 && connects[1]?.reconnect === true), 'recovered with a reconnect');
+  assert(drops.length === 0, 'the half-open drop did NOT fire a spurious onDrop (onError owns it)');
   await bridge.close();
 });
 

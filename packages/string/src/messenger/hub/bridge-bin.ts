@@ -143,6 +143,18 @@ export async function startAgentboxBridge(
     connect: () => connectWebSocket(cfg.hubUrl),
     heartbeatIntervalMs: cfg.heartbeatIntervalMs,
     onError: (reason) => console.error(`[bridge ${cfg.bridgeId}] ${reason}`),
+    // Log the full link history to the journal: each (re)connect and each drop with a reason, not
+    // just the first connect — so systemd's journal shows when the bridge flapped and why.
+    onConnect: ({ reconnect }) => {
+      if (reconnect) {
+        console.log(`[bridge ${cfg.bridgeId}] reconnected to ${cfg.hubUrl}`);
+      } else {
+        console.log(
+          `[bridge ${cfg.bridgeId}] connected to ${cfg.hubUrl}; serving ${cfg.agents.length} agent(s): ${cfg.agents.join(', ')}`,
+        );
+      }
+    },
+    onDrop: (reason) => console.log(`[bridge ${cfg.bridgeId}] link dropped: ${reason}; reconnecting`),
   });
 
   for (const agentId of cfg.agents) {
@@ -159,10 +171,9 @@ export async function startAgentboxBridge(
     bridge.register(agentId, adapter);
   }
 
+  // The first-connect line is emitted by onConnect (fired during start()), together with every
+  // reconnect — so there is one consistent connect log, not a special-cased first one here.
   await bridge.start();
-  console.log(
-    `[bridge ${cfg.bridgeId}] connected to ${cfg.hubUrl}; serving ${cfg.agents.length} agent(s): ${cfg.agents.join(', ')}`,
-  );
   return bridge;
 }
 
