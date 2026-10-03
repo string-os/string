@@ -26,5 +26,6 @@ import './fs.test.js';
 import './recovery.test.js';
 import './string-root.test.js';
 import './misc.test.js';
+import './messenger-codex.test.js';
 import { printSummary } from './runner.js';
 printSummary();
