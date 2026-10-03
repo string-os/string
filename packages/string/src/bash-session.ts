@@ -145,11 +145,14 @@ export class BashSession {
     // 1. Run the user command
     // 2. Capture exit code in __string_ec
     // 3. Print marker line: MARKER|exitcode|cwd
+    // The marker is split across a shell string break (see _splitMarker) so that if the PTY is
+    // still echoing input (stty -echo not yet applied — a race under load), the echoed command
+    // line does NOT contain the contiguous marker and cannot be mistaken for the real output line.
     const wrappedCmd =
       `${command}\n` +
       `__string_ec=$?\n` +
       `echo ""\n` +
-      `echo "${marker}|$__string_ec|$(pwd)"\n`;
+      `echo "${this._splitMarker(marker)}|$__string_ec|$(pwd)"\n`;
 
     const raw = await this._sendAndWait(wrappedCmd, marker, timeoutMs);
 
@@ -226,15 +229,26 @@ export class BashSession {
   }
 
   private async _probe(): Promise<void> {
-    // Disable echo and wait for confirmation marker.
-    // Use && to guarantee stty completes before echo.
+    // Disable echo and wait for the confirmation marker. `&&` guarantees stty completes before the
+    // echo runs, and the SPLIT marker (see _splitMarker) guarantees we resolve on the marker bash
+    // actually PRINTS — i.e. after `stty -echo` ran — not on the input line the PTY may echo back
+    // before bash even parses it. So by the time this returns, echo is genuinely off (waiting on
+    // the fact, not a fixed delay).
     const nonce = crypto.randomBytes(4).toString('hex');
     const marker = `${MARKER_PREFIX}${nonce}`;
-    await this._sendAndWait(`stty -echo && echo "${marker}"\n`, marker, 5000);
+    await this._sendAndWait(`stty -echo && echo "${this._splitMarker(marker)}"\n`, marker, 5000);
     this._buffer = '';
-    // Small delay to let the terminal driver fully apply stty settings
-    await new Promise(r => setTimeout(r, 50));
-    this._buffer = '';
+  }
+
+  /**
+   * Build an echo argument that prints `marker` CONTIGUOUSLY when executed, but whose SOURCE text
+   * (what the PTY may echo back before `stty -echo` applies) does not contain the contiguous marker
+   * — the two halves are separated by an empty shell string `""`, which bash drops on execution.
+   * This makes marker detection immune to echo timing instead of relying on a fixed settle window.
+   */
+  private _splitMarker(marker: string): string {
+    const half = Math.ceil(marker.length / 2);
+    return `${marker.slice(0, half)}""${marker.slice(half)}`;
   }
 
   private _clearTimeout(): void {
