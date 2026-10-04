@@ -32,5 +32,6 @@ import './messenger-cc.test.js';
 import './messenger-bridge.test.js';
 import './messenger-event-store-inbox.test.js';
 import './messenger-bridge-bin.test.js';
+import './messenger-bridge-send.test.js';
 import { printSummary } from './runner.js';
 printSummary();
