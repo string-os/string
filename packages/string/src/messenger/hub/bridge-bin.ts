@@ -1,8 +1,10 @@
 import { readFile } from 'fs/promises';
+import http from 'http';
 import os from 'os';
 import path from 'path';
 import { Bridge } from './bridge.js';
 import { connectWebSocket } from './link-websocket.js';
+import { createSendServer } from './bridge-send-server.js';
 import { CcChannelAdapter } from '../cc/adapter.js';
 import { EventStoreInbox } from '../cc/event-store-inbox.js';
 
@@ -36,6 +38,13 @@ export interface BridgeBinConfig {
   /** Directory for the per-agent dedup maps (0700, bridge-owned, outside any agent home). */
   stateDir: string;
   heartbeatIntervalMs: number;
+  /**
+   * Loopback port for the OUTBOUND `POST /send` listener, through which a local agent sends a
+   * cross-machine message (see {@link createSendServer}). Always bound to 127.0.0.1. Default 3941
+   * (the hub's dev default is 3940; the send listener takes the next port so the two never collide
+   * if both ever run on one box).
+   */
+  sendPort: number;
 }
 
 /** Known Codex (node) sessions — they do not read-ack String events, so the cc bridge can't serve them. */
@@ -65,6 +74,7 @@ export function resolveBridgeConfig(env: NodeJS.ProcessEnv = process.env): Bridg
       env.CREW_BRIDGE_STATE_DIR?.trim() ||
       path.join(os.homedir(), '.local', 'state', 'crew-messenger-bridge'),
     heartbeatIntervalMs: Number(env.CREW_BRIDGE_HEARTBEAT_MS) || 15_000,
+    sendPort: Number(env.CREW_BRIDGE_SEND_PORT) || 3941,
   };
 }
 
@@ -177,9 +187,38 @@ export async function startAgentboxBridge(
   return bridge;
 }
 
+/**
+ * Start the loopback `POST /send` listener that lets local agents send through this bridge. Bound to
+ * 127.0.0.1 only; `from` is constrained to the agents this bridge serves and the hub stamps the real
+ * sender. Resolves once bound. Separate from {@link startAgentboxBridge} so the hub link can be
+ * tested without opening a port.
+ */
+export function startSendListener(bridge: Bridge, cfg: BridgeBinConfig): Promise<http.Server> {
+  const server = createSendServer({
+    send: (from, msg) => bridge.send(from, msg),
+    agents: cfg.agents,
+  });
+  return new Promise<http.Server>((resolve, reject) => {
+    const onError = (err: Error): void => reject(err);
+    server.once('error', onError);
+    server.listen(cfg.sendPort, '127.0.0.1', () => {
+      server.removeListener('error', onError);
+      console.log(
+        `[bridge ${cfg.bridgeId}] outbound send listener on http://127.0.0.1:${cfg.sendPort}/send ` +
+          `(accepts from: ${cfg.agents.join(', ')})`,
+      );
+      resolve(server);
+    });
+  });
+}
+
 // Entry point: start only when executed directly, never on import.
 if (import.meta.url === `file://${process.argv[1]}`) {
-  startAgentboxBridge().catch((err) => {
+  (async (): Promise<void> => {
+    const cfg = resolveBridgeConfig();
+    const bridge = await startAgentboxBridge(cfg);
+    await startSendListener(bridge, cfg);
+  })().catch((err) => {
     console.error('[bridge] failed to start:', err instanceof Error ? err.message : err);
     process.exit(1);
   });

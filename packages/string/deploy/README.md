@@ -44,3 +44,40 @@ When cleared: `systemctl --user start crew-messenger-bridge`, watch
 `journalctl --user -u crew-messenger-bridge -f`, confirm the hello + heartbeat, then send one
 message to nova end-to-end before enabling (`systemctl --user enable crew-messenger-bridge`) and
 widening the agent list.
+
+## Sending — how an agent speaks through the bridge
+
+The bridge is two-way. Inbound (above) delivers messages from the hub into local agents. Outbound
+lets a local agent **send** to an agent on another box through the same single bridge connection.
+
+Alongside the hub link, the bin opens a tiny HTTP listener on **loopback only**
+(`http://127.0.0.1:${CREW_BRIDGE_SEND_PORT:-3941}/send`). Nothing off-box can reach it: the bridge
+still dials OUT to the hub and opens no inbound network port. The listener also rejects any caller
+whose socket peer is not loopback, as defence-in-depth on top of the `127.0.0.1` bind.
+
+The agent-facing command is **`crew-send`**:
+
+```bash
+# from = $STRING_AGENT_ID (this box's agent identity); crew-send refuses to run if it is unset.
+STRING_AGENT_ID=nova crew-send leo "nova — bridge is up, sending through the hub"
+```
+
+- `crew-send <to> <message...>` POSTs `{ from: $STRING_AGENT_ID, to, body }` to the local listener.
+- `from` must be one of the agents **this** bridge serves (`CREW_BRIDGE_AGENTS`); a name it does not
+  serve is refused locally (403) and never relayed.
+- The **hub stamps the real sender** from the bridge's capability token, so `from` only selects which
+  served identity to speak as — it cannot forge another bridge's agents.
+- The reply is the hub's own verdict: success prints `sent <from> -> <to> (<messageId>)` and exits 0;
+  a hub rejection or a down link prints the reason and exits non-zero. It never fakes a success.
+
+`POST /send` directly (for scripts): body `{ "from", "to", "body" }` with `Content-Type:
+application/json` and **no** `Origin` header → `200 { state:"accepted", messageId }`, or non-2xx with
+a reason (`403` from not served / not loopback / Origin present, `415` non-JSON content-type, `409`
+hub rejected, `400` bad input, `502` link down). The Origin refusal + JSON-only content-type block a
+web page on this box from POSTing crew messages (browser CSRF): a cross-origin page cannot send a
+JSON body without a CORS preflight the listener never answers, and any browser request carries Origin.
+
+**Trust note (accepted for now):** the listener authenticates the *bridge*, not the *caller*. Any
+local process running as this user can pick any `from` the bridge serves — this is same-user trust on
+a shared box, which is the box's existing security boundary. Narrowing a send to a specific local
+agent identity (e.g. a per-agent token) is out of scope here.

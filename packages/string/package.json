@@ -10,7 +10,8 @@
     }
   },
   "bin": {
-    "string": "./dist/cli.js"
+    "string": "./dist/cli.js",
+    "crew-send": "./dist/crew-send.js"
   },
   "types": "./dist/index.d.ts",
   "files": [
