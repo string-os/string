@@ -1,4 +1,5 @@
 import { promises as fs } from 'fs';
+import { randomUUID } from 'crypto';
 import path from 'path';
 import { type AgentEventStatus } from '../../events.js';
 import type { AgentEventInbox } from './inbox.js';
@@ -108,6 +109,8 @@ export class EventStoreInbox implements AgentEventInbox {
   private polling = false;
   private loaded: Promise<void> | null = null;
   private closed = false;
+  /** Serializes {@link persist} writes so two un-awaited persists never race on the temp file. */
+  private persistChain: Promise<void> = Promise.resolve();
 
   constructor(opts: EventStoreInboxOptions) {
     this.agentId = opts.agentId;
@@ -288,11 +291,26 @@ export class EventStoreInbox implements AgentEventInbox {
     return this.loaded;
   }
 
-  /** Atomically persist the map (temp + rename) so a crash never leaves a half-written file. */
-  private async persist(): Promise<void> {
+  /**
+   * Atomically persist the map (temp + rename) so a crash never leaves a half-written file.
+   *
+   * Writes are SERIALIZED per inbox: two persists that fire close together (e.g. a bridge's hello and
+   * a brief landing ~0.3s apart) must not overlap. The old code shared one `<file>.tmp`, so two
+   * concurrent writes raced — the first rename moved the temp, the second found nothing (ENOENT) and
+   * that persist was lost. Each queued write also uses a UNIQUE temp name, so even an out-of-process
+   * writer on the same path cannot collide, and it snapshots the map WHEN IT RUNS, so the last write
+   * wins with the freshest state. A failed write never wedges the chain (the next persist still runs).
+   */
+  private persist(): Promise<void> {
+    const run = this.persistChain.then(() => this.writeMapSnapshot());
+    this.persistChain = run.catch(() => {}); // a rejection must not break the chain for later writes
+    return run;
+  }
+
+  private async writeMapSnapshot(): Promise<void> {
     const obj: Record<string, MapEntry> = {};
-    for (const [k, v] of this.map) obj[k] = v;
-    const tmp = `${this.mapPath}.tmp`;
+    for (const [k, v] of this.map) obj[k] = v; // snapshot at write time → freshest state wins
+    const tmp = `${this.mapPath}.${process.pid}.${randomUUID()}.tmp`;
     try {
       await fs.mkdir(path.dirname(this.mapPath), { recursive: true, mode: 0o700 });
       await fs.writeFile(tmp, JSON.stringify(obj) + '\n', { mode: 0o600 });
@@ -301,6 +319,7 @@ export class EventStoreInbox implements AgentEventInbox {
       // A failed persist is not fatal to delivery (the event was already pushed); it only weakens
       // restart dedup, so surface it rather than throw into the hub's delivery path.
       this.onError(`[inbox ${this.agentId}] could not persist dedup map ${this.mapPath}: ${(err as Error).message}`);
+      await fs.rm(tmp, { force: true }).catch(() => {}); // don't leave an orphan temp behind
     }
   }
 }

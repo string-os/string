@@ -309,6 +309,37 @@ await section('inbox: a failed webhook push throws and records nothing', async (
   inbox.close();
 });
 
+await section('inbox: two un-awaited persists do not race on the temp file (concurrent deliveries)', async () => {
+  // The bridge bug: a hello and a brief landed ~0.3s apart, so two persists overlapped. With one
+  // shared `<file>.tmp`, the first rename moved it and the second hit ENOENT — a lost persist. Fire
+  // two pushes WITHOUT awaiting the first, so their persists overlap, and prove both writes land.
+  const home = await tempHome();
+  const mapPath = path.join(home, 'map.json');
+  const { fetchImpl } = fakeDaemon(home, 'nova');
+  const errors: string[] = [];
+  const inbox = new EventStoreInbox({
+    agentId: 'nova',
+    home,
+    webhookUrl: 'http://d/webhook/tok',
+    mapPath,
+    pollIntervalMs: 10,
+    fetchImpl,
+    onError: (m) => errors.push(m),
+  });
+  inbox.onAck(() => {});
+
+  const p1 = inbox.push('m1', '[from leo] hello');
+  const p2 = inbox.push('m2', '[from leo] brief');
+  await Promise.all([p1, p2]);
+
+  const persisted = JSON.parse(await fs.readFile(mapPath, 'utf-8')) as Record<string, unknown>;
+  assert(persisted.m1 !== undefined && persisted.m2 !== undefined, 'both concurrent writes landed — no lost persist');
+  assert(!errors.some((e) => /could not persist/.test(e)), 'neither persist raced on the temp file (no ENOENT)');
+  const strays = (await fs.readdir(home)).filter((f) => f.includes('.tmp'));
+  assert(strays.length === 0, 'no orphan .tmp files are left behind');
+  inbox.close();
+});
+
 await section('inbox: close stops the poller and rejects further pushes', async () => {
   const home = await tempHome();
   const { fetchImpl } = fakeDaemon(home, 'nova');
