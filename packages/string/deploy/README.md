@@ -70,6 +70,14 @@ STRING_AGENT_ID=nova crew-send leo "nova — bridge is up, sending through the h
 - The reply is the hub's own verdict: success prints `sent <from> -> <to> (<messageId>)` and exits 0;
   a hub rejection or a down link prints the reason and exits non-zero. It never fakes a success.
 
-`POST /send` directly (for scripts): body `{ "from", "to", "body" }` → `200 { state:"accepted",
-messageId }`, or non-2xx with a reason (`403` from not served / not loopback, `409` hub rejected,
-`400` bad input, `502` link down).
+`POST /send` directly (for scripts): body `{ "from", "to", "body" }` with `Content-Type:
+application/json` and **no** `Origin` header → `200 { state:"accepted", messageId }`, or non-2xx with
+a reason (`403` from not served / not loopback / Origin present, `415` non-JSON content-type, `409`
+hub rejected, `400` bad input, `502` link down). The Origin refusal + JSON-only content-type block a
+web page on this box from POSTing crew messages (browser CSRF): a cross-origin page cannot send a
+JSON body without a CORS preflight the listener never answers, and any browser request carries Origin.
+
+**Trust note (accepted for now):** the listener authenticates the *bridge*, not the *caller*. Any
+local process running as this user can pick any `from` the bridge serves — this is same-user trust on
+a shared box, which is the box's existing security boundary. Narrowing a send to a specific local
+agent identity (e.g. a per-agent token) is out of scope here.

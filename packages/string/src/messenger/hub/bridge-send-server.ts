@@ -10,6 +10,9 @@ import type { SendOutcome } from './bridge.js';
  *
  * `POST /send` with `{ from, to, body }`:
  *  - the caller must be on loopback (defence-in-depth on top of the 127.0.0.1 bind);
+ *  - browser CSRF is refused two ways: any request with an Origin header is rejected, and the body
+ *    must be Content-Type application/json (which forces a CORS preflight this listener never answers,
+ *    so a no-preflight "simple" cross-origin POST from a web page on this box cannot reach the hub);
  *  - `from` must be one of the agents THIS bridge serves — a name it does not serve is refused, never
  *    silently relayed. The hub additionally re-derives the real sender from the bridge's capability
  *    token, so `from` only selects which served identity to speak as; it cannot forge another bridge.
@@ -56,6 +59,15 @@ export function createSendHandler(
       sendJson(res, 403, { error: 'refused: caller is not on loopback' });
       return;
     }
+    // Browser-CSRF defence. This box runs a browser, and 127.0.0.1 is reachable from any web page.
+    // Without these two guards a malicious page could POST here and send crew messages as a served
+    // agent. They are belt-and-suspenders:
+    //  (a) refuse any request carrying an Origin header — that is browser-issued traffic (including a
+    //      CORS preflight); crew-send, a CLI, never sets Origin.
+    if (req.headers.origin !== undefined) {
+      sendJson(res, 403, { error: 'refused: requests carrying an Origin header are not accepted' });
+      return;
+    }
     if (req.method !== 'POST') {
       sendJson(res, 405, { error: `use POST, not ${req.method}` });
       return;
@@ -63,6 +75,14 @@ export function createSendHandler(
     const pathOnly = (req.url ?? '').split('?')[0];
     if (pathOnly !== '/send') {
       sendJson(res, 404, { error: `unknown path ${pathOnly}` });
+      return;
+    }
+    //  (b) require Content-Type application/json. A JSON content-type is NOT a CORS "simple" request,
+    //      so a cross-origin page must send a preflight first — which this listener never answers, so
+    //      the real POST never fires. A no-preflight "simple" POST (text/plain) is refused here (415).
+    const contentType = (req.headers['content-type'] ?? '').split(';')[0].trim().toLowerCase();
+    if (contentType !== 'application/json') {
+      sendJson(res, 415, { error: 'refused: Content-Type must be application/json' });
       return;
     }
 

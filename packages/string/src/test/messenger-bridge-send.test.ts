@@ -107,6 +107,48 @@ await section('bridge-send: a non-loopback caller is refused 403 and the hub sen
   assert(calls.length === 0, 'the hub send is never attempted for a remote caller');
 });
 
+await section('bridge-send: a request carrying an Origin header is refused 403 (browser CSRF)', async () => {
+  const { deps, calls } = makeDeps({ agents: ['nova'] });
+  const handler = createSendHandler(deps);
+  let status = 0;
+  let body = '';
+  const res = {
+    writeHead(s: number) {
+      status = s;
+    },
+    end(b?: string) {
+      body = b ?? '';
+    },
+  } as unknown as http.ServerResponse;
+  // A loopback POST that looks valid EXCEPT it carries an Origin — i.e. a browser on this box. A CLI
+  // never sets Origin, so refusing it costs nothing and blocks a web page from speaking as an agent.
+  const req = {
+    socket: { remoteAddress: '127.0.0.1' },
+    method: 'POST',
+    url: '/send',
+    headers: { origin: 'http://evil.example', 'content-type': 'application/json' },
+  } as unknown as http.IncomingMessage;
+  handler(req, res);
+  assert(status === 403, 'an Origin-bearing request gets 403');
+  assert(/Origin/.test(body), 'the refusal names Origin');
+  assert(calls.length === 0, 'the hub send is never attempted for a browser request');
+});
+
+await section('bridge-send: a non-JSON body is refused 415 (blocks the no-preflight CSRF POST)', async () => {
+  const { deps, calls } = makeDeps({ agents: ['nova'] });
+  await withServer(deps, async (port) => {
+    // text/plain is a CORS "simple" request — no preflight. The 415 is what stops a web page from
+    // smuggling a JSON crew message through under that guise.
+    const res = await fetch(`http://127.0.0.1:${port}/send`, {
+      method: 'POST',
+      headers: { 'content-type': 'text/plain' },
+      body: JSON.stringify({ from: 'nova', to: 'leo', body: 'csrf attempt' }),
+    });
+    assert(res.status === 415, 'a text/plain body is 415');
+    assert(calls.length === 0, 'the body was never parsed or relayed to the hub');
+  });
+});
+
 await section('bridge-send: a from this bridge does not serve is refused 403, before any hub send', async () => {
   const { deps, calls } = makeDeps({ agents: ['nova'] });
   await withServer(deps, async (port) => {
