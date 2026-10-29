@@ -1619,6 +1619,19 @@ export function startDaemon(port = 3923, opts?: { log?: boolean }): void {
     dir: join(STRING_DATA_DIR, 'logs'),
   });
 
+  // Boot visibility for the agent store. A restart that boots an EMPTY registry
+  // (the data dir was lost or relocated across an upgrade) silently re-mints every
+  // webhook token on first use and 401s every stale cron/wake caller — an outage
+  // that otherwise only surfaces hours or days later. Logging the load outcome at
+  // startup makes "booted with 0 agents from <path>" immediately diagnosable.
+  // Counts only; no token values are logged.
+  log.info('agents.store.loaded', {
+    path: agents.storePath,
+    loadedFromStore: agents.loadedFromStore,
+    agents: agents.loadedCount,
+    withWebhookToken: agents.loadedWithWebhookToken,
+  });
+
   // Disk-first recovery: ~/.string/agents/<id> is the source of truth for agent
   // homes. If the registry JSON gets lost/corrupted or the daemon migrates
   // STRING_DATA_DIR, re-register any home dirs we discover. Idempotent.

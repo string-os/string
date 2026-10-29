@@ -19,6 +19,7 @@ import './agent-config.test.js';
 import './port-resolver.test.js';
 import './agent-cli.test.js';
 import './agents-provisioning.test.js';
+import './agent-registry-store.test.js';
 import './capability.test.js';
 import './capability-issuance.test.js';
 import './describe.test.js';

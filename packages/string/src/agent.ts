@@ -13,22 +13,45 @@ export class AgentRegistry {
   private readonly agents = new Map<string, Agent>();
   private readonly persistPath: string | null;
 
+  // Boot diagnostics, set once at construction and never mutated: whether the
+  // persisted store was read as an array, how many agents it held, and how many
+  // of those carried a webhook token. The daemon logs these at startup so a
+  // restart that boots an EMPTY registry — e.g. the data dir was not preserved
+  // across an upgrade, which silently re-mints every token on first webhook use
+  // and 401s every stale caller — is visible immediately instead of surfacing
+  // hours or days later as unexplained 401s.
+  readonly loadedFromStore: boolean;
+  readonly loadedCount: number;
+  readonly loadedWithWebhookToken: number;
+
   constructor(initialAgents: Agent[] = [], persistPath?: string) {
     this.persistPath = persistPath ?? null;
 
     // Load from file first, then overlay any initial agents.
+    let loadedFromStore = false;
     if (this.persistPath) {
       try {
         const data = JSON.parse(readFileSync(this.persistPath, 'utf-8'));
         if (Array.isArray(data)) {
           for (const agent of data) this.agents.set(agent.id, agent);
+          loadedFromStore = true;
         }
       } catch { /* file doesn't exist yet — that's fine */ }
     }
+    // Snapshot the store-load outcome BEFORE overlaying initialAgents, so it
+    // reflects what persistence actually yielded.
+    this.loadedFromStore = loadedFromStore;
+    this.loadedCount = this.agents.size;
+    this.loadedWithWebhookToken = [...this.agents.values()].filter(a => !!a.webhookToken).length;
 
     for (const agent of initialAgents) {
       this.register(agent);
     }
+  }
+
+  /** Absolute path of the JSON store backing this registry, or null if in-memory only. */
+  get storePath(): string | null {
+    return this.persistPath;
   }
 
   register(agent: Agent): Agent {
