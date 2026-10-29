@@ -1,6 +1,6 @@
 {
   "name": "string-os",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "description": "String — an OS for AI agents, built on SFMD. HTML for humans, SFMD for agents.",
   "repository": {
