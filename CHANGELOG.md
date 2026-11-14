@@ -1,5 +1,73 @@
 # Changelog
 
+## v0.1.16 (unreleased — staged, pending npm token)
+
+The headline is **event / alarm integrity**: event delivery is now durable,
+acked, and replay-safe, closing the redelivery flood that let resolved alarms and
+retracted instructions re-arrive as current. Plus the System API v0 surface (#47)
+— capability tokens, filesystem verbs, one-call agent pairing — and a batch of
+CLI/runtime fixes.
+
+```
+@string-os/string  0.1.16
+```
+
+### Event system — delivery, acks, replay integrity
+
+- **Durable delivered/acked lifecycle + grace-gated backfill** (#56, #57, #60):
+  events move `pending → delivered → ack`; the backfill replays only pending +
+  within-grace deliveries, so a resume/compact no longer re-drains the whole
+  queue. Adds HTTP `/events/{id}/ack`, `GET /events/count`, client
+  `ackEvent`/`autoAck`, and a retention sweep (acked past window + an un-acked
+  safety cap).
+- **The `--mcp` consumer now acks** (#65): it opts into `autoAck` and returns the
+  channel-notification promise, so delivered events drain instead of re-flooding
+  every session — the root of the redelivery flood.
+- **Re-shown events are marked as replays** (#70): a re-emitted, unacked event
+  carries a visible in-body `⤺ REPLAY` banner (keyed on a stamp-once
+  `firstEmittedAt`, independent of ack/status); the persisted event is untouched.
+- **No lost updates, no resurrects** (#69, #71): per-event mutations and the
+  sweep/clear deletes are serialized by an in-process per-file lock, so a delete
+  can't clobber an ack or bring a purged event back. Coverage limits are named
+  in-code (#72–#74).
+- **Naive-reader safety** (#67): the `/events` list names its sort order so a
+  retraction above its instruction isn't misread.
+
+### System API v0 (#47) — capabilities, filesystem, pairing
+
+- **Capability token model + single verifier** (#51, #54): opaque-stored,
+  data-only capability plane; HTTP mint/list/revoke + a shell mint verb.
+- **Filesystem verbs** (#53): `PUT`/`GET`/`DELETE` + `HEAD`-as-`STAT`, gated by the
+  capability verifier.
+- **One-call agent pairing + full disposable teardown** (#55), `GET /describe`
+  self-describe (#49), and `STRING_NO_AGENT_RECOVERY` for empty-registry test
+  daemons (#50).
+
+### CLI & runtime
+
+- **Multi-word CLI args survive** (#62) and **a single quoted command body is
+  passed verbatim** (#75) — `string <topic> '/cmd "args"'` stops returning
+  COMMAND_UNSUPPORTED and behaves like the REPL/MCP paths.
+- **`string --version`** (#76, #77): names the running build — version, entrypoint
+  path, build time, source commit — and computes `STALE` itself when the dist is
+  behind HEAD, because every install reports the same version string while running
+  a different build.
+- Safe `/uninstall` + `/install` upsert & reload (#61); CLI response
+  `stdout`/`stderr`/`exit_code` aliases + loud unresolved refs (#63);
+  `--<field>-file` field input (#64); `agent current` reports the resolved agent
+  (#58).
+
+### Config, tests, web
+
+- **`STRING_ROOT`** — one switch to isolate all persistent state (#59).
+- Hermetic test envs strip inherited `STRING_*` (#48).
+- Docs/site: Cloudflare Pages Accept-based `.md` routing middleware (#44, #45),
+  sidebar logo (#46), CF Pages types in both Astro tsconfigs (#52).
+
+_(#66 / #68 were release plumbing — a 0.1.16 prep whose pins went live in git
+before the npm publish and had to be reverted. This release is that publish, done
+in the correct order: publish to npm first, then land the pins.)_
+
 ## v0.1.3 (2026-05-08)
 
 Two reshapes to the action runtime and the topic system. **Breaking
