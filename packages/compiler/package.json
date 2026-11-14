@@ -18,6 +18,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "node ../../scripts/check-version.mjs",
     "prepack": "pnpm build",
     "dev": "tsx src/cli.ts"
   },

@@ -19,6 +19,7 @@
   ],
   "scripts": {
     "build": "rm -rf dist && tsc",
+    "prepublishOnly": "node ../../scripts/check-version.mjs",
     "prepack": "pnpm build",
     "dev": "tsx src/cli.ts",
     "test": "tsx src/test/index.ts"

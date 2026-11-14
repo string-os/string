@@ -1,9 +1,13 @@
 #!/usr/bin/env node
 import fs from 'fs';
 import path from 'path';
-import process from 'process';
+import { fileURLToPath } from 'url';
 
-const root = process.cwd();
+// Resolve the repo root from this script's own location (scripts/check-version.mjs),
+// NOT from process.cwd(): a prepublishOnly hook runs with the cwd set to the package
+// being published, so a cwd-relative root would read the wrong tree (or none). This
+// gate must give the same answer no matter which directory invokes it.
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 
 function readJson(file) {
   return JSON.parse(fs.readFileSync(path.join(root, file), 'utf-8'));
