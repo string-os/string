@@ -51,6 +51,7 @@ import { EventStore, createWebhookToken, type AgentEvent } from './events.js';
 import { CapabilityStore, FS_VERBS, normalizeFsPath, type FsVerb, type VerifyFailure } from './capability.js';
 import { STRING_VERSION } from './version.js';
 import { stringRoot } from './config.js';
+import { reapTick, type StallState } from './event-stream-reaper.js';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -110,14 +111,6 @@ const agents = new AgentRegistry([], join(STRING_DATA_DIR, 'agents.json'));
 const capabilities = new CapabilityStore({ persistPath: join(STRING_DATA_DIR, 'capabilities.json') });
 const runtimes = new Map<string, RuntimeEntry>();
 const eventStreams = new Map<string, Set<http.ServerResponse>>();
-// Per-stream liveness state, reachable from notifyEventStreams (which only has the
-// ServerResponse) as well as the stream's own heartbeat loop. `stalledSince` is the
-// epoch-ms when this stream's socket last went un-drainable (kernel send buffer full
-// → the peer stopped reading), or null while it drains normally; `reap` tears the
-// stream down (used by the stall watchdog AND by notifyEventStreams when it meets an
-// already-stalled stream). A WeakMap so a closed stream's state is GC'd with it.
-interface StreamState { stalledSince: number | null; reap: (reason: string) => void; }
-const streamState = new WeakMap<http.ServerResponse, StreamState>();
 let log: Logger;
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -150,14 +143,22 @@ const EVENT_SWEEP_INTERVAL_MS = (() => {
   return Number.isFinite(v) && v > 0 ? v : 60 * 60 * 1000; // hourly
 })();
 
-// Live event-stream liveness. The app-level SSE heartbeat proves the daemon→client
-// direction is flowing; the reaper below tears down a stream whose peer has silently
-// gone — the half-open connection class that left keel's inbox registered to a dead
-// consumer for 16 days, every event "delivered" to a socket no one was reading. Two
-// detectors, because a half-open stream shows up two ways: (1) the peer/host vanished
-// with no RST — caught by TCP keepalive on the socket; (2) the peer is still ACKing
-// at the TCP layer but stopped READING — caught by backpressure (writes stop
-// draining), reaped once the stall outlives EVENT_STREAM_STALL_MS.
+// Live event-stream liveness hardening. The app-level SSE heartbeat proves the
+// daemon→client direction is flowing; the reaper in handleEventStream tears down a
+// stream whose peer has silently stopped reading, so later events are not stamped
+// `delivered` to a registered-but-dead socket. A half-open stream shows up two ways:
+//   (1) the peer/host vanished with no RST — TCP keepalive on the socket eventually
+//       errors it and fires close(). NOTE: this is slow and bounded by the kernel —
+//       ~EVENT_HEARTBEAT_MS idle before the first probe, then the OS keepalive probe
+//       retries (~10 min total with Linux defaults), not instant. It is a backstop.
+//   (2) the peer still ACKs at the TCP layer but stopped READING — the heartbeat's
+//       writes stop draining (res.writableNeedDrain stays set); reaped once that
+//       outlives EVENT_STREAM_STALL_MS. The decision logic lives in
+//       event-stream-reaper.ts and is unit-tested there; it cannot be reproduced over
+//       a loopback socket (the peer's kernel keeps ACKing and autotunes its receive
+//       buffer to tens of MiB, so backpressure never sustains).
+// This does NOT explain keel: keel's events were `pending` (no stream ever
+// registered), not `delivered` to a dead socket — see #47 for that root cause.
 const EVENT_HEARTBEAT_MS = (() => {
   const v = Number(process.env.STRING_EVENT_HEARTBEAT_MS);
   return Number.isFinite(v) && v > 0 ? v : 30_000;
@@ -199,54 +200,41 @@ function sseEvent(res: http.ServerResponse, event: string, data: unknown): boole
   // here can throw synchronously. A failed push to one dead stream must never
   // break the webhook/heartbeat path, so swallow it — the stream's 'close'/
   // 'error' handler will unregister it.
-  // Returns whether the socket ACCEPTED the write without backpressure: `false`
-  // means the write buffered (kernel send queue full → the peer stopped reading)
-  // or the socket is dead — the signal the stall watchdog and notifyEventStreams
-  // use to avoid treating a buffered write to a non-reading peer as a delivery.
+  // Returns whether the bytes REACHED the socket (were queued to be sent), not
+  // whether the socket drained. res.write() returns false for any chunk larger
+  // than the stream's highWaterMark even to a fast, healthy peer, so its
+  // return value is NOT a liveness signal and is deliberately ignored here: the
+  // bytes are still queued and will be sent. We return false only when the write
+  // THREW (the socket is dead). Backpressure/liveness is judged separately, over
+  // time, by the stall watchdog via res.writableNeedDrain.
   try {
-    const accepted = res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+    res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
     if (typeof (res as any).flush === 'function') {
       (res as any).flush();
     }
-    return accepted;
+    return true;
   } catch {
     /* dead stream — cleanup happens via close/error handlers */
     return false;
   }
 }
 
-/** Push an event to every live stream for the agent. Returns true if it reached
- *  at least one stream (so the caller can mark it delivered). */
+/** Push an event to every live stream for the agent. Returns true if the bytes
+ *  reached at least one stream (so the caller can mark it delivered + emitted).
+ *  "Reached the socket" — not "drained" — is the right bar: the bytes are queued
+ *  and will be sent, so this is a genuine emission (a later backfill must treat a
+ *  re-show as a replay). A peer that has stopped reading is torn down separately by
+ *  the stall watchdog, not by second-guessing this push. */
 function notifyEventStreams(agentId: string, event: AgentEvent): boolean {
   const streams = eventStreams.get(agentId);
   if (!streams || streams.size === 0) return false;
-  const now = Date.now();
   let pushed = false;
   for (const stream of [...streams]) {
     if (stream.writableEnded || stream.destroyed) {
       streams.delete(stream);
       continue;
     }
-    const st = streamState.get(stream);
-    // A stream already stalled past the reap threshold is a dead consumer awaiting
-    // teardown. Do NOT mark this event delivered to it — that is exactly how keel's
-    // events were lost: stamped `delivered` to a socket no one was reading, then aged
-    // out of the redelivery grace. Reap it now and skip; the event stays pending for
-    // a live or reconnecting consumer.
-    if (st && st.stalledSince !== null && now - st.stalledSince >= EVENT_STREAM_STALL_MS) {
-      st.reap('stalled-on-push');
-      continue;
-    }
-    const accepted = sseEvent(stream, 'event', event);
-    if (st) {
-      if (!accepted && st.stalledSince === null) st.stalledSince = now; // backpressure onset
-      else if (accepted) st.stalledSince = null;                        // drained again
-    }
-    // Count only a write the socket accepted (drained to the kernel) as a delivery.
-    // A backpressured write is buffered to a peer that may never read it, so leave the
-    // event pending (redelivered on reconnect — the client dedups) rather than stamp
-    // deliveredAt on an unconfirmed push.
-    if (accepted) pushed = true;
+    if (sseEvent(stream, 'event', event)) pushed = true;
   }
   if (pushed) log.info('events.stream.push', { agentId, eventId: event.id, streams: streams.size });
   return pushed;
@@ -669,53 +657,40 @@ function handleEventStream(req: http.IncomingMessage, res: http.ServerResponse):
     if (replayed > 0) log.info('events.stream.backfill', { agentId, replayed });
   })();
 
-  // Case (1) half-open: the peer/host vanished with no RST. TCP keepalive makes the
-  // OS probe the idle socket and error it, which fires close() below — without it the
-  // socket can sit ESTAB and registered indefinitely (the keel failure). Complements
-  // the app-level heartbeat (proves daemon→client) and the stall watchdog (case 2).
+  // Backstop for the vanished-peer case: TCP keepalive makes the OS probe an idle
+  // socket and error it, firing close() below, so a peer that disappeared with no RST
+  // does not sit ESTAB and registered forever. Slow (minutes; see the knobs comment),
+  // so it is only a backstop to the stall watchdog.
   req.socket?.setKeepAlive(true, EVENT_HEARTBEAT_MS);
 
   let closed = false;
   let heartbeat: ReturnType<typeof setInterval> | null = null;
+  const stall: StallState = { stalledSince: null };
   const close = () => {
     if (closed) return;
     closed = true;
     if (heartbeat) clearInterval(heartbeat);
-    streamState.delete(res);
     streams!.delete(res);
     if (streams!.size === 0) eventStreams.delete(agentId);
     log.info('events.stream.close', { agentId });
   };
 
-  // Case (2) half-open: the peer still ACKs at the TCP layer but has stopped READING,
-  // so our writes stop draining. Track that backpressure; once it outlives
-  // EVENT_STREAM_STALL_MS the stream is reaped (unregistered + socket destroyed) so
-  // the next event is not stamped `delivered` to a consumer that is gone. reap() is
-  // also called from notifyEventStreams when it meets an already-stalled stream.
-  const st: StreamState = {
-    stalledSince: null,
-    reap: (reason: string) => {
-      if (closed) return;
-      log.info('events.stream.reap', { agentId, reason });
-      close();       // unregister first, so no further push targets this stream
-      res.destroy(); // tear the socket down; the client's watcher reconnects
-    },
-  };
-  streamState.set(res, st);
-
-  // Heartbeat + stall watchdog. The ping proves liveness to the client (whose own
-  // idle timer reconnects if pings stop). Each tick also samples backpressure: a
-  // rejected write or a non-draining buffer means the peer stopped reading.
+  // Heartbeat + stall watchdog (one reaper). The ping proves daemon→client liveness
+  // (the client's own idle timer reconnects if pings stop). Each tick also samples
+  // res.writableNeedDrain: true means the socket's buffer is still above highWaterMark
+  // and has not drained — the peer has stopped reading. A healthy peer (even one just
+  // sent a >16 KiB event) drains between ticks and clears the flag, so only a buffer
+  // stuck past EVENT_STREAM_STALL_MS is reaped: unregister, then destroy the socket so
+  // the client's watcher reconnects. Later events then stay pending for a live
+  // consumer instead of being stamped `delivered` to this dead socket.
   heartbeat = setInterval(() => {
     if (res.writableEnded || res.destroyed) return;
-    const accepted = sseEvent(res, 'ping', { t: new Date().toISOString() });
-    const now = Date.now();
-    if (!accepted || res.writableNeedDrain) {
-      if (st.stalledSince === null) st.stalledSince = now;
-      else if (now - st.stalledSince >= EVENT_STREAM_STALL_MS) st.reap('stalled-heartbeat');
-    } else {
-      st.stalledSince = null;
-    }
+    sseEvent(res, 'ping', { t: new Date().toISOString() });
+    reapTick(res, stall, Date.now(), EVENT_STREAM_STALL_MS, () => {
+      log.info('events.stream.reap', { agentId, reason: 'stalled' });
+      close();       // unregister first, so no further push targets this stream
+      res.destroy(); // tear the socket down; the client's watcher reconnects
+    });
   }, EVENT_HEARTBEAT_MS);
 
   req.on('close', close);
