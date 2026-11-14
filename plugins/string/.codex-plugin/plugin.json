@@ -1,7 +1,7 @@
 {
   "name": "string",
   "description": "Use String apps and the web through one MCP tool. Install an app from a GitHub URL, read pages as markdown, run typed actions on documents — the whole String runtime exposed as a single `mcp__string__string` tool, with a skill that teaches Codex when and how to use it.",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "author": {
     "name": "H1R AI",
     "url": "https://h1r.ai"
