@@ -758,6 +758,12 @@ await section('events — watchAgentEvents self-reconnects after the stream drop
   server!.closeAllConnections?.(); await new Promise<void>(r => server!.close(() => r()));
 });
 
+// NOTE: the stall-watchdog that reaps a half-open stream (peer ACKing but not reading) is
+// unit-tested deterministically in event-stream-reaper.test.ts. It cannot be exercised over
+// a real loopback socket — the peer's kernel keeps ACKing and autotunes its receive buffer
+// into the tens of MiB, so res.writableNeedDrain never stays set long enough to reap. See
+// string-os/string#47 and the comment atop event-stream-reaper.ts.
+
 await section('events — POST /events/{id}/ack + client.ackEvent close the lifecycle', async () => {
   const env = makeEnv();
   const daemon = await startDaemon(env);

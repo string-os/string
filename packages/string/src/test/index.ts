@@ -24,6 +24,7 @@ import './capability.test.js';
 import './capability-issuance.test.js';
 import './describe.test.js';
 import './events.test.js';
+import './event-stream-reaper.test.js';
 import './fs.test.js';
 import './recovery.test.js';
 import './string-root.test.js';
