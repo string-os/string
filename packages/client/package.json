@@ -15,6 +15,7 @@
   ],
   "scripts": {
     "build": "tsc",
+    "prepublishOnly": "node ../../scripts/check-version.mjs",
     "prepack": "pnpm build"
   },
   "license": "MIT",
