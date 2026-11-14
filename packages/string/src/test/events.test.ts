@@ -1,5 +1,6 @@
 import fs from 'fs';
 import http from 'http';
+import net from 'net';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
@@ -756,6 +757,76 @@ await section('events — watchAgentEvents self-reconnects after the stream drop
   assert(received.length === afterClose, 'close() stops reconnecting for good');
 
   server!.closeAllConnections?.(); await new Promise<void>(r => server!.close(() => r()));
+});
+
+await section('events — a half-open stream (peer stops reading) is reaped; its events are not lost', async () => {
+  // Reproduces the keel failure on a scratch daemon: a consumer connects, then stops
+  // READING (its process hangs / host wedges) while its socket stays ESTAB. The server
+  // kept pushing to that dead stream and stamping events `delivered` to a socket no one
+  // read — with grace=0 (deliver-once) those events are then lost forever. The fix: a
+  // backpressured push no longer counts as a delivery, and the stall watchdog reaps the
+  // stream, so events survive for a reconnecting consumer.
+  const env = makeEnv();
+  const daemon = await startDaemon(env, {
+    STRING_EVENT_REDELIVER_GRACE_MS: '0',   // deliver-once: a falsely-"delivered" event is lost → exposes the bug
+    STRING_EVENT_HEARTBEAT_MS: '100',       // fast heartbeat so the stall watchdog samples quickly
+    STRING_EVENT_STREAM_STALL_MS: '400',    // reap a stalled stream within ~0.4s
+  });
+  const home = path.join(env.root, 'agent-home-halfopen');
+  const BIG = 'x'.repeat(60 * 1024); // ~60 KiB (< the 64 KiB webhook cap) to fill the send buffer fast
+  let deadSock: net.Socket | null = null;
+  try {
+    assert(await client.ping(env.port), 'daemon up for half-open test');
+    assert(runCli(env, ['agent', 'add', 'wedged', '--home', home]).code === 0, 'agent add ok');
+    assert(runCli(env, ['agent', 'use', 'wedged']).code === 0, 'agent use ok');
+    const show = runCli(env, ['event', 'webhook', 'show']);
+    const webhookUrl = show.stdout.split('\n').find(line => line.startsWith('http://127.0.0.1:'));
+    assert(!!webhookUrl, 'webhook URL printed');
+
+    // A consumer that connects then NEVER reads: a raw socket we write the request on
+    // and never drain. With no app reads the OS recv buffer fills and does not autotune,
+    // so TCP flow-control backpressures the daemon's writes — a peer that stopped reading.
+    // (http.request keeps draining the response into Node buffers even when paused, which
+    // masks the backpressure; a raw socket does not.)
+    deadSock = await new Promise<net.Socket>((resolve, reject) => {
+      const s = net.connect({ host: '127.0.0.1', port: env.port }, () => {
+        s.write('GET /events/stream HTTP/1.1\r\nHost: 127.0.0.1\r\nX-Agent-Id: wedged\r\nConnection: keep-alive\r\n\r\n');
+        resolve(s);
+      });
+      s.on('error', reject);
+      // deliberately no 'data' handler → the response is never read
+    });
+    await wait(150); // let the stream register + 'ready' land in the (undrained) buffer
+
+    // Fill the wedged stream's send path until the daemon actually backpressures. Buffer
+    // sizes vary by host, so calibrate to the effect rather than a fixed byte count: once
+    // a push to the dead stream stops being accepted, notifyEventStreams no longer counts
+    // it as a delivery, so `pending` starts climbing. Keep posting big events until that
+    // shows (or a generous cap), proving the stall path engaged.
+    let backpressured = false;
+    for (let i = 0; i < 400 && !backpressured; i++) {
+      assert((await postText(webhookUrl!, `${BIG}#primer${i}`)).status === 202, `primer ${i} accepted`);
+      if (i % 10 === 9) backpressured = (await client.eventCount(env.port, 'wedged')).pending > 0;
+    }
+    assert(backpressured, 'the daemon backpressured on the non-reading stream (pending climbs)');
+    await wait(700); // let the stall watchdog (stall 400ms + heartbeat ticks) reap the dead stream
+
+    // The canary is posted AFTER backpressure is established. Under the fix it must NOT be
+    // stamped delivered to the dead stream (a backpressured/reaped stream is not a
+    // delivery target), so with grace=0 it stays redeliverable instead of being lost.
+    const canary = 'canary-after-backpressure';
+    assert((await postText(webhookUrl!, canary)).status === 202, 'canary accepted');
+
+    // A fresh, reading consumer must receive the canary — proving it survived the wedged
+    // stream. (On the pre-fix daemon the canary is marked delivered to the dead stream
+    // and, with grace=0, never reaches this consumer.)
+    const got = await collectSSEUntil(env.port, 'wedged', evs => evs.some(e => e.text === canary), 8000);
+    assert(got.some(e => e.text === canary), 'canary survived the half-open stream and reached a fresh consumer');
+  } finally {
+    deadSock?.destroy();
+    daemon.stop();
+    fs.rmSync(env.root, { recursive: true, force: true });
+  }
 });
 
 await section('events — POST /events/{id}/ack + client.ackEvent close the lifecycle', async () => {
