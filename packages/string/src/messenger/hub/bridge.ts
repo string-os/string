@@ -1,3 +1,6 @@
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { HubLink } from './link.js';
 import {
   PROTOCOL_VERSION,
@@ -41,6 +44,10 @@ export interface BridgeOptions {
   hubSilenceLimitMs?: number;
   /** Injectable clock (ms); defaults to Date.now. Stamps heartbeats and expires the dedup map. */
   now?: () => number;
+  deliveryRetryWindowMs?: number;
+  deliveryRetryIntervalMs?: number;
+  /** Persists terminal delivery decisions across bridge restarts. */
+  failureDirectory?: string;
   onError?: (reason: string) => void;
   /**
    * Fired after each successful hello — the first connect and every reconnect (`reconnect: true`).
@@ -56,7 +63,10 @@ export interface BridgeOptions {
 }
 
 /** How long a delivered message id is remembered for redelivery dedup before it is forgotten. */
-const DELIVERED_TTL_MS = 24 * 60 * 60 * 1000;
+const MESSAGE_TTL_MS = 24 * 60 * 60 * 1000;
+const FAILURE_NOTICE_PREFIX = 'bridge-delivery-failure:';
+
+type Failure = 'expired' | 'push-unconfirmed' | 'reported';
 
 /**
  * The agent-box side of the cross-machine messenger: one persistent client WebSocket the bridge
@@ -83,6 +93,10 @@ export class Bridge {
   private readonly heartbeatIntervalMs: number;
   private readonly hubSilenceLimitMs: number;
   private readonly now: () => number;
+  private readonly deliveryRetryWindowMs: number;
+  private readonly deliveryRetryIntervalMs: number;
+  private readonly failureDirectory?: string;
+  private readonly failures = new Map<string, Failure>();
   private readonly onError?: (reason: string) => void;
   private readonly onConnect?: (info: { reconnect: boolean }) => void;
   private readonly onDrop?: (reason: string) => void;
@@ -105,7 +119,7 @@ export class Bridge {
   private readonly pendingSends = new Map<string, { resolve: (o: SendOutcome) => void; reject: (e: Error) => void }>();
   /**
    * Messages confirmed delivered -> the ms they were confirmed, so a redelivered `deliver`
-   * re-asserts the ack instead of re-dispatching. Entries older than DELIVERED_TTL_MS are
+   * re-asserts the ack instead of re-dispatching. Entries older than MESSAGE_TTL_MS are
    * forgotten so this never grows without bound (a redelivery that old is not realistic).
    */
   private readonly delivered = new Map<string, number>();
@@ -128,6 +142,9 @@ export class Bridge {
     this.heartbeatIntervalMs = opts.heartbeatIntervalMs ?? 15_000;
     this.hubSilenceLimitMs = opts.hubSilenceLimitMs ?? 3 * this.heartbeatIntervalMs;
     this.now = opts.now ?? Date.now;
+    this.deliveryRetryWindowMs = opts.deliveryRetryWindowMs ?? 10 * 60 * 1000;
+    this.deliveryRetryIntervalMs = opts.deliveryRetryIntervalMs ?? 15_000;
+    this.failureDirectory = opts.failureDirectory;
     this.onError = opts.onError;
     this.onConnect = opts.onConnect;
     this.onDrop = opts.onDrop;
@@ -251,10 +268,8 @@ export class Bridge {
     for (const { reject } of this.pendingSends.values()) reject(new Error('hub connection closed'));
     this.pendingSends.clear();
     // KEEP `dispatching` across the reconnect: the adapter delivery is local and outlives the hub
-    // link, so a message still being handled is NOT finished. If we cleared it and the hub
-    // redelivered on reconnect, handleDeliver would dispatch it a second time (e.g. the codex
-    // adapter would fire a second turn/start). The in-flight deliver() resolves to an ack or
-    // rejects (hung → its catch clears dispatching), and only then does redelivery re-dispatch.
+    // link. Clearing it here would let redelivery interrupt an in-progress local retry or
+    // submit a message twice before the runtime's read ack arrives.
     if (this.closing || this.fatal || this.reconnecting) return;
     this.reconnecting = true;
     this.ready = this.reconnectLoop();
@@ -326,7 +341,7 @@ export class Bridge {
 
   /** Forget delivered ids older than the TTL so the dedup map cannot grow without bound. */
   private pruneDelivered(): void {
-    const cutoff = this.now() - DELIVERED_TTL_MS;
+    const cutoff = this.now() - MESSAGE_TTL_MS;
     for (const [id, at] of this.delivered) {
       if (at < cutoff) this.delivered.delete(id);
     }
@@ -412,14 +427,82 @@ export class Bridge {
       return;
     }
     this.dispatching.add(msg.id);
-    // Human identities (founder/cso) may pre-empt; everyone else steers/queues per the adapter.
-    const mode = isHumanIdentity(msg.from) ? 'interrupt' : 'steer';
-    adapter.deliver(this.toDeliverable(msg), { mode }).catch((err: unknown) => {
-      // The adapter could not submit (e.g. a hung runtime). Drop the in-flight mark so the hub's
-      // redelivery re-dispatches; the bridge never asserts `failed` (that is hub-owned).
+    this.deliverWithRetry(msg, adapter).catch((err: unknown) => {
       this.dispatching.delete(msg.id);
       this.onError?.(`deliver failed for ${msg.id}: ${(err as Error).message}`);
     });
+  }
+
+  private async deliverWithRetry(msg: StampedMessage, adapter: InboundAdapter): Promise<void> {
+    let failure = await this.readFailure(msg.id);
+    const expiresAt = msg.createdAtMs + MESSAGE_TTL_MS;
+    const deadline = Math.min(expiresAt, this.now() + this.deliveryRetryWindowMs);
+    const mode = isHumanIdentity(msg.from) ? 'interrupt' : 'steer';
+    while (!failure && !this.closing) {
+      if (this.now() >= expiresAt) {
+        failure = 'expired';
+        break;
+      }
+      try {
+        await adapter.deliver(this.toDeliverable(msg), { mode });
+        // A successful submission still awaits the adapter's normal read ACK.
+        return;
+      } catch (err) {
+        this.onError?.(`deliver failed for ${msg.id}: ${(err as Error).message}`);
+      }
+      const remaining = deadline - this.now();
+      if (remaining <= 0) {
+        failure = this.now() >= expiresAt ? 'expired' : 'push-unconfirmed';
+        break;
+      }
+      await this.wait(Math.min(remaining, this.deliveryRetryIntervalMs));
+      if (this.now() >= deadline) failure = this.now() >= expiresAt ? 'expired' : 'push-unconfirmed';
+    }
+    if (!this.closing && failure && failure !== 'reported') {
+      // Seal the decision before telling the sender so a later redelivery cannot execute the message.
+      await this.recordFailure(msg.id, failure);
+      if (!msg.clientUserMessageId?.startsWith(FAILURE_NOTICE_PREFIX)) {
+        const reason = failure === 'expired'
+          ? 'message expired after 24 hours'
+          : 'recipient push could not be confirmed before the retry deadline';
+        const outcome = await this.send(msg.to, {
+          to: msg.from,
+          body: `NOT DELIVERED: message ${msg.id} — ${reason}`,
+          clientUserMessageId: FAILURE_NOTICE_PREFIX + msg.id,
+        });
+        if (outcome.state !== 'accepted') throw new Error('hub did not accept the delivery failure notice');
+      }
+      await this.recordFailure(msg.id, 'reported');
+    }
+    this.dispatching.delete(msg.id);
+  }
+
+  private failurePath(id: string): string | undefined {
+    return this.failureDirectory && join(this.failureDirectory, createHash('sha256').update(id).digest('hex'));
+  }
+
+  private async readFailure(id: string): Promise<Failure | undefined> {
+    const path = this.failurePath(id);
+    if (!path) return this.failures.get(id);
+    try {
+      const failure = await readFile(path, 'utf8');
+      if (failure === 'expired' || failure === 'push-unconfirmed' || failure === 'reported') return failure;
+      throw new Error('invalid delivery failure record');
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err;
+    }
+  }
+
+  private async recordFailure(id: string, failure: Failure): Promise<void> {
+    const path = this.failurePath(id);
+    if (!path) {
+      this.failures.set(id, failure);
+      return;
+    }
+    await mkdir(this.failureDirectory!, { recursive: true, mode: 0o700 });
+    const temp = `${path}.${process.pid}.tmp`;
+    await writeFile(temp, failure, { mode: 0o600 });
+    await rename(temp, path);
   }
 
   private toDeliverable(msg: StampedMessage): DeliverableMessage {

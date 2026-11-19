@@ -20,7 +20,12 @@
  *  - hubSilenceLimitMs = 0 disables the check.
  */
 import { assert, section } from './runner.js';
-import { Bridge } from '../messenger/hub/bridge.js';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { CcChannelAdapter } from '../messenger/cc/adapter.js';
+import { EventStoreInbox } from '../messenger/cc/event-store-inbox.js';
+import { Bridge, type BridgeOptions } from '../messenger/hub/bridge.js';
 import { FakeHub, FakeInboundAdapter, stamped } from './fake-hub.js';
 
 const tick = (n = 5): Promise<void> => new Promise((r) => setTimeout(r, n));
@@ -41,7 +46,9 @@ async function waitUntil(cond: () => boolean, timeoutMs = 2000, stepMs = 5): Pro
   return cond();
 }
 
-function setup(opts?: { baseBackoffMs?: number; heartbeatIntervalMs?: number; hubSilenceLimitMs?: number; now?: () => number }) {
+function setup(opts?: Pick<BridgeOptions,
+  'baseBackoffMs' | 'heartbeatIntervalMs' | 'hubSilenceLimitMs' | 'now' |
+  'failureDirectory' | 'deliveryRetryWindowMs' | 'deliveryRetryIntervalMs'>) {
   const hub = new FakeHub();
   const errors: string[] = [];
   const connects: Array<{ reconnect: boolean }> = [];
@@ -56,6 +63,9 @@ function setup(opts?: { baseBackoffMs?: number; heartbeatIntervalMs?: number; hu
     maxBackoffMs: 8,
     heartbeatIntervalMs: opts?.heartbeatIntervalMs ?? 0, // off by default in tests
     now: opts?.now,
+    failureDirectory: opts?.failureDirectory,
+    deliveryRetryWindowMs: opts?.deliveryRetryWindowMs,
+    deliveryRetryIntervalMs: opts?.deliveryRetryIntervalMs,
     onError: (r) => errors.push(r),
     onConnect: (info) => connects.push(info),
     onDrop: (r) => drops.push(r),
@@ -229,6 +239,84 @@ await section('bridge/review: an in-flight delivery is not re-dispatched when th
   await bridge.close();
 });
 
+await section('bridge: a down webhook is retried, then the original sender receives NOT DELIVERED', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'bridge-failed-delivery-'));
+  const failureDirectory = join(dir, 'failed');
+  let now = Date.now();
+  let attempts = 0;
+  const { bridge, hub } = setup({
+    failureDirectory, now: () => now, deliveryRetryWindowMs: 20, deliveryRetryIntervalMs: 1,
+  });
+  const sender = setup();
+  sender.bridge.register('leo', sender.adapter);
+  const inbox = new EventStoreInbox({
+    agentId: 'nova', home: dir, mapPath: join(dir, 'inbox.json'), webhookUrl: 'http://test.invalid',
+    fetchImpl: async () => {
+      attempts++;
+      now += 10;
+      throw new TypeError('fetch failed');
+    },
+  });
+  const recipient = new CcChannelAdapter({ inbox, onAck: ack => bridge.reportAck(ack) });
+  const original = { ...stamped('original', 'leo', 'nova', 'original body'), createdAtMs: now };
+  const restarted = setup({ failureDirectory, now: () => now });
+  try {
+    await recipient.start();
+    bridge.register('nova', recipient);
+    await bridge.start();
+    await sender.bridge.start();
+    hub.deliver(original);
+    assert(await waitUntil(() => hub.sends.length > 0), 'hub accepts the sender notice');
+    const notice = hub.sends[0]!;
+    assert(attempts === 2, 'webhook retried through the deadline');
+    assert(notice.to === 'leo' && notice.from === 'nova', 'notice routes back to the original sender');
+    sender.hub.deliver(stamped('failure-notice', notice.from, notice.to, notice.body));
+    assert(await waitUntil(() => sender.adapter.delivered.length > 0), 'original sender receives the notice');
+    assert(sender.adapter.delivered[0]?.body.includes('NOT DELIVERED: message original'), 'notice names the failed message');
+    assert(notice.body.includes('retry deadline'), 'notice gives the reason');
+    assert(!notice.body.includes('original body'), 'notice does not quote the original message');
+    assert(hub.acks.length === 0, 'failed message never gets a delivered ack');
+    // Wait for the report to be recorded after the hub accepts the notice.
+    const [record] = await readdir(failureDirectory);
+    assert(!!record, 'terminal failure is persisted');
+    let reported = false;
+    for (let i = 0; i < 100 && !reported; i++) {
+      reported = (await readFile(join(failureDirectory, record!), 'utf8')) === 'reported';
+      if (!reported) await tick();
+    }
+    assert(reported, 'hub acceptance is persisted');
+    await bridge.close();
+    await restarted.bridge.start();
+    restarted.hub.deliver(original);
+    // A second live message confirms that the bridge is handling deliveries after the restart.
+    restarted.hub.deliver(stamped('new', 'leo', 'nova', 'still receiving'));
+    assert(await waitUntil(() => restarted.adapter.delivered.some(m => m.id === 'new')), 'new message is delivered');
+    assert(restarted.adapter.delivered.every(m => m.id !== 'original'), 'terminal failure does not reach the recipient');
+    assert(restarted.hub.sends.length === 0, 'no duplicate notice after bridge restart');
+  } finally {
+    await bridge.close();
+    await recipient.close();
+    await sender.bridge.close();
+    await restarted.bridge.close();
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+await section('bridge: a message at the 24-hour boundary reports expiry without a push', async () => {
+  const now = Date.now();
+  const { hub, bridge, adapter } = setup({ now: () => now });
+  try {
+    await bridge.start();
+    hub.deliver({ ...stamped('expired', 'leo', 'nova', 'old work'), createdAtMs: now - DAY_MS });
+    assert(await waitUntil(() => hub.sends.length > 0), 'expiry notice is sent');
+    assert(hub.sends[0]?.to === 'leo', 'original sender receives expiry');
+    assert(hub.sends[0]?.body.includes('NOT DELIVERED: message expired — message expired after 24 hours'), 'expiry reason and id');
+    assert(adapter.delivered.length === 0 && hub.acks.length === 0, 'expired work never reaches the recipient or gets acked');
+  } finally {
+    await bridge.close();
+  }
+});
+
 await section('bridge/review: send() rejects instead of hanging when the link is down for good', async () => {
   const { hub, bridge } = setup();
   await bridge.start();
@@ -246,7 +334,7 @@ await section('bridge/review: send() rejects instead of hanging when the link is
 });
 
 await section('bridge/review: the delivered-dedup map forgets ids after the TTL', async () => {
-  let nowMs = 1_000_000;
+  let nowMs = Date.now();
   const { hub, bridge, adapter } = setup({ now: () => nowMs });
   await bridge.start();
   hub.deliver(stamped('m1', 'leo', 'nova', 'first'));
