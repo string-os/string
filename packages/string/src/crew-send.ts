@@ -60,7 +60,7 @@ async function main(): Promise<void> {
   }
 
   if (res.ok && parsed.state === 'accepted') {
-    process.stdout.write(`sent ${from} -> ${to} (${parsed.messageId ?? 'accepted'})\n`);
+    process.stdout.write(`accepted (delivery pending) ${from} -> ${to} (${parsed.messageId ?? 'no message id'})\n`);
     return;
   }
 

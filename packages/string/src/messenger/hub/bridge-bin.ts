@@ -152,6 +152,7 @@ export async function startAgentboxBridge(
     token,
     connect: () => connectWebSocket(cfg.hubUrl),
     heartbeatIntervalMs: cfg.heartbeatIntervalMs,
+    failureDirectory: path.join(cfg.stateDir, 'delivery-failures'),
     onError: (reason) => console.error(`[bridge ${cfg.bridgeId}] ${reason}`),
     // Log the full link history to the journal: each (re)connect and each drop with a reason, not
     // just the first connect — so systemd's journal shows when the bridge flapped and why.

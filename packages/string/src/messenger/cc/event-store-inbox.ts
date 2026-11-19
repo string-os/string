@@ -205,6 +205,7 @@ export class EventStoreInbox implements AgentEventInbox {
     try {
       res = await this.fetchImpl(this.webhookUrl, {
         method: 'POST',
+        signal: AbortSignal.timeout(10_000),
         headers: { 'content-type': 'text/plain; charset=utf-8' },
         body,
       });

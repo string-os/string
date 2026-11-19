@@ -160,7 +160,7 @@ export class FakeHub {
 
 /** Build a StampedMessage (hub-stamped) for a deliver frame. */
 export function stamped(id: string, from: string, to: string, body: string): StampedMessage {
-  return { id, from, to, body, createdAtMs: 0 };
+  return { id, from, to, body, createdAtMs: Date.now() };
 }
 
 export class FakeInboundAdapter implements InboundAdapter {

@@ -863,9 +863,9 @@ await section('events — GET /events/count + client.eventCount visibility surfa
   }
 });
 
-await section('events — watchAgentEvents autoAck retires handled events; failure preserves at-least-once', async () => {
+await section('events — restart replays unacked events and suppresses auto-acked events', async () => {
   const env = makeEnv();
-  const daemon = await startDaemon(env);
+  let daemon = await startDaemon(env);
   const home = path.join(env.root, 'agent-home-autoack');
   let watcher: ReturnType<typeof client.watchAgentEvents> | null = null;
   try {
@@ -916,9 +916,9 @@ await section('events — watchAgentEvents autoAck retires handled events; failu
     assert((await store.read(failId))!.status !== 'ack', 'a rejected handler leaves its event unacked (at-least-once preserved)');
 
     watcher.close();
-
-    // Prove the unacked event is still redeliverable to a FRESH consumer (bypassing
-    // the client's process-local dedup), while the acked one is gone for good.
+    daemon.stop();
+    daemon = await startDaemon(env);
+    // The new process uses the same on-disk inbox. Only the unacked event may replay.
     const fresh = await collectSSE(env.port, 'auto', 900);
     // The failed event was emitted once already (to the handler that threw), so on
     // re-show it is correctly a REPLAY: its streamed text carries the banner around
