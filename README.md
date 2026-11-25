@@ -1,3 +1,12 @@
+> [!NOTE]
+> **Update (2026-11):** Our paper, [*String: An Agentic OS Where Every App Is a Markdown File*](https://arxiv.org/abs/2608.28027),
+> was selected as an **Oral/Spotlight** at the NeurIPS 2026 Workshop on
+> *AgenticOS: Co-designing Systems and ML Foundations of an OS Layer for Agentic AI* (Sydney, Dec 12). 🎉
+
+<p align="center">
+  <a href="https://arxiv.org/abs/2608.28027"><img src="./assets/neurips-2026-agenticos.png" alt="String celebrating its NeurIPS 2026 AgenticOS Workshop Oral/Spotlight" width="720" /></a>
+</p>
+
 # String
 
 <p align="center">
